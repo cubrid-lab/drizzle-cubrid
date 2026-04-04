@@ -275,32 +275,12 @@ npm run check        # Lint + type-check + test
 npm test             # Run tests
 ```
 
-## Benchmark
-
-Performance benchmarks comparing CUBRID drivers against MySQL are tracked in the [cubrid-benchmark](https://github.com/cubrid-labs/cubrid-benchmark) suite.
-
-[![Benchmark](https://github.com/cubrid-labs/cubrid-benchmark/actions/workflows/bench.yml/badge.svg)](https://cubrid-labs.github.io/cubrid-benchmark/)
-
-- **Tier 0** — Functional smoke tests (connect + CRUD)
-- **Tier 1** — Driver throughput: 10K INSERT/SELECT, 1K UPDATE/DELETE
-- Same schema, same seed data, same CI hardware per run
-- Results published to [GitHub Pages dashboard](https://cubrid-labs.github.io/cubrid-benchmark/)
-
-
 ## Ecosystem
 
 | Package | Description |
 |---------|-------------|
 | [cubrid-client](https://github.com/cubrid-labs/cubrid-client) | TypeScript CUBRID driver |
 | [drizzle-cubrid](https://github.com/cubrid-labs/drizzle-cubrid) | Drizzle ORM dialect (this package) |
-| [pycubrid](https://github.com/cubrid-labs/pycubrid) | Python DB-API 2.0 driver |
-| [sqlalchemy-cubrid](https://github.com/cubrid-labs/sqlalchemy-cubrid) | SQLAlchemy 2.0 dialect |
-| [cubrid-go](https://github.com/cubrid-labs/cubrid-go) | Go database/sql driver + GORM |
-| [gorm-cubrid](https://github.com/cubrid-labs/gorm-cubrid) | GORM dialect for CUBRID |
-| [cubrid-rs](https://github.com/cubrid-labs/cubrid-rs) | Native Rust database driver for CUBRID (sync + async, pure Rust) |
-| [sea-orm-cubrid](https://github.com/cubrid-labs/sea-orm-cubrid) | SeaORM backend for CUBRID |
-| [cubrid-cookbook](https://github.com/cubrid-labs/cubrid-cookbook) | Framework integration examples |
-| [cubrid-benchmark](https://github.com/cubrid-labs/cubrid-benchmark) | Multi-language benchmark suite |
 
 ## Roadmap
 
