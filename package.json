@@ -39,7 +39,11 @@
     "sql",
     "typescript"
   ],
-  "author": "cubrid-labs",
+  "author": "Gyeongjun Paik <paikend@gmail.com>",
+  "contributors": [
+    { "name": "Gyeongjun Paik", "email": "paikend@gmail.com" },
+    { "name": "Yeongseon Choe", "email": "yeongseon.choe@gmail.com" }
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
