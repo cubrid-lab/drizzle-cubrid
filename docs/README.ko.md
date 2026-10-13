@@ -1,5 +1,11 @@
 # drizzle-cubrid
 
+<!-- CUBRID-LAB-ROLE-ICON:START -->
+<a href="https://github.com/cubrid-lab/brand">
+  <img src="https://raw.githubusercontent.com/cubrid-lab/brand/aa62d38b48d165e39f0c56ed706a9dadb090a2bb/studies/icons/drizzle-cubrid.svg" alt="CUBRID Lab ORM icon (TypeScript)" width="80" />
+</a>
+<!-- CUBRID-LAB-ROLE-ICON:END -->
+
 **CUBRID 데이터베이스를 위한 Drizzle ORM 다이얼렉트**
 
 [🇰🇷 한국어](README.ko.md) · [🇺🇸 English](../README.md)
