@@ -10,6 +10,9 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
     strategy:
+      # Without this, the first lane to fail cancels the others, so a failure
+      # that is specific to one Node version hides the state of every other.
+      fail-fast: false
       matrix:
         node-version: [18, 20, 22]
     steps:
@@ -24,5 +27,10 @@ jobs:
         run: npx tsc --noEmit
       - name: Build
         run: npm run build
+      # vitest >=4 imports `styleText` from node:util, which does not exist
+      # before Node 20.12, so the runner cannot start on Node 18 at all. Install,
+      # type check and build still run there, which is what verifies the
+      # `engines: node >=18` floor this package declares.
       - name: Test with coverage
+        if: matrix.node-version != 18
         run: npx vitest run --coverage --reporter=verbose
