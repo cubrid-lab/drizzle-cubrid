@@ -246,3 +246,25 @@ Types: `feat`, `fix`, `docs`, `chore`, `ci`, `style`, `test`, `refactor`
 3. Commit, tag (`v{major}.{minor}.{patch}`), push with tags
 4. Create GitHub release via `gh release create`
 5. npm publish triggers automatically from the release
+
+## Issue triage lifecycle
+
+Every new issue in this repository starts with `status: needs triage`.
+Issue forms mark it at creation; the `issues: opened` workflow covers other
+human submissions. Agents creating issues using `GITHUB_TOKEN` must include
+it explicitly because their own events may not retrigger the workflow.
+
+1. Verify observed problem and evidence, unknowns, duplicates and open PRs,
+   local ownership/type, scope/non-goals, acceptance and dependencies.
+2. Inspect **all currently open issues in this repository** (all pages) and
+   compare urgency, effect on users/data, existing priorities, active work and
+   unresolved prerequisites rather than issue age.
+3. Select exactly one `priority: critical/high/medium/low` and one original
+   `size: XS/S/M/L/XL`, based on effort; split very large independent work
+   while preserving issue ownership and accepted criteria.
+4. Re-fetch the saved issue, check type, priority, size and duplicate decision
+   against the actual labels, then remove `status: needs triage` only when
+   this manual review is complete. Keep it for unresolved questions.
+
+Do not automatically assign a priority or mark triage complete. Existing
+code, tests, security and release safeguards are unaffected.
