@@ -2,6 +2,9 @@ name: Bug Report
 description: Report a bug in drizzle-cubrid
 title: "bug: "
 labels: ["bug"]
+
+title: "[Bug]: "
+labels: ["bug", "status: needs triage"]
 body:
   - type: markdown
     attributes:
