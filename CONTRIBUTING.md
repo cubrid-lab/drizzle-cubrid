@@ -144,6 +144,21 @@ scrutiny. No existing repository CI or release safeguards are waived.
 
 ---
 
+## Issue ownership and coding agents
+
+Before implementation, compare the latest code, all open issues and any PRs
+touching the same behavior. New issues begin with `status: needs triage`;
+maintainers verify evidence, duplicates, scope, issue type and relative
+urgency before confirming one `priority: critical/high/medium/low` and one
+`size: XS/S/M/L/XL`. Read back the saved labels before clearing triage.
+
+Outside contributors can work on unclaimed issues without a required Oracle
+review or GitHub Assignee access. Maintainer-operated autonomous agents must
+have authorization and a confirmed implementer for reserved work. Required
+GitHub CI on the final PR head and project maintainers decide merge readiness.
+The review policy is in "Pull Request Review and Merge Policy" above, and the
+triage procedure is in [AGENTS.md](AGENTS.md#issue-triage-lifecycle).
+
 ## Reporting Issues
 
 When reporting a bug, please include:
@@ -162,4 +177,4 @@ For feature requests, describe the use case and expected behavior.
 ## Questions?
 
 Open a [GitHub Discussion](https://github.com/cubrid-lab/drizzle-cubrid/discussions)
-or file an [issue](https://github.com/cubrid-labs/drizzle-cubrid/issues).
+or file an [issue](https://github.com/cubrid-lab/drizzle-cubrid/issues).
