@@ -1,3 +1,9 @@
+<!-- CUBRID-LAB-ICON:START -->
+<p align="center">
+  <a href="https://github.com/cubrid-lab/brand"><img src="https://raw.githubusercontent.com/cubrid-lab/brand/8aa81b79f00ae936b03a9546f14f514c5e2554a7/dist/icons/drizzle-cubrid.svg" alt="drizzle-cubrid icon (CUBRID Lab brand repository)" width="120"></a>
+</p>
+<!-- CUBRID-LAB-ICON:END -->
+
 # drizzle-cubrid
 
 **CUBRID 데이터베이스를 위한 Drizzle ORM 다이얼렉트**
