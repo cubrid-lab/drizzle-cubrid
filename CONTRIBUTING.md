@@ -25,8 +25,8 @@ and instructions for contributing to the project.
 
 ```bash
 # Clone the repository (and cubrid-client for local dependency)
-git clone https://github.com/cubrid-labs/cubrid-client.git
-git clone https://github.com/cubrid-labs/drizzle-cubrid.git
+git clone https://github.com/cubrid-lab/cubrid-client.git
+git clone https://github.com/cubrid-lab/drizzle-cubrid.git
 cd drizzle-cubrid
 
 # Install dependencies
@@ -53,18 +53,19 @@ npm run test:cov
 npm run test:watch
 ```
 
-### Integration Tests (Requires CUBRID)
+### Integration Tests (Requires an external CUBRID)
+
+The repository currently has **no `docker-compose.yml`**. Provision an
+isolated CUBRID database separately and configure the integration tests for
+its actual endpoint, then run:
 
 ```bash
-# Start a CUBRID container
-docker compose up -d
-
-# Run integration tests
 npm run integration
-
-# Stop the container when done
-docker compose down
 ```
+
+Do not claim live verification from `npm test` or a CI run without a database.
+The current Node 18/Vitest CI compatibility problem is tracked in issue #100;
+do not weaken the test gate to make a documentation PR pass.
 
 ### Type Checking
 
@@ -76,7 +77,7 @@ npm run typecheck
 
 ## Code Style
 
-This project uses [Biome](https://biomejs.dev/) for linting and formatting.
+The current `package.json` defines `npm run lint` and `npm run format` using ESLint, not Biome. Check the actual installed tooling and report any unavailable lint check rather than claiming it ran.
 
 ### Rules
 
@@ -89,10 +90,10 @@ This project uses [Biome](https://biomejs.dev/) for linting and formatting.
 
 ```bash
 # Check lint and format
-npx biome check src/ tests/
+npm run lint
 
 # Auto-fix
-npx biome check --write src/ tests/
+npm run format
 ```
 
 ---
@@ -135,6 +136,21 @@ npx biome check --write src/ tests/
 
 ---
 
+## Issue ownership and coding agents
+
+Before implementation, compare the latest code, all open issues and any PRs
+touching the same behavior. New issues begin with `status: needs triage`;
+maintainers verify evidence, duplicates, scope, issue type and relative
+urgency before confirming one `priority: critical/high/medium/low` and one
+`size: XS/S/M/L/XL`. Read back the saved labels before clearing triage.
+
+Outside contributors can work on unclaimed issues without a required Oracle
+review or GitHub Assignee access. Maintainer-operated autonomous agents must
+have authorization and a confirmed implementer for reserved work. Required
+GitHub CI on the final PR head and project maintainers decide merge readiness.
+The tool-neutral review change is already tracked by PR #131; the existing
+issue-intake change is PR #134, not a reason to duplicate either workflow.
+
 ## Reporting Issues
 
 When reporting a bug, please include:
@@ -152,5 +168,5 @@ For feature requests, describe the use case and expected behavior.
 
 ## Questions?
 
-Open a [GitHub Discussion](https://github.com/cubrid-labs/drizzle-cubrid/discussions)
-or file an [issue](https://github.com/cubrid-labs/drizzle-cubrid/issues).
+Open a [GitHub Discussion](https://github.com/cubrid-lab/drizzle-cubrid/discussions)
+or file an [issue](https://github.com/cubrid-lab/drizzle-cubrid/issues).
