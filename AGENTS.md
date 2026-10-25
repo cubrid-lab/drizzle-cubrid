@@ -91,7 +91,7 @@ type QueryResultRow = Record<string, unknown>;
 ### Setup
 
 ```bash
-git clone https://github.com/cubrid-labs/drizzle-cubrid.git
+git clone https://github.com/cubrid-lab/drizzle-cubrid.git
 cd drizzle-cubrid
 npm install
 ```
@@ -108,15 +108,13 @@ npm run typecheck     # tsc --noEmit
 npm run integration   # Integration tests (requires Docker CUBRID)
 ```
 
-### Docker (Integration Tests)
+### Live integration (external CUBRID required)
 
-```bash
-docker compose up -d                          # Default CUBRID 11.2
-CUBRID_VERSION=11.4 docker compose up -d      # Specific version
-export CUBRID_TEST_URL="cubrid://dba@localhost:33000/testdb"
-npm run integration
-docker compose down -v                        # Cleanup
-```
+`npm run integration` selects the live integration test file. This repository
+currently has **no Docker Compose file or live CUBRID CI service**. Provision
+a disposable CUBRID instance separately and follow the test's configured
+endpoint before running it. Record database/version and results honestly:
+unit-only or skipped tests do not establish live compatibility.
 
 ## Code Conventions
 
@@ -228,16 +226,20 @@ cubrid-client: createClient({ host, port, database, user, password })
 
 ## Commit Convention
 
+Follow this repository's `CONTRIBUTING.md` and existing PR/title conventions.
+Describe the actual change in plain English; do not copy tool-specific credits.
+
+```text
+docs(agents): clarify contributor validation
+
+Describe what changed and why.
+
+Refs #N
 ```
-<type>: <description>
 
-<body>
-
-Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-opencode)
-Co-authored-by: Sisyphus <clio-agent@sisyphuslabs.ai>
-```
-
-Types: `feat`, `fix`, `docs`, `chore`, `ci`, `style`, `test`, `refactor`
+Keep authorship and actual coauthors accurate. A human contributor, Codex,
+Claude Code, OpenCode or another agent is never required to append a particular
+coauthor or AI-tool trailer, nor to run a mandatory Oracle pre/post review.
 
 ## Release Process
 
