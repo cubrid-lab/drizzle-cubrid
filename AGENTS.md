@@ -2,8 +2,7 @@
 
 ## Organization-wide issue and PR standards
 
-See [the cubrid-lab policy](https://github.com/cubrid-lab/.github/blob/main/docs/ISSUE_PR_COMMIT_STANDARD.md). For issues, use type-only titles (`feat:`, `bug:`, `docs:`) without required module scope; communicate the clear objective, evidence and verifiable acceptance. Triage checks duplicates, scope, priority and size; PRs/commits retain existing Conventional Commits rules, CI and actual validation evidence. Avoid personal comments and agent bookkeeping in issue text.
-
+See [the cubrid-lab policy](https://github.com/cubrid-lab/.github/blob/main/docs/ISSUE_PR_COMMIT_STANDARD.md). Every issue title needs a lowercase type-only prefix (`feat:`, `bug:`, `docs:`, `test:`, `chore:` or `ci:`) without a module scope; issues use `bug:`, not the commit type `fix:`. Issue bodies communicate the clear objective, evidence and verifiable acceptance. Triage checks duplicates, scope, priority and size; PRs/commits retain existing Conventional Commits rules, CI and actual validation evidence. Avoid personal comments and agent bookkeeping in issue text.
 
 Project knowledge base for AI coding agents.
 
