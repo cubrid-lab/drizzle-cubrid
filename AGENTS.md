@@ -279,3 +279,22 @@ documentation, presentations, and other maintainer-facing writing.
 
 This is a shared writing convention, not a new CI check, reviewer approval,
 or merge gate. Keep existing repository-specific technical and safety rules.
+
+### Self-explanatory code comments, tests and review text
+
+Source comments, test names and test comments, examples, PR descriptions
+and review replies follow the organization rule in
+[Explanations in code, tests, reviews and agent-written text](https://github.com/cubrid-lab/.github/blob/main/docs/ISSUE_PR_COMMIT_STANDARD.md#6-explanations-in-code-tests-reviews-and-agent-written-text)
+(section 6 of the shared standard; it is linked here, not copied). In short:
+when a comment is needed, say what the code does, why it matters and which
+Drizzle or CUBRID constraint applies (for example, why a result row is
+reshaped before Drizzle maps it), then add an issue number only for
+traceability. Do not add comments that only restate the code.
+
+Repository-specific rules in this file keep precedence: Drizzle query
+semantics, `cubrid-client` compatibility, CI and the release process. The
+review workflow itself is maintained in the Development Workflow section
+and is not changed here. This rule is a writing convention checked during
+normal review by any contributor or tool, not a CI gate or required
+reviewer. Do not rename test names, fixtures or other machine-readable
+identifiers only to improve prose.
