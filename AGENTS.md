@@ -250,3 +250,55 @@ Types: `feat`, `fix`, `docs`, `chore`, `ci`, `style`, `test`, `refactor`
 3. Commit, tag (`v{major}.{minor}.{patch}`), push with tags
 4. Create GitHub release via `gh release create`
 5. npm publish triggers automatically from the release
+
+## Human-readable communication (all agents)
+
+Use this rule for text authored or edited by Codex, Claude Code, OpenCode,
+ChatGPT, Copilot, or any other agent. It applies to issues, PRs, reviews,
+comments, checklists, status updates, commit summaries, release notes,
+documentation, presentations, and other maintainer-facing writing.
+
+- Write for a reader unfamiliar with the underlying script, storyboard,
+  automation run, or agent plan. Name the actual project, component,
+  action, evidence, and location in ordinary, clear language.
+- Never use unexplained internal identifiers as reader-facing labels or
+  checklist instructions (for example, `H1, P1, C1, K1, F2` or `A1/B1/R1/R2`).
+  Do not substitute `P1`/`P2` for repository priority labels.
+- When an internal identifier is necessary for accurate cross-reference,
+  **describe the subject first**, then add the identifier in context:
+  `pycubrid introduction (0:20; storyboard shot P1)`. Use descriptive
+  names and timestamps, section titles, or paths wherever practical.
+- Use natural, actionable wording. Prefer `Listen to the full narration and
+  verify the pronunciation of each project name` to `Maintainer full listen`.
+  Avoid compressed task fragments, unexplained acronyms, and generated
+  process/status jargon.
+- Keep legitimate technical identifiers unchanged in code, tests, structured
+  data, logs, specifications, and exact evidence references. Issue numbers,
+  filenames, command names, APIs, error codes, and hashes are not prohibited.
+  Do not break machine-readable references to improve prose.
+- Before publishing, reread the text as a first-time maintainer. It should
+  state what happened or needs to happen, why, and where without requiring a
+  separate lookup table. Edit an existing editable comment to correct unclear
+  wording rather than adding redundant follow-up comments.
+
+This is a shared writing convention, not a new CI check, reviewer approval,
+or merge gate. Keep existing repository-specific technical and safety rules.
+
+### Self-explanatory code comments, tests and review text
+
+Source comments, test names and test comments, examples, PR descriptions
+and review replies follow the organization rule in
+[Explanations in code, tests, reviews and agent-written text](https://github.com/cubrid-lab/.github/blob/main/docs/ISSUE_PR_COMMIT_STANDARD.md#6-explanations-in-code-tests-reviews-and-agent-written-text)
+(section 6 of the shared standard; it is linked here, not copied). In short:
+when a comment is needed, say what the code does, why it matters and which
+Drizzle or CUBRID constraint applies (for example, why a result row is
+reshaped before Drizzle maps it), then add an issue number only for
+traceability. Do not add comments that only restate the code.
+
+Repository-specific rules in this file keep precedence: Drizzle query
+semantics, `cubrid-client` compatibility, CI and the release process. The
+review workflow itself is maintained in the Development Workflow section
+and is not changed here. This rule is a writing convention checked during
+normal review by any contributor or tool, not a CI gate or required
+reviewer. Do not rename test names, fixtures or other machine-readable
+identifiers only to improve prose.
