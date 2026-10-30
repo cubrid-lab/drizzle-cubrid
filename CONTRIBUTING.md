@@ -1,5 +1,7 @@
 # Contributing to drizzle-cubrid
 
+**Issue titles** always start with a lowercase type-only prefix (`feat:`, `bug:`, `docs:`, `test:`, `chore:` or `ci:`) without a module scope; the issue forms prefill one. **PRs and commits** continue to use Conventional Commits and local CI. See the [organization standard](https://github.com/cubrid-lab/.github/blob/main/docs/ISSUE_PR_COMMIT_STANDARD.md) for evidence, triage and verification responsibilities.
+
 Thank you for your interest in contributing! This document provides guidelines
 and instructions for contributing to the project.
 
