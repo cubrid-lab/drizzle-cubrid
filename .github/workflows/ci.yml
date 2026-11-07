@@ -10,8 +10,11 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
     strategy:
+      # Without this, the first lane to fail cancels the others, so a failure
+      # that is specific to one Node version hides the state of every other.
+      fail-fast: false
       matrix:
-        node-version: [18, 20, 22]
+        node-version: [20, 22]
     steps:
       - uses: actions/checkout@v6
       - name: Use Node.js ${{ matrix.node-version }}
@@ -24,5 +27,90 @@ jobs:
         run: npx tsc --noEmit
       - name: Build
         run: npm run build
+      # The developer runner requires a recent Node. Node 18 consumer support
+      # is independently enforced against the built npm tarball below.
       - name: Test with coverage
         run: npx vitest run --coverage --reporter=verbose
+
+  package-artifact:
+    name: Build packed npm package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Pack candidate and record exact installed peer versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p packed
+          npm pack --ignore-scripts --pack-destination packed
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const lock = require('./package-lock.json');
+          for (const name of ['drizzle-orm', 'cubrid-client']) {
+            const version = lock.packages?.[`node_modules/${name}`]?.version;
+            if (!version) throw new Error(`Cannot determine installed peer version: ${name}`);
+            fs.writeFileSync(`packed/${name}.version`, `${version}\n`);
+          }
+          NODE
+          test "$(find packed -maxdepth 1 -name '*.tgz' | wc -l)" -eq 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package-for-node18
+          path: packed/
+          if-no-files-found: error
+          retention-days: 3
+
+  node18-consumer:
+    name: Node 18 packed-package consumer
+    needs: package-artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 18
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package-for-node18
+          path: packed/
+      - name: Install actual tarball and tested peer versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Node runtime: $(node --version)"
+          mkdir consumer
+          cd consumer
+          npm init -y >/dev/null
+          shopt -s nullglob
+          tarballs=(../packed/*.tgz)
+          test "${#tarballs[@]}" -eq 1
+          drizzle_version=$(cat ../packed/drizzle-orm.version)
+          client_version=$(cat ../packed/cubrid-client.version)
+          npm install --ignore-scripts --no-audit --no-fund "${tarballs[0]}" "drizzle-orm@${drizzle_version}" "cubrid-client@${client_version}"
+      - name: Exercise CJS and ESM exports on Node 18
+        working-directory: consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          (async () => {
+            const cjs = require('drizzle-cubrid');
+            const esm = await import('drizzle-cubrid');
+            for (const api of [cjs, esm]) {
+              assert.equal(typeof api.drizzle, 'function');
+              assert.equal(typeof api.cubridTable, 'function');
+              assert.equal(typeof api.cubridSet, 'function');
+              const table = api.cubridTable('node18_consumer_smoke', { tags: api.cubridSet('tags') });
+              assert.ok(table.tags, 'runtime table/column construction must work');
+            }
+            console.log('Node 18 packed CJS and ESM consumer assertions passed');
+          })().catch((error) => { console.error(error); process.exitCode = 1; });
+          NODE
