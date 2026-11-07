@@ -1,0 +1,41 @@
+# Engineering invariants learned from the Python CUBRID projects
+
+> **Status:** Engineering review checklist and test-design requirements, not evidence that this repository already passes them. Adopted from verified scenarios in [pycubrid](https://github.com/cubrid-lab/pycubrid) and [sqlalchemy-cubrid](https://github.com/cubrid-lab/sqlalchemy-cubrid), with language-native adaptation. Review together with this repository's release policy before claiming stable support.
+
+## Why these invariants exist
+
+The Python driver and SQLAlchemy dialect revealed that a passing query or green offline suite is not enough. Bugs occurred around transaction boundaries, CAS session replacement, stale handles, partial fetches, value fidelity, state transitions, unsupported SQL and skipped live tests. They also established reusable **methods**: protocol fixtures, modeled lifecycle tests, JDBC/driver differential cases, explicit failure modes, catalog/DDL tests, and candidate-SHA evidence. **Do not port Python API shapes, source code, or version rules into another language.**
+
+Useful concrete sources:
+- [pycubrid CAS reconnect architecture](https://github.com/cubrid-lab/pycubrid/blob/main/docs/ARCHITECTURE.md#cas-reconnection), [session persistence tests](https://github.com/cubrid-lab/pycubrid/blob/main/tests/test_cas_session_persistence.py), [cursor ownership tests](https://github.com/cubrid-lab/pycubrid/blob/main/tests/test_autocommit_handle_ownership.py)
+- [pycubrid connection state-machine tests](https://github.com/cubrid-lab/pycubrid/blob/main/tests/test_connection_state_machine.py), [official-driver differential cases](https://github.com/cubrid-lab/pycubrid/blob/main/tests/test_official_differential.py)
+- [SQLAlchemy CUBRID architecture](https://github.com/cubrid-lab/sqlalchemy-cubrid/blob/main/docs/ARCHITECTURE.md), [transactional DDL tests](https://github.com/cubrid-lab/sqlalchemy-cubrid/blob/main/test/test_transactional_ddl.py), [live integration gate tests](https://github.com/cubrid-lab/sqlalchemy-cubrid/blob/main/test/test_integration_gate.py), [release-note formatting](https://github.com/cubrid-lab/sqlalchemy-cubrid/blob/main/docs/RELEASE_NOTES_STYLE.md)
+
+**Evidence rule:** the Python code/tests are counterexamples and research references, not proof of the corresponding Go, Rust or TypeScript behavior. Every native implementation must demonstrate its own actual behavior on a real CUBRID server.
+
+## Drizzle-specific failure prevention
+
+1. **SQL compiler independence:** CUBRID SQL grammar is authoritative. MySQL is a reference for understanding ORM architecture, never the production compiler, table/column alias or migration strategy. Track the staged removal of `MySqlDialect`, `mysqlTable` and MySQL column builders without breaking 0.x users silently.
+2. **Exact driver contract:** `cubrid-client.query()` returns rows (or an empty array for DML); `execute()` returns affected-row and generated-key metadata. Do not invent a multi-row sequence of IDs, read metadata from the first result row, or rely on `Object.values(row)` when column names/aliases collide. Prove column-order and NULL join mappings.
+3. **Session and transaction scope:** a query in an ORM transaction must use the transaction-bound connection and never run on a shared autocommit client. Test nested savepoints/rollback, begin/commit failure, use-after-completion, concurrent operations and cancel/partial fetch cleanup.
+4. **Type fidelity and validation:** `cubrid-client` may decode collections to arrays, and precision-bearing values have distinct JavaScript types. Do not claim MySQL scalar builders or string collection parsers are compatible without a real-CUBRID round trip. Reject unsupported conversions explicitly.
+5. **Migration correctness:** a Drizzle Kit `dialect: 'mysql'` configuration is not a CUBRID migrator. Check actual catalog and DDL transaction/rollback behavior against real CUBRID (including version-dependent differences); do not assume MySQL-style DDL auto-commit or blindly generate destructive schema changes.
+6. **Test truthfulness:** SQL snapshots and Vitest mocks validate the compiler/test harness, not broker execution. Before a database-behavior release, execute actual ORM-created SQL and inspect stored data, rollback, generated keys and schema changes on declared supported DB versions. If a mandatory integration test file does not exist or executes zero cases, fail the release gate.
+
+## Checklist before implementation PR approval
+
+- [ ] The issue identifies which layer owns the behavior: Drizzle core/SQL compiler, this adapter, or `cubrid-client`.
+- [ ] No MySQL SQL compatibility assumption remains in new native behavior; the choice of Drizzle public extension points is evidenced.
+- [ ] Type inference tests and runtime type/value tests agree; unsupported behavior is visible.
+- [ ] Transaction, duplicate-column, multi-row DML and error paths have explicit acceptance tests.
+- [ ] Real DB results and SQL generated by this adapter are independently observed, not inferred from `cubrid-client` CI.
+- [ ] User-facing README/PRD/AGENTS/migration examples are reconciled with actual implementation status, supported versions and release notes.
+- [ ] Confirm release policy and candidate-SHA live DB gate before a 1.0 claim.
+
+## Local tracking
+
+- [CUBRID-native architecture #155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155), [extension feasibility #156](https://github.com/cubrid-lab/drizzle-cubrid/issues/156)
+- [result mapping #160](https://github.com/cubrid-lab/drizzle-cubrid/issues/160), [transactions #161](https://github.com/cubrid-lab/drizzle-cubrid/issues/161), [types #162](https://github.com/cubrid-lab/drizzle-cubrid/issues/162)
+- [migrations #163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163), [real DB validation #164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164), [version policy #151](https://github.com/cubrid-lab/drizzle-cubrid/issues/151)
+
+This is a checklist and an implementation backlog, not a statement that the native dialect already exists. [Release policy](RELEASE_POLICY.md) must be reviewed first.
