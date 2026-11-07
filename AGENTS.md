@@ -95,7 +95,7 @@ type QueryResultRow = Record<string, unknown>;
 ### Setup
 
 ```bash
-git clone https://github.com/cubrid-labs/drizzle-cubrid.git
+git clone https://github.com/cubrid-lab/drizzle-cubrid.git
 cd drizzle-cubrid
 npm install
 ```
@@ -109,18 +109,12 @@ npm run build         # Build ESM + CJS via tsup
 npm run lint          # ESLint check
 npm run format        # ESLint auto-fix
 npm run typecheck     # tsc --noEmit
-npm run integration   # Integration tests (requires Docker CUBRID)
+npm run integration   # Defined in package.json, but its target test file is not checked in; do not claim this passes
 ```
 
-### Docker (Integration Tests)
+### Real CUBRID integration tests
 
-```bash
-docker compose up -d                          # Default CUBRID 11.2
-CUBRID_VERSION=11.4 docker compose up -d      # Specific version
-export CUBRID_TEST_URL="cubrid://dba@localhost:33000/testdb"
-npm run integration
-docker compose down -v                        # Cleanup
-```
+This repository currently has **no checked-in Docker Compose manifest or `tests/integration.test.ts`**, despite having an `npm run integration` script. Do not run non-existent setup commands or represent unit tests as live database proof. The real CUBRID harness, explicit server version and non-empty integration cases are tracked in [#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164). Use an approved disposable test environment when that implementation exists.
 
 ## Code Conventions
 
@@ -132,7 +126,7 @@ docker compose down -v                        # Cleanup
 - **Target**: ES2022, Node.js 18+
 - **Imports**: ESM-first (`import/export`)
 - **Type hints**: Full TypeScript strict mode, no `any` escapes
-- **super()**: Always `super()`, never `super(ClassName, self)`
+- **Class inheritance**: Use TypeScript/JavaScript `super()` syntax and the actual Drizzle extension interface.
 
 ### Naming
 
@@ -143,10 +137,10 @@ docker compose down -v                        # Cleanup
 ### Patterns to Follow
 
 - All Drizzle entity classes must have `static readonly [entityKind]: string = 'ClassName'`
-- Session methods follow the `MySqlSession` abstract contract exactly
-- PreparedQuery follows the `MySqlPreparedQuery` abstract contract
+- **Current implementation only:** `src/session.ts` subclasses MySQL session types; this is transitional and **not** the target CUBRID API contract. The proposed native dialect follows verified Drizzle extension points and real CUBRID SQL behavior.
+- **Current implementation only:** prepared queries use MySQL-derived types. Do not treat them as native CUBRID semantics; verify independent prepared-binding behavior before replacing these adapters.
 - Use `fillPlaceholders()` from `drizzle-orm/sql` for parameter mapping
-- Use `mapResultRow()` from `drizzle-orm/utils` for result mapping
+- Use `mapResultRow()` only where the current row/field shape is proven compatible; native CUBRID duplicate-column and value mapping require separate verification.
 - HKT types: `CubridQueryResultHKT`, `CubridPreparedQueryHKT` — required for type inference
 
 ### Anti-Patterns (Never Do)
