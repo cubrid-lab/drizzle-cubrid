@@ -19,6 +19,10 @@ Recommend Node 22 for local build/tooling and preserve the current Node >=18 con
 - Distinguish **setup ready**, **offline tests passed**, **real CUBRID integration passed** and **release artifact verified** as four distinct states. No passing prerequisite implies later states.
 - Avoid adding heavyweight per-PR jobs just to demonstrate setup. Reserve required live DB matrix and external consumer checks for relevant behavioral changes and final release candidates.
 
+## 1.x Node.js 18 support constraint
+
+[ADR 0006](0006-node-18-support-through-1x.md) makes the **Node 18 consumer floor mandatory for all planned 1.x releases**; it is not merely retained "until" a possible 1.x decision to change it. Development tools may require Node 22. Verify emitted code and peer dependencies by installing the **packed artifact in a clean Node 18 consumer**, separately from Vitest/ESLint on Node 22. Raising `engines.node` above 18 is a future **2.0 major** proposal only. Keep the existing [#100](https://github.com/cubrid-lab/drizzle-cubrid/issues/100) toolchain failure as an open CI issue until that separation is actually implemented and tested.
+
 ## Alternatives considered
 
 - **Rejected:** One shared global language/tool version and cross-language Makefile for every repo; violates Go, Cargo and Node-specific conventions.
