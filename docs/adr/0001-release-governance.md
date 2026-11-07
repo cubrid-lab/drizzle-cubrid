@@ -15,6 +15,10 @@ Keep 0.x package instability explicitly documented. Do not release 1.0 merely to
 
 Applicable SemVer classification: a compatible bug/security fix is generally PATCH, an additive feature MINOR, and an incompatible public behavior or supported-environment change requires a reviewed breaking release (under current 0.x rules, commonly the next 0.y.0; at 1.x+ a MAJOR). Changes to SQL generation, data types, migrations or transactions can be compatibility-breaking without exported-type changes. A release candidate must have a reviewed version and notes, a final immutable commit, actual live CUBRID evidence when database behavior is claimed, and verified published artifacts. Keep omitted/failed checks visible; never invent approval or successful publication.
 
+## Runtime compatibility during adapter 1.x
+
+The planned stable adapter **must support Node 18 throughout all 1.x releases**. `engines.node >=18` may not be raised during 1.x to satisfy development tools; Node 22 can be used for compiling/Vitest/ESLint while Node 18 independently tests the packed runtime with compatible `cubrid-client@1.x` and tested Drizzle ORM peer dependencies. Dropping Node 18 is **no earlier than a reviewed 2.0 MAJOR**, not an automatic or scheduled change. See [ADR 0006](0006-node-18-support-through-1x.md). This applies independently of driver major/minor/patch synchrony.
+
 ## Alternatives considered
 
 - **Rejected:** Force adapter version equal to driver version; or keep open-ended >= peer dependencies as support guarantees; or publish directly from a user-created tag without reviewed preflight.
