@@ -160,6 +160,10 @@ docker compose down -v                        # Cleanup
 
 
 
+## Node.js 18 compatibility throughout stable 1.x
+
+The eventual `drizzle-cubrid@1.0.0` and **every 1.x release** must retain `engines.node >=18`, coordinated with the independent Node 18 guarantee of `cubrid-client@1.x`. [ADR 0006](docs/adr/0006-node-18-support-through-1x.md) is the source for this compatibility decision. Build, lint and test on modern Node where toolchain dependencies require it, but run **Node 18 smoke tests of packed ESM/CJS artifacts with verified peer versions**. The minimum Node floor may be reconsidered **no earlier than a reviewed 2.0 MAJOR**. Do not implement #100 by raising `engines.node` in 1.x or by skipping the Node 18 consumer lane.
+
 ## Development setup before design and TDD implementation
 
 Use the repository-specific [development setup guide](docs/DEVELOPMENT_SETUP.md) and [setup ADR 0005](docs/adr/0005-development-setup.md) (**Proposed**) before attempting new runtime or ORM work. Verify the **actual** manifest, supported developer toolchain, dependency resolution, read-only offline checks, and availability/absence of real CUBRID integration separately. Do not invent an unavailable Docker Compose file, integration test, linter, Cargo registry artifact, or Go module import path. A successful unit build is not a successful real-database test or a published package. Record observed setup blockers as issues; do not silently change public consumer engine/Go module paths/Rust MSRV, weaken CI, or modify release credentials to make onboarding appear green.
