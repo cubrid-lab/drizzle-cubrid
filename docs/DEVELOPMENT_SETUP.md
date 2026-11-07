@@ -21,6 +21,12 @@ npm test
 
 The repository also declares `npm run test:cov` (95% thresholds in `vitest.config.ts`) and `npm run lint` using ESLint. **The inspected main branch has no ESLint flat-config file**, and Vitest 4/Node 18 incompatibility is known. These commands may fail today; record exact errors rather than claiming setup readiness or weakening coverage thresholds. A missing lint config or incompatible toolchain is a **setup blocker**, not a reason to suppress a required check. `npm run format` is mutating (`eslint --fix`); do not run it as read-only validation.
 
+## Node 18 runtime compatibility through 1.x
+
+**Fixed compatibility rule:** `drizzle-cubrid@1.0.0` and **every 1.x release** must remain usable on Node 18, despite the project's Node 22 `.nvmrc` and newer Vitest/ESLint development tools. The minimum supported Node runtime can only be reconsidered at a **future 2.0 major** with reviewed migration notes; this is not an allowance to drop it in 1.x. [ADR 0006](adr/0006-node-18-support-through-1x.md) records the decision. The `cubrid-client` driver also preserves Node 18 in 1.x.
+
+Design CI in two parts: (1) on Node 22, build/typecheck/Vitest/coverage/lint using current tooling; (2) on **Node 18**, install a **clean packed `drizzle-cubrid` artifact** with explicitly compatible peer versions and run nonzero ESM/CJS import and representative runtime tests. An incompatible Vitest 4 startup on Node 18 is a developer-tooling failure, not evidence the built library cannot run on Node 18. Do not skip the Node 18 consumer check, lower coverage, or change `engines.node` to bypass [#100](https://github.com/cubrid-lab/drizzle-cubrid/issues/100).
+
 ## Real CUBRID integration — not implemented in this checkout
 
 The `integration` npm script currently points to `tests/integration.test.ts`, **which is absent on the inspected main branch**, and there is **no committed Docker Compose file** here. Do not tell contributors that `docker compose up` followed by `npm run integration` proves a live database integration. The actual integration harness needs to be designed and built in [#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164).
