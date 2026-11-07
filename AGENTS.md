@@ -178,7 +178,7 @@ Read the [repository ADR index](docs/adr/README.md) before proposing changes to 
 
 ## CUBRID correctness lessons and native regression review
 
-Before changing protocol, SQL generation, transaction handling, schema migrations, type codecs, connection recovery or release claims, review [the repository-specific engineering invariants](docs/ENGINEERING_INVARIANTS.md). These rules are grounded in this repository's own public contract, integration responsibilities, and verifiable CUBRID behavior. Distinguish mock tests, live CUBRID execution and independent differential evidence; never claim a check ran without its actual CI result. For an unrelated docs-only change, the checklist is advisory and does not mandate unnecessary database jobs. Existing repository review and merge requirements remain authoritative.
+Before changing Drizzle query/schema generation, type codecs, transaction/result mapping, npm peer compatibility or releases, review [the repository-specific engineering invariants](docs/ENGINEERING_INVARIANTS.md). These rules are grounded in the TypeScript Drizzle adapter and its own ORM/driver integration contract, and verifiable CUBRID behavior. Distinguish mock tests, live CUBRID execution and independent differential evidence; never claim a check ran without its actual CI result. For an unrelated docs-only change, the checklist is advisory and does not mandate unnecessary database jobs. Existing repository review and merge requirements remain authoritative.
 
 ## Development Workflow (cubrid-labs org standard)
 
