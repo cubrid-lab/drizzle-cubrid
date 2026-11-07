@@ -62,11 +62,14 @@ jobs:
 
   lint-and-test:
     needs: impact
-    if: ${{ always() && needs.impact.outputs.docs_only != 'true' }}
+    if: ${{ needs.impact.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     strategy:
+      # Without this, the first lane to fail cancels the others, so a failure
+      # that is specific to one Node version hides the state of every other.
+      fail-fast: false
       matrix:
-        node-version: [18, 20, 22]
+        node-version: [20, 22]
     steps:
       - uses: actions/checkout@v6
       - name: Use Node.js ${{ matrix.node-version }}
@@ -79,32 +82,121 @@ jobs:
         run: npx tsc --noEmit
       - name: Build
         run: npm run build
+      # The developer runner requires a recent Node. Node 18 consumer support
+      # is independently enforced against the built npm tarball below.
       - name: Test with coverage
         run: npx vitest run --coverage --reporter=verbose
+
+  package-artifact:
+    name: Build packed npm package
+    needs: impact
+    if: ${{ needs.impact.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Pack candidate and record exact installed peer versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p packed
+          npm pack --ignore-scripts --pack-destination packed
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const lock = require('./package-lock.json');
+          for (const name of ['drizzle-orm', 'cubrid-client']) {
+            const version = lock.packages?.[`node_modules/${name}`]?.version;
+            if (!version) throw new Error(`Cannot determine installed peer version: ${name}`);
+            fs.writeFileSync(`packed/${name}.version`, `${version}\n`);
+          }
+          NODE
+          test "$(find packed -maxdepth 1 -name '*.tgz' | wc -l)" -eq 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package-for-node18
+          path: packed/
+          if-no-files-found: error
+          retention-days: 3
+
+  node18-consumer:
+    name: Node 18 packed-package consumer
+    needs: package-artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 18
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package-for-node18
+          path: packed/
+      - name: Install actual tarball and tested peer versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Node runtime: $(node --version)"
+          mkdir consumer
+          cd consumer
+          npm init -y >/dev/null
+          shopt -s nullglob
+          tarballs=(../packed/*.tgz)
+          test "${#tarballs[@]}" -eq 1
+          drizzle_version=$(cat ../packed/drizzle-orm.version)
+          client_version=$(cat ../packed/cubrid-client.version)
+          npm install --ignore-scripts --no-audit --no-fund "${tarballs[0]}" "drizzle-orm@${drizzle_version}" "cubrid-client@${client_version}"
+      - name: Exercise CJS and ESM exports on Node 18
+        working-directory: consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          (async () => {
+            const cjs = require('drizzle-cubrid');
+            const esm = await import('drizzle-cubrid');
+            for (const api of [cjs, esm]) {
+              assert.equal(typeof api.drizzle, 'function');
+              assert.equal(typeof api.cubridTable, 'function');
+              assert.equal(typeof api.cubridSet, 'function');
+              const table = api.cubridTable('node18_consumer_smoke', { tags: api.cubridSet('tags') });
+              assert.ok(table.tags, 'runtime table/column construction must work');
+            }
+            console.log('Node 18 packed CJS and ESM consumer assertions passed');
+          })().catch((error) => { console.error(error); process.exitCode = 1; });
+          NODE
 
   ci-gate:
     name: CI gate
     if: always()
-    needs: [impact, docs-check, lint-and-test]
+    needs: [impact, docs-check, lint-and-test, package-artifact, node18-consumer]
     runs-on: ubuntu-latest
     env:
       IMPACT: ${{ needs.impact.result }}
       DOCS_ONLY: ${{ needs.impact.outputs.docs_only }}
       DOCS_CHECK: ${{ needs.docs-check.result }}
-      J1: ${{ needs.lint-and-test.result }}
+      TESTS: ${{ needs.lint-and-test.result }}
+      PACKAGE: ${{ needs.package-artifact.result }}
+      NODE18: ${{ needs.node18-consumer.result }}
     steps:
-      - name: Require selected jobs to pass
+      - name: Fail closed on missing selected validation
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$IMPACT" == success ]] || { echo "::error::Classifier did not succeed"; exit 1; }
+          [[ "$IMPACT" == success ]] || { echo '::error::CI change classification failed'; exit 1; }
           if [[ "$DOCS_ONLY" == true ]]; then
-            [[ "$DOCS_CHECK" == success ]] || { echo "::error::Docs check: $DOCS_CHECK"; exit 1; }
+            [[ "$DOCS_CHECK" == success ]] || { echo "::error::Docs checks: $DOCS_CHECK"; exit 1; }
+            for result in "$TESTS" "$PACKAGE" "$NODE18"; do
+              [[ "$result" == skipped ]] || { echo "::error::Unexpected runtime job on docs-only PR: $result"; exit 1; }
+            done
+          else
+            for result in "$TESTS" "$PACKAGE" "$NODE18"; do
+              [[ "$result" == success ]] || { echo "::error::Required runtime check: $result"; exit 1; }
+            done
           fi
-          for result in "$J1"; do
-            if [[ "$DOCS_ONLY" == true ]]; then
-              [[ "$result" == skipped || "$result" == success ]] || exit 1
-            else
-              [[ "$result" == success ]] || { echo "::error::Runtime check: $result"; exit 1; }
-            fi
-          done
