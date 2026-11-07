@@ -15,6 +15,8 @@ and instructions for contributing to the project.
 
 ---
 
+**Supported consumer runtime (planned 1.x):** `drizzle-cubrid@1.x` retains Node 18 through every minor/patch release, coordinating with `cubrid-client@1.x`. Node 22 (`.nvmrc`) is the development-tool baseline, not a consumer-floor change. For Node 18 CI, test a clean packed adapter with compatible peers rather than attempting to start incompatible Vitest 4 on Node 18. No Node 18 removal until a separately reviewed **2.0 MAJOR**. See [ADR 0006](docs/adr/0006-node-18-support-through-1x.md) and [#100](https://github.com/cubrid-lab/drizzle-cubrid/issues/100).
+
 ## Development Setup
 
 ### Prerequisites
