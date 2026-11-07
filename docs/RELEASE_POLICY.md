@@ -12,7 +12,7 @@ Review [the repository-specific engineering invariants](ENGINEERING_INVARIANTS.m
 
 ## Version numbers
 
-Use SemVer for **each publicly distributed package/module/crate**. A compatibility-generation relationship between the CUBRID driver and its ORM adapter does not override an individual package's SemVer contract.
+Apply npm SemVer to `drizzle-cubrid` independently. Its public adapter API, SQL behavior and tested peer bounds determine compatibility, not another package's release number.
 
 | Change | Before 1.0 | From 1.0 onward |
 | --- | --- | --- |
@@ -31,29 +31,29 @@ A release's **version, supported runtime/database ranges, published package expo
 
 A modern Node 22 compiler/Vitest/ESLint development job is independent of a required **Node 18 external npm-tarball ESM/CJS consumer smoke**, using tested `cubrid-client` and `drizzle-orm` versions. Incompatible Vitest toolchain under Node 18 does not justify raising the 1.x consumer minimum or counting a cancelled Node 18 lane as successful. Maintain modern toolchain/coverage checks separately and fail closed when the Node 18 consumer check does not run or fails. See [ADR 0006](adr/0006-node-18-support-through-1x.md) and [#100](https://github.com/cubrid-lab/drizzle-cubrid/issues/100).
 
-## Driver ↔ ORM compatibility generations
+## Drizzle adapter and npm peer compatibility
 
-- Target **1.x driver + 1.x ORM** for each language's first verified stable integration. This is a *supported compatibility generation*, not simultaneous publication or equality of full version strings.
-- Driver and ORM MINOR/PATCH releases are independent. A newer driver release does not automatically authorize a new ORM release.
-- Driver MAJOR release triggers an ORM compatibility assessment and tested peer/module/crate version policy. Publish a new adapter MAJOR **only when its own compatibility promise changes incompatibly**; do not force a pointless MAJOR just for matching digits.
-- If an ORM's own API needs a MAJOR independently of the driver, honor SemVer and document the temporary numeric mismatch. Never hide breaking changes to keep the numbers equal.
-- Publish bounded **actually tested** dependency support ranges, not open-ended assumptions. Include explicitly tested CUBRID database versions. Unverified combinations must be labeled unverified.
+- Verify the actual supported `drizzle-orm` and `cubrid-client` peer dependency ranges by installing an **external npm consumer** and running typed SQL/result and ESM/CJS imports against each advertised range.
+- Target a verified 1.x compatibility generation with supported `cubrid-client@1.x` and keep the adapter's own MINOR/PATCH independent. Neither package must follow another's release calendar or full version string.
+- A driver MAJOR release requires a new adapter compatibility assessment, not an automatic adapter MAJOR; make an adapter breaking release only for its own incompatible API or support changes.
+- Preserve Node.js 18 consumption for all adapter 1.x releases as documented separately. Development-tooling requirements do not silently change `engines.node`.
+- Mark unsupported Drizzle APIs and untested database/peer combinations explicitly, and do not use MySQL SQL generation as a CUBRID correctness oracle.
 
 ## Workflow and release notes
 
 1. Merge scoped code/test/documentation PRs with required final-head CI. Architectural notes and mocked tests are not substitutes for live CUBRID tests.
-2. Open a **reviewed release candidate PR** containing the proposed version change, manifest/lockfile or crate metadata, release notes, API/compatibility notes, and any migration instructions. No automatic publish directly from arbitrary feature PR merges.
+2. Open a **reviewed release candidate PR** containing the proposed version change, `package.json`, npm lockfile and peer dependency metadata, release notes, API/compatibility notes, and any migration instructions. No automatic publish directly from arbitrary feature PR merges.
 3. Run an explicit **release preflight** on the exact candidate commit: quality/lint/tests, real supported database matrix where the release makes DB behavior claims, package/build artifact verification, dependency lower-bound and consumer smoke tests, and security/secret checks. Fail closed for missing, failed, cancelled or skipped required release checks.
-4. A maintainer approves the candidate and release notes. Release/publishing permission changes need independent security review. Only then create immutable tags and publish to the language's registry. Do not overwrite tags or re-publish an existing version.
+4. A maintainer approves the candidate and release notes. Release/publishing permission changes need independent security review. Only then create immutable tags and publish the reviewed npm package. Do not overwrite tags or re-publish an existing version.
 5. Verify the public registry artifact and GitHub Release match the reviewed commit and tag. Record evidence and a release recovery/retry procedure; do not mask a partial publish as a success.
 
 Recommended release-note headings (omit empty sections): **Highlights**, **Breaking changes / Migration**, **Fixes**, **Compatibility**, **Dependencies**, and **Contributors**. Attribute contributions inline with `by @username` where provenance is known; optionally welcome verified first-time contributors. Avoid broken Markdown line wrapping, misleading first-contribution claims, and autogenerated duplicate contributor credits.
 
-Release automation may prepare a candidate PR, but **must not skip the review, release gate or registry verification**. Choose language-appropriate tools and do not copy an npm workflow into Go or Cargo unmodified.
+Release automation may prepare a candidate PR, but **must not skip the review, release gate or registry verification**. Review the repository's npm release automation; do not borrow a different package's release workflow.
 
 ## Mandatory live-CUBRID release verification
 
-**Release rule, not an existing CI claim:** Before publishing **any release that changes or claims database behavior**, run DB-backed tests against the exact candidate commit and testable published package/module/crate; before **1.0**, complete the full documented supported CUBRID version matrix. For ordinary doc-only or tooling PRs, lightweight checks may be sufficient, but the eventual **release candidate** must not use the docs-only shortcut to skip a required database gate.
+**Release rule, not an existing CI claim:** Before publishing **any release that changes or claims database behavior**, run DB-backed tests against the exact candidate commit and packaged npm candidate tarball; before **1.0**, complete the full documented supported CUBRID version matrix. For ordinary doc-only or tooling PRs, lightweight checks may be sufficient, but the eventual **release candidate** must not use the docs-only shortcut to skip a required database gate.
 
 **Minimum evidence by responsibility:**
 
@@ -74,7 +74,7 @@ Release automation may prepare a candidate PR, but **must not skip the review, r
 4. Include both success and failure-path evidence. Add selected JDBC-based semantic comparisons where valuable for rows, types and transaction outcomes, but do not depend on byte-for-byte parity or use JDBC as an implementation blueprint.
 5. Record the tested commit SHA, CUBRID version and image/reference digest where possible, test command, counts of passed/failed/skipped cases, and artifacts/logs. Zero executed tests, missing environment, skipped required cases or failing required database jobs block the relevant release claim.
 6. Run a **release-candidate-only full verification** even when change-impact routing skips DB jobs on docs-only pull requests. Fail closed for inconclusive evidence; rerun on the exact final candidate after a code or release-manifest change.
-7. Test the **actual distributed artifact** in a small external consumer (Go module, Rust crate or npm tarball). In-repository tests cannot alone confirm release metadata, dependency resolution, or imported runtime behavior.
+7. Run `npm pack` and install the **actual tarball** in clean ESM, CommonJS and TypeScript consumer projects, including the declared minimum Node.js 18 consumer and representative tested Drizzle/driver peer versions. In-repository tests alone cannot prove npm exports or compatibility.
 
 **Scope:** This is a policy requirement. Existing green CI runs are not reclassified as complete integration evidence. Implementation of new CI jobs, server provisioning and tests must be separately reviewed. No automatic 1.0 release is authorized by this document.
 
@@ -95,7 +95,7 @@ Design PRs may be developed as drafts in parallel, but **must not be treated as 
 - Drizzle ORM API/SQL compiler compatibility is an **independent** axis from the driver version. Bound peer ranges after checking the oldest and newest versions actually verified.
 - ESM/CJS exports, emitted `.d.ts`, public schema/query inference and Node.js minimum are versioned APIs. Test an installed `npm pack` tarball with real ESM/CJS/TypeScript consumers, not only in-repo imports.
 - Categorize query semantics, generated keys and migrations as potentially breaking, even if TypeScript API signatures remain unchanged.
-- `.github/workflows/publish.yml` currently publishes on a `v*` tag after a Node matrix; it is **not** the release-candidate workflow used by `cubrid-client`. First design an idempotent reviewed-release gate (e.g. Release Please, as used by `cubrid-client`), then change automation in a separate PR after independent security review. Do **not** create an automatic tag or npm publication in this policy PR.
+- `.github/workflows/publish.yml` currently publishes on a `v*` tag after a Node matrix; it is **not** the release-candidate workflow used by `cubrid-client`. First design an idempotent reviewed-release gate (for example Release Please, after an independent workflow review), then change automation in a separate PR after independent security review. Do **not** create an automatic tag or npm publication in this policy PR.
 - Align the minimum tested npm consumer Node/Drizzle/driver versions with the build toolchain without silently dropping advertised Node support.
 
 Related: [version/peer policy #151](https://github.com/cubrid-lab/drizzle-cubrid/issues/151), [native dialect #155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155), [draft architecture PR #166](https://github.com/cubrid-lab/drizzle-cubrid/pull/166).
