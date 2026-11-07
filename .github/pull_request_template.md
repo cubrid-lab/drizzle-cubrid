@@ -33,3 +33,9 @@ List files shared with other PRs (especially `ci.yml`, `package-lock.json` or na
 ## Reviewers
 
 Mention relevant reviewers, or state unassigned.
+
+## Repository-owned change and reference review
+
+- [ ] This PR stays within **drizzle-cubrid** responsibilities (TypeScript Drizzle dialect, CUBRID SQL generation and npm peer compatibility), rather than copying another project's API or release process.
+- [ ] Cross-repository references have a genuine driver/ORM dependency, independent JDBC comparison, or coordination purpose; they are not substitutes for this repository's test evidence.
+- [ ] Issue/PR/ADR text does not contain copied tooling, version commitments or test claims from an unrelated language or repository.
