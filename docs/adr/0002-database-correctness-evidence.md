@@ -6,18 +6,18 @@
 
 ## Context
 
-The CUBRID Python driver and its SQLAlchemy dialect revealed that apparently successful queries can hide transaction-scope mistakes, accidental retries after uncertain execution, stale broker handles, precision loss and unverified ORM-generated SQL. The purpose of learning from them is to **reuse verified invariants and test design**, never Python API signatures or implementation code. The current repository has its own runtime, public API and released compatibility obligations.
+drizzle-cubrid owns the TypeScript Drizzle CUBRID dialect and ORM adapter. This project's correctness decisions must cover Drizzle extension APIs, native CUBRID SQL/DDL, typed column mappings, driver result contracts, npm peer ranges, and real CUBRID ORM tests, including negative and failure-path behavior. Passing offline tests alone is not proof of database compatibility. The accepted public API, local implementation, and actual CUBRID server behavior are the basis for requirements and test evidence.
 
 ## Decision
 
 The ORM must compile CUBRID SQL and own schema/types/migration semantics; it must not quietly inherit MySQL's compiler or assume MySQL DDL behavior. The cubrid-client owns CAS transport, connection and result metadata, and the adapter must use its actual query/execute return contracts. Query row/alias ordering, generated IDs, bigint/precision/collections, transaction-bound connections, rollback and migration behavior each require an actual CUBRID test for production claims. Fail unsupported SQL and missing result metadata explicitly. Drizzle core extension feasibility is a prerequisite for an independent native implementation.
 
-Use source-linked test cases as engineering references, then implement targeted **native-language** regression tests. Identify whether a test actually talked to CUBRID, which server/broker and client/ORM versions were used, what SQL/outcome was asserted, and whether any required case was skipped. The fact that a Python project passes its tests does **not** certify this package.
+Create targeted tests for this project's observable contracts. Record whether tests actually communicated with CUBRID, the server/broker and dependency versions, asserted SQL outcomes, and skipped cases. External test results never certify this package.
 
 ## Alternatives considered
 
 - **Rejected:** Subclassing MySQL dialect/database and re-exporting mysqlTable as a permanent compatibility strategy; rewriting MySQL SQL strings; assuming query() returns DML insert metadata; claiming migrations from a MySQL-mode Drizzle Kit example.
-- **Rejected:** A generic cross-language implementation copied verbatim from Python.
+- **Rejected:** Treating another package's API, implementation, or test results as this project's contract.
 - **Rejected:** Marking an unsupported/unverified feature as absent simply because one server or connector failed in a particular test.
 
 ## Consequences and trade-offs
