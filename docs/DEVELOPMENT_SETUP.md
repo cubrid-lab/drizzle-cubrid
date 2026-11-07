@@ -45,7 +45,7 @@ Review emitted ESM/CJS and `.d.ts` with an external TypeScript consumer (require
 ## Setup exit criteria
 
 - [ ] Node 22 dev checks are reproduced from `npm ci` on a clean checkout, with observed CI/local outcomes.
-- [ ] Node 18 consumer support is retained or revised only through a separate reviewed SemVer decision and external smoke.
+- [ ] Node 18 consumer support is **retained for all 1.x releases**, with external packed ESM/CJS smoke tests. A runtime-floor increase may be proposed no earlier than a separately reviewed **2.0 MAJOR**.
 - [ ] ESLint configuration and compatible coverage/runtime toolchain are verified; failures are not silenced.
 - [ ] Real CUBRID integration suite exists and actually runs before database support is claimed.
 - [ ] `docs/DESIGN_SIGNOFF.md` in [architecture draft PR #166](https://github.com/cubrid-lab/drizzle-cubrid/pull/166) covers the native-dialect feasibility and TDD plan; release policy PR must be approved first.
