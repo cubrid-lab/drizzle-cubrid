@@ -157,6 +157,25 @@ docker compose down -v                        # Cleanup
 - No empty `catch` blocks
 - No `console.log` in production code (use Drizzle's Logger interface)
 
+
+
+
+## Development setup before design and TDD implementation
+
+Use the repository-specific [development setup guide](docs/DEVELOPMENT_SETUP.md) and [setup ADR 0005](docs/adr/0005-development-setup.md) (**Proposed**) before attempting new runtime or ORM work. Verify the **actual** manifest, supported developer toolchain, dependency resolution, read-only offline checks, and availability/absence of real CUBRID integration separately. Do not invent an unavailable Docker Compose file, integration test, linter, Cargo registry artifact, or Go module import path. A successful unit build is not a successful real-database test or a published package. Record observed setup blockers as issues; do not silently change public consumer engine/Go module paths/Rust MSRV, weaken CI, or modify release credentials to make onboarding appear green.
+
+## Test-first implementation after architecture review
+
+Before implementing a CUBRID behavior change, check the approved API/SQL/protocol contract and [TDD ADR 0004](docs/adr/0004-test-first-development.md) (**currently Proposed**). Follow **Red → Green → Refactor** in focused slices: execute a deterministic failure for the intended reason first, implement the smallest fix, rerun the case and relevant regressions, then refactor. Explain the initial failure and actual checks in the PR without inventing command output. A final PR must pass its required CI; never keep a deliberately failing regression as proof of Red. Confirm database-dependent behavior through real CUBRID tests and the release candidate matrix; mocks alone cannot certify it. Upstream feasibility prototypes and docs-only changes are exempt from ritual Red steps but must show their own accurate evidence. Release policy and architecture decisions must be approved before classifying design as completed.
+
+## Architecture decisions and release order
+
+Read the [repository ADR index](docs/adr/README.md) before proposing changes to public behavior, release contracts, native dialect design, transaction ownership or migrations. ADR 0001 records release governance; ADR 0002 records the failure-evidence contract learned from Python; native architecture ADR 0003 (where applicable) is **Proposed** in the separate draft architecture PR. Do not treat a Proposed ADR as approved. Adopt the release policy before accepting the architecture ADR; require actual tested evidence before claiming implementation or release readiness. Use the [ADR template](docs/adr/TEMPLATE.md) for material new decisions, not for every trivial change.
+
+## CUBRID correctness lessons and native regression review
+
+Before changing protocol, SQL generation, transaction handling, schema migrations, type codecs, connection recovery or release claims, review [the repository-specific engineering invariants](docs/ENGINEERING_INVARIANTS.md). These are based on concrete pycubrid/sqlalchemy-cubrid failure cases but must be implemented and tested using **this language's native interfaces**, not copied Python APIs. Distinguish mock tests, live CUBRID execution and independent differential evidence; never claim a check ran without its actual CI result. For an unrelated docs-only change, the checklist is advisory and does not mandate unnecessary database jobs. Existing repository review and merge requirements remain authoritative.
+
 ## Development Workflow (cubrid-labs org standard)
 
 All non-trivial work across cubrid-labs repositories MUST follow this 4-phase cycle:

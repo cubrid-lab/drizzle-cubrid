@@ -19,26 +19,38 @@ and instructions for contributing to the project.
 
 ### Prerequisites
 
-- Node.js 18 or later
-- Git
-- Docker (for integration tests)
+- Node.js 22 recommended for local **developer tooling**. The package still declares Node >=18 for consumers; its CI and dependency compatibility require a separate reviewed decision ([#100](https://github.com/cubrid-lab/drizzle-cubrid/issues/100)).
+- Git and npm
+- A disposable CUBRID server will be needed for future live integration tests, but no root Docker Compose or runnable integration test file is currently checked in.
+- [Development setup and actual blockers](docs/DEVELOPMENT_SETUP.md)
 
 ### Installation
 
 ```bash
-# Clone the repository (and cubrid-client for local dependency)
-git clone https://github.com/cubrid-labs/cubrid-client.git
-git clone https://github.com/cubrid-labs/drizzle-cubrid.git
+# Clone only the adapter; the checked-in npm lockfile resolves cubrid-client
+git clone https://github.com/cubrid-lab/drizzle-cubrid.git
 cd drizzle-cubrid
 
-# Install dependencies
-npm install
+# Install the exact committed dependency tree
+npm ci
 
 # Build
 npm run build
 ```
 
 ---
+
+
+
+## Test-driven implementation
+
+For bug fixes or behavioral features, start from a reviewed interface/SQL/transaction design. Use the [TDD decision](docs/adr/0004-test-first-development.md): **Red** (run a new focused test and capture the genuine target failure), **Green** (smallest production change passing that test), **Refactor** (rerun related tests and final PR CI). In the PR description record the failing assertion/error **actually observed**, the passing assertion, which regressions ran, and whether real CUBRID validation ran or remains unverified. A mock-only pass cannot establish server compatibility; the exact release candidate still requires full live DB validation. No deliberate failing tests or skipped release checks may be left to satisfy the TDD process. For documentation and upstream feasibility work, describe the design/probe evidence rather than forcing an irrelevant Red test. The ADR and design contracts are proposals until reviewed and accepted.
+
+## CUBRID correctness and regression evidence
+
+For changes to CUBRID protocol, connection lifecycle, error handling, results, native SQL, ORM migrations, supported versions or releases, read [this repository's engineering invariants](docs/ENGINEERING_INVARIANTS.md) **before** implementation and review. The checks are adapted from the real bugs and tests of `pycubrid` and `sqlalchemy-cubrid`, not a Python API port. In the pull request, describe the behavioral invariant affected, the normal and failure cases tested, and which checks were offline, real CUBRID or independently compared with JDBC. State the exact CUBRID/runtime/driver versions and test outcomes when claiming database compatibility. **Do not mark tests as passed when they were skipped, missing or never executed.**
+
+For documentation-only or nonbehavioral changes, explain why a database run is unnecessary rather than manufacturing an integration result. The final **release candidate** still follows the repository's full live-CUBRID release gate, separate from ordinary PR path optimization. These expectations supplement, and do not weaken, the established review/CI rules.
 
 ## Running Tests
 
@@ -55,18 +67,9 @@ npm run test:cov
 npm run test:watch
 ```
 
-### Integration Tests (Requires CUBRID)
+### Real CUBRID integration (not set up yet)
 
-```bash
-# Start a CUBRID container
-docker compose up -d
-
-# Run integration tests
-npm run integration
-
-# Stop the container when done
-docker compose down
-```
+**Do not execute the old Docker instructions as proof of a test**: this repository has no checked-in root Docker Compose file, and `npm run integration` references `tests/integration.test.ts`, which is not present on the inspected main branch. Building a real-CUBRID harness with nonzero SQL assertions is tracked in [#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164). The actual driver and Drizzle ORM version matrix must be tested separately. See [Development setup](docs/DEVELOPMENT_SETUP.md).
 
 ### Type Checking
 
@@ -78,23 +81,13 @@ npm run typecheck
 
 ## Code Style
 
-This project uses [Biome](https://biomejs.dev/) for linting and formatting.
-
-### Rules
-
-- **Indent**: Tabs
-- **Line width**: 100 characters
-- **Quote style**: Double quotes
-- **Semicolons**: Always
-
-### Running Checks
+The manifest currently uses ESLint (`npm run lint`, `npm run format`), **not Biome**. The inspected main branch does not include an ESLint flat configuration, so lint setup is an **open blocker**; report its actual failure rather than calling it passed. Formatting (`npm run format`) mutates files and should be an intentional action, never a read-only setup check. Follow `.editorconfig` and the [development setup guide](docs/DEVELOPMENT_SETUP.md) while the lint configuration is designed.
 
 ```bash
-# Check lint and format
-npx biome check src/ tests/
-
-# Auto-fix
-npx biome check --write src/ tests/
+npm run typecheck
+npm test
+npm run build
+# npm run lint  # run after a reviewed ESLint config has been added
 ```
 
 ---
@@ -116,10 +109,7 @@ npx biome check --write src/ tests/
    npm run typecheck
    ```
 
-4. **Run lint checks**:
-   ```bash
-   npx biome check src/ tests/
-   ```
+4. **Track lint setup explicitly:** `npm run lint` is declared but the inspected branch lacks a compatible ESLint flat config. Do not substitute an unpinned `npx biome` download or report a lint pass until the tooling issue is resolved.
 
 ### PR Content
 
@@ -154,5 +144,5 @@ For feature requests, describe the use case and expected behavior.
 
 ## Questions?
 
-Open a [GitHub Discussion](https://github.com/cubrid-labs/drizzle-cubrid/discussions)
+Open a [GitHub Discussion](https://github.com/cubrid-lab/drizzle-cubrid/discussions)
 or file an [issue](https://github.com/cubrid-labs/drizzle-cubrid/issues).
