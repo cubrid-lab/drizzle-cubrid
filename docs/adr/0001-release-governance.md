@@ -7,7 +7,7 @@
 
 ## Context
 
-The CUBRID Lab language drivers and ORM adapters progressed at different rates. An optimistic package number, borrowed ORM backend, passing mocks or a green but empty integration job must not accidentally imply production readiness. The Python driver and SQLAlchemy dialect established useful regression evidence, but release rules must follow each ecosystem's real package manager and compatibility obligations.
+A tag, passing mock suite, or green job without executed database cases does not establish a ready release of drizzle-cubrid. This repository's release contract follows its own API and responsibilities, including Drizzle ORM APIs, npm peer dependency ranges, native SQL/DDL, and real CUBRID integration. Other packages' version numbers cannot substitute for its compatibility evidence.
 
 ## Decision
 
@@ -22,7 +22,7 @@ The planned stable adapter **must support Node 18 throughout all 1.x releases**.
 ## Alternatives considered
 
 - **Rejected:** Force adapter version equal to driver version; or keep open-ended >= peer dependencies as support guarantees; or publish directly from a user-created tag without reviewed preflight.
-- **Rejected:** One centrally synchronized release number and a generic Python-style policy for all languages; each distribution has separate SemVer, packaging and runtime constraints.
+- **Rejected:** Making this package's releases contingent on matching another repository's version number or calendar.
 - **Rejected:** Treat an issue, green mock suite, GitHub tag or draft changelog as sufficient release evidence.
 
 ## Consequences and trade-offs
