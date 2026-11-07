@@ -1,6 +1,8 @@
-# Engineering invariants learned from the Python CUBRID projects
+# Engineering invariants for drizzle-cubrid
 
-> **Status:** Engineering review checklist and test-design requirements, not evidence that this repository already passes them. Adopted from verified scenarios in [pycubrid](https://github.com/cubrid-lab/pycubrid) and [sqlalchemy-cubrid](https://github.com/cubrid-lab/sqlalchemy-cubrid), with language-native adaptation. Review together with this repository's release policy before claiming stable support.
+> **Status:** Proposed repository-specific engineering checklist, not evidence that existing tests pass.
+
+drizzle-cubrid owns the TypeScript Drizzle CUBRID dialect and ORM adapter. Correctness requirements follow Drizzle extension APIs, native CUBRID SQL/DDL, typed column mappings, driver result contracts, npm peer ranges, and real CUBRID ORM tests. Use this repository's implementation, public API, relevant live-CUBRID evidence and official CUBRID/JDBC results as appropriate; never assume that another language's driver or ORM test result establishes behavior here.
 
 ## Why these invariants exist
 
