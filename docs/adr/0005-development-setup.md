@@ -11,7 +11,7 @@ A correct CUBRID design and test-first workflow can still fail when contributors
 
 ## Decision
 
-Recommend Node 22 for local build/tooling and preserve the current Node >=18 consumer promise until a separately reviewed compatibility decision and real ESM/CJS consumer tests. Use `npm ci` with the committed lockfile. Explicitly block false integration test instructions: the package's `integration` script references `tests/integration.test.ts`, but that file and Docker Compose are absent on main. Do not introduce a MySQL-based DB setup as a substitute for a CUBRID dialect.
+Recommend Node 22 for local build/tooling while **committing to Node >=18 consumers for all 1.x versions**, with real ESM/CJS tests of the packed package. Any increase to the minimum Node runtime is a possible **2.0 major** decision only. Use `npm ci` with the committed lockfile. Explicitly block false integration test instructions: the package's `integration` script references `tests/integration.test.ts`, but that file and Docker Compose are absent on main. Do not introduce a MySQL-based DB setup as a substitute for a CUBRID dialect.
 
 - Maintain a **single repository-local onboarding guide** [DEVELOPMENT_SETUP.md](../DEVELOPMENT_SETUP.md) that names the actual install/build/offline/live-CUBRID/publish-consumer steps, without requiring other-language package tools.
 - Use the repo's checked-in lockfile or module manifest and keep dependency update/publishing workflows separately reviewed. Do not blindly regenerate a lockfile or raise a published runtime floor to fix a development-tool problem.
