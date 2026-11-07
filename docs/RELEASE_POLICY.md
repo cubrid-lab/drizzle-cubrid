@@ -25,6 +25,12 @@ A severe correctness defect is repaired promptly; explain any observable change,
 
 A release's **version, supported runtime/database ranges, published package exports, immutable tag and release notes must agree**. The new version is not considered released merely because a manifest was edited or a draft PR merged.
 
+## Node.js 18 compatibility for every 1.x adapter release
+
+**Approved direction for design, pending ADR review:** The first stable `drizzle-cubrid@1.0.0` and **all subsequent 1.x MINOR/PATCH/maintenance releases** must retain **`engines.node >=18`**. A Node minimum above 18 is a possible future **2.0 MAJOR** change only, subject to separately reviewed breaking-change policy, migration notes and actual downstream/driver compatibility. `cubrid-client@1.x` retains Node 18 throughout its own 1.x generation. These compatibility promises do not force identical minor/patch numbers or automatic major bumps between packages.
+
+A modern Node 22 compiler/Vitest/ESLint development job is independent of a required **Node 18 external npm-tarball ESM/CJS consumer smoke**, using tested `cubrid-client` and `drizzle-orm` versions. Incompatible Vitest toolchain under Node 18 does not justify raising the 1.x consumer minimum or counting a cancelled Node 18 lane as successful. Maintain modern toolchain/coverage checks separately and fail closed when the Node 18 consumer check does not run or fails. See [ADR 0006](adr/0006-node-18-support-through-1x.md) and [#100](https://github.com/cubrid-lab/drizzle-cubrid/issues/100).
+
 ## Driver ↔ ORM compatibility generations
 
 - Target **1.x driver + 1.x ORM** for each language's first verified stable integration. This is a *supported compatibility generation*, not simultaneous publication or equality of full version strings.
