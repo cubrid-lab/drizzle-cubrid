@@ -174,16 +174,16 @@ Read the [repository ADR index](docs/adr/README.md) before proposing changes to 
 
 Before changing Drizzle query/schema generation, type codecs, transaction/result mapping, npm peer compatibility or releases, review [the repository-specific engineering invariants](docs/ENGINEERING_INVARIANTS.md). These rules are grounded in the TypeScript Drizzle adapter and its own ORM/driver integration contract, and verifiable CUBRID behavior. Distinguish mock tests, live CUBRID execution and independent differential evidence; never claim a check ran without its actual CI result. For an unrelated docs-only change, the checklist is advisory and does not mandate unnecessary database jobs. Existing repository review and merge requirements remain authoritative.
 
-## Development Workflow (cubrid-labs org standard)
+## Development Workflow (drizzle-cubrid)
 
-All non-trivial work across cubrid-labs repositories MUST follow this 4-phase cycle:
+Apply this repository's own Drizzle/TypeScript/CUBRID contracts. Do not inherit a different repository's architecture or mandate any named AI reviewer.
 
-1. **Oracle Design Review** — Consult Oracle before implementation to validate architecture, API surface, and approach. Raise concerns early.
-2. **Implementation** — Build the feature/fix with tests. Follow existing codebase patterns.
-3. **Documentation Update** — Update ALL affected docs (README, CHANGELOG, ROADMAP, API docs, SUPPORT_MATRIX, PRD, etc.) in the same PR or as an immediate follow-up. Code without doc updates is incomplete.
-4. **Oracle Post-Implementation Review** — Consult Oracle to review the completed work for correctness, edge cases, and consistency before merging.
+1. **Scope and design:** Identify this adapter's affected public API, Drizzle extension contract, real CUBRID SQL/driver behavior, compatibility requirements, and any proposed ADR. Mark proposed decisions as proposed.
+2. **Test-first implementation:** For behavioral changes, reproduce an observed RED case, make the minimal GREEN change, then refactor and preserve regression tests. Explain why TDD is not applicable for pure docs updates.
+3. **Verification and documentation:** Record actually executed typecheck, build, tests/coverage and, where behavior requires, real CUBRID integration and Node 18 packed-consumer evidence. Update only documentation affected by the change and do not claim missing tests passed.
+4. **Review and merge:** Address review findings and check final-head CI, repository protections and relevant maintainer review requirements. Independent maintainer review is necessary for high-risk security, release/publishing or protection changes where required. Optional Oracle/Copilot/agent reviews are **advisory**, never substitutes for human judgment or automatic approval.
 
-Skipping any phase requires explicit justification. Trivial changes (typos, single-line fixes) may skip phases 1 and 4.
+There are no mandatory AI-specific pre/post review calls. Trivial docs edits do not require invented integration results or unrelated CI jobs.
 
 ## Test Structure
 
@@ -195,14 +195,14 @@ flowchart TD
     A --> E[types.test.ts - SET, MULTISET, SEQUENCE, MONETARY]
     A --> F[query.test.ts - SELECT, INSERT, UPDATE, DELETE]
     A --> G[table.test.ts - cubridTable builder]
-    A --> H[integration.test.ts - Live DB tests]
+    A --> H[Future real-CUBRID integration tests - not yet checked in]
 ```
 
 ### Testing Approach
 
 - **Unit tests** — mock `cubrid-client` with fake implementations
 - **Query tests** — use Drizzle's `drizzle.mock()` or equivalent for SQL generation verification
-- **Integration tests** — real CUBRID via Docker, guarded by env var
+- **Integration tests** — **not implemented in this repository yet**: the script refers to a missing test file, and no Docker Compose setup is checked in. See #164. Do not claim real database verification until an actual nonempty harness passes.
 
 ### Coverage
 
