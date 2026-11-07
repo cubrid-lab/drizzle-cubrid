@@ -24,4 +24,4 @@ This repository does **not** yet have a complete live-CUBRID integration harness
 
 ## Merge discipline
 
-The `CI gate` fails if change classification is broken or if a **selected** job fails, is cancelled, is missing or is skipped. The docs-only route is limited to pull requests whose tracked changes are all documentation paths; changing a workflow, source code, dependency, `.nvmrc` or another unknown path runs the full validation. Real release artifacts, registry publishing and supported database versions require separate verification. 
+The `CI gate` fails if change classification is broken or if a **selected** job fails, is cancelled, is missing or is skipped. The docs-only route is limited to pull requests whose tracked changes are all documentation paths; changing a workflow, source code, dependency, `.nvmrc` or another unknown path runs the full validation. Real release artifacts, registry publishing and supported database versions require separate verification.
