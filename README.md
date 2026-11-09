@@ -292,7 +292,6 @@ npm test             # Run tests
 
 See [`ROADMAP.md`](ROADMAP.md) for this project's direction and next milestones.
 
-For the ecosystem-wide view, see the [CUBRID Labs Ecosystem Roadmap](https://github.com/cubrid-labs/.github/blob/main/ROADMAP.md) and [Project Board](https://github.com/orgs/cubrid-labs/projects/2).
 
 ## Disclaimer
 
