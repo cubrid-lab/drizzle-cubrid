@@ -1,8 +1,8 @@
 # AGENTS.md
 
-## Organization-wide issue and PR standards
+## Issue and pull request guidance (drizzle-cubrid)
 
-See [the cubrid-lab policy](https://github.com/cubrid-lab/.github/blob/main/docs/ISSUE_PR_COMMIT_STANDARD.md). Every issue title needs a lowercase type-only prefix (`feat:`, `bug:`, `docs:`, `test:`, `chore:` or `ci:`) without a module scope; issues use `bug:`, not the commit type `fix:`. Issue bodies communicate the clear objective, evidence and verifiable acceptance. Triage checks duplicates, scope, priority and size; PRs/commits retain existing Conventional Commits rules, CI and actual validation evidence. Avoid personal comments and agent bookkeeping in issue text.
+See [the local contributor guide](CONTRIBUTING.md). Every issue title needs a lowercase type-only prefix (`feat:`, `bug:`, `docs:`, `test:`, `chore:` or `ci:`) without a module scope; issues use `bug:`, not the commit type `fix:`. Issue bodies communicate the clear objective, evidence and verifiable acceptance. Triage checks duplicates, scope, priority and size; PRs/commits retain existing Conventional Commits rules, CI and actual validation evidence. Avoid personal comments and agent bookkeeping in issue text.
 
 Project knowledge base for AI coding agents.
 
@@ -281,15 +281,13 @@ documentation, presentations, and other maintainer-facing writing.
   separate lookup table. Edit an existing editable comment to correct unclear
   wording rather than adding redundant follow-up comments.
 
-This is a shared writing convention, not a new CI check, reviewer approval,
+These are local writing expectations, not a new CI check, reviewer approval,
 or merge gate. Keep existing repository-specific technical and safety rules.
 
 ### Self-explanatory code comments, tests and review text
 
 Source comments, test names and test comments, examples, PR descriptions
-and review replies follow the organization rule in
-[Explanations in code, tests, reviews and agent-written text](https://github.com/cubrid-lab/.github/blob/main/docs/ISSUE_PR_COMMIT_STANDARD.md#6-explanations-in-code-tests-reviews-and-agent-written-text)
-(section 6 of the shared standard; it is linked here, not copied). In short:
+and review replies follow the local explanation guidance below:
 when a comment is needed, say what the code does, why it matters and which
 Drizzle or CUBRID constraint applies (for example, why a result row is
 reshaped before Drizzle maps it), then add an issue number only for
