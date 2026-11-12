@@ -144,6 +144,19 @@ scrutiny. No existing repository CI or release safeguards are waived.
 
 ---
 
+## Issue ownership and coding agents
+
+Before implementation, compare the latest code, all open issues and any PRs
+touching the same behavior. New issues start with `status: needs triage`; see
+the [triage procedure](AGENTS.md#issue-triage-lifecycle).
+
+An issue is claimed when it has an assignee or a linked open PR. Comment on the
+issue before starting so overlapping PRs are avoided. Outside contributors can
+work on unclaimed issues without a required AI review or GitHub Assignee
+access. Maintainer-operated autonomous agents must have authorization and must
+not take over claimed work. Merge readiness follows the
+[Pull Request Review and Merge Policy](#pull-request-review-and-merge-policy).
+
 ## Reporting Issues
 
 When reporting a bug, please include:
@@ -162,4 +175,4 @@ For feature requests, describe the use case and expected behavior.
 ## Questions?
 
 Open a [GitHub Discussion](https://github.com/cubrid-lab/drizzle-cubrid/discussions)
-or file an [issue](https://github.com/cubrid-labs/drizzle-cubrid/issues).
+or file an [issue](https://github.com/cubrid-lab/drizzle-cubrid/issues).

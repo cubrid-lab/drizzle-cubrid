@@ -249,16 +249,21 @@ cubrid-client: createClient({ host, port, database, user, password })
 
 ## Commit Convention
 
+Follow this repository's `CONTRIBUTING.md` and existing PR/title conventions.
+Describe the actual change in plain English; do not copy tool-specific credits.
+
+```text
+docs(agents): clarify contributor validation
+
+Describe what changed and why.
+
+Refs #N
 ```
-<type>: <description>
 
-<body>
-
-Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-opencode)
-Co-authored-by: Sisyphus <clio-agent@sisyphuslabs.ai>
-```
-
-Types: `feat`, `fix`, `docs`, `chore`, `ci`, `style`, `test`, `refactor`
+Use Conventional Commits types (`feat`, `fix`, `docs`, `chore`, `ci`, `style`,
+`test`, `refactor`). Keep authorship and actual coauthors accurate. A human
+contributor, Codex, Claude Code, OpenCode or another agent is never required to
+append a particular coauthor or AI-tool trailer.
 
 ## Release Process
 
