@@ -81,12 +81,17 @@ function toDriverTransactionOptions(
 	return { isolationLevel: config.isolationLevel as CubridTransactionOptions['isolationLevel'] };
 }
 
-/** Keeps `primary` as the thrown error and records `secondary` on it for diagnosis. */
-function attachRollbackError(primary: unknown, secondary: unknown): void {
-	if (primary instanceof Error && !('rollbackError' in primary)) {
-		Object.defineProperty(primary, 'rollbackError', {
-			value: secondary,
+/**
+ * Records `value` on the error being rethrown, for diagnosis, without replacing
+ * that error. Skips values that are not extensible errors and keeps a property
+ * that is already set.
+ */
+function attachDiagnostic(primary: unknown, key: 'rollbackError' | 'transactionError', value: unknown): void {
+	if (primary instanceof Error && Object.isExtensible(primary) && !(key in primary)) {
+		Object.defineProperty(primary, key, {
+			value,
 			configurable: true,
+			enumerable: true,
 			writable: true,
 		});
 	}
@@ -273,6 +278,11 @@ export class CubridSession<
 	): Promise<T> {
 		if (typeof this.client.transaction === 'function') {
 			const options = toDriverTransactionOptions(config);
+			if (options !== undefined && this.client.transaction.length < 2) {
+				// cubrid-client before 1.3.0 has transaction(callback) only and would
+				// silently run at the server's default isolation level.
+				throw new Error('isolationLevel requires cubrid-client 1.3.0 or later');
+			}
 			let callbackFailure: { error: unknown } | undefined;
 			const run = async (txClient: CubridQueryable): Promise<T> => {
 				// Every statement in the callback, including savepoints, runs on the
@@ -305,12 +315,15 @@ export class CubridSession<
 				// cubrid-client wraps a callback failure in its own TransactionError.
 				// Rethrow the callback's error itself, so Drizzle's rollback signal
 				// (TransactionRollbackError) and application errors reach the caller
-				// unchanged; a failed rollback is kept on it as `rollbackError`.
+				// as the same object. The driver's error (with its rollbackError,
+				// closeError and outcomeUnknown) is kept as `transactionError`, and a
+				// failed rollback also as `rollbackError`.
 				if (callbackFailure && driverError !== callbackFailure.error) {
 					const rollbackError = (driverError as { rollbackError?: unknown } | null)?.rollbackError;
 					if (rollbackError !== undefined) {
-						attachRollbackError(callbackFailure.error, rollbackError);
+						attachDiagnostic(callbackFailure.error, 'rollbackError', rollbackError);
 					}
+					attachDiagnostic(callbackFailure.error, 'transactionError', driverError);
 					throw callbackFailure.error;
 				}
 				throw driverError;
@@ -410,7 +423,7 @@ export class CubridTransaction<
 			try {
 				await tx.execute(sql.raw(`rollback to savepoint ${savepointName}`));
 			} catch (rollbackError) {
-				attachRollbackError(error, rollbackError);
+				attachDiagnostic(error, 'rollbackError', rollbackError);
 			}
 			throw error;
 		}

@@ -608,8 +608,9 @@ class OwnedTransactionClient extends MockClient {
 		try {
 			result = await callback(txClient);
 		} catch (cause) {
-			// Like cubrid-client: the callback failure becomes `cause` of a
-			// TransactionError, and a failed rollback is reported on it.
+			// Imitates only how cubrid-client reports a failed callback: a
+			// TransactionError whose `cause` is the callback's error, with
+			// `rollbackError` set when rolling back also failed.
 			const wrapped = new Error('Transaction failed.', { cause }) as Error & {
 				rollbackError?: Error;
 			};
@@ -809,6 +810,94 @@ describe('CubridSession with a driver that owns transaction connections', () => 
 			.catch((e: unknown) => e);
 
 		expect((error as Error & { rollbackError?: unknown }).rollbackError).toBe(inner);
+	});
+
+	it('refuses isolationLevel when the driver transaction() takes no options', async () => {
+		const client = new OwnedTransactionClient();
+		// cubrid-client before 1.3.0: transaction(callback) only.
+		client.transaction = async function <T>(callback: (tx: CubridQueryable) => Promise<T>) {
+			return callback(new MockClient());
+		};
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await expect(
+			session.transaction(async () => 'ok', { isolationLevel: 'serializable' }),
+		).rejects.toThrow(/1\.3\.0/);
+		await expect(session.transaction(async () => 'ok')).resolves.toBe('ok');
+	});
+
+	it('keeps the driver error on the callback error as transactionError', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		const failure = new Error('callback failed');
+
+		const error = (await session
+			.transaction(async () => {
+				throw failure;
+			})
+			.catch((e: unknown) => e)) as Error & { transactionError?: Error };
+
+		expect(error).toBe(failure);
+		expect(error.transactionError?.message).toBe('Transaction failed.');
+		expect(error.transactionError?.cause).toBe(failure);
+		expect(Object.keys(error)).toContain('transactionError');
+	});
+
+	it('leaves a frozen callback error as is', async () => {
+		const client = new OwnedTransactionClient();
+		client.rollbackError = new Error('rollback failed');
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		const failure = Object.freeze(new Error('frozen'));
+
+		await expect(
+			session.transaction(async () => {
+				throw failure;
+			}),
+		).rejects.toBe(failure);
+	});
+
+	it('rethrows a driver failure that happens before the callback runs', async () => {
+		const client = new OwnedTransactionClient();
+		const closed = new Error('Client is closed.');
+		client.transaction = async () => {
+			throw closed;
+		};
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await expect(session.transaction(async () => 'ok')).rejects.toBe(closed);
+	});
+
+	it('commits when the callback handles its own statement error', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		const result = await session.transaction(async (tx) => {
+			await tx.execute(sql`select 1`).then(() => {
+				throw new Error('handled');
+			}).catch(() => undefined);
+			return 'committed';
+		});
+
+		expect(result).toBe('committed');
+	});
+
+	it('sends ROLLBACK TO SAVEPOINT on the owned connection', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await session.transaction(async (tx) => {
+			await tx
+				.transaction(async () => {
+					throw new Error('inner');
+				})
+				.catch(() => undefined);
+		});
+
+		expect(client.queries).toEqual([]);
+		expect(client.txClients[0]?.queries.map((q) => q.sql.toLowerCase())).toEqual([
+			'savepoint sp1',
+			'rollback to savepoint sp1',
+		]);
 	});
 
 	it('propagates a commit failure from the driver', async () => {
