@@ -55,7 +55,7 @@
   description: "Inactive issue or pull request"
 
 - name: "status: needs triage"
-  color: "fbca04"
+  color: "5319e7"
   description: "New issue waiting for maintainer triage"
 
 - name: "priority: critical"
