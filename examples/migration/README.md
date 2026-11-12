@@ -1,71 +1,20 @@
-# CUBRID Migration Example (Drizzle Kit)
+# CUBRID schema migrations — not yet supported
 
-This directory shows a minimal migration setup for `drizzle-cubrid`.
+**Status: blocked / design in progress.** This repository does **not** currently provide a verified CUBRID-native schema migration generator or migrator. Do not use MySQL, PostgreSQL, SQLite, or any other database dialect as a substitute.
 
-## 1) Install
+## What was removed
 
-```bash
-npm install drizzle-cubrid drizzle-orm cubrid-client
-npm install -D drizzle-kit
-```
+The former `drizzle.config.ts` selected `dialect: 'mysql'` and suggested running `drizzle-kit generate` and `drizzle-kit migrate` against a CUBRID broker. That setup was never verified as a CUBRID migration path, could produce non-CUBRID DDL, and could attempt a foreign wire protocol. The config and its associated runnable schema example were removed rather than leaving an executable unsafe recommendation.
 
-## 2) Configure Drizzle Kit
+No replacement `drizzle-kit` configuration, generation command, `migrate()` API or SQL migration runner is shipped by this change. Do not reinterpret the absence of a config as a migration implementation.
 
-- `drizzle.config.ts` points to `./src/schema.ts`
-- `dialect` uses `mysql` because CUBRID is MySQL-compatible for DDL generation
-- connection values come from `CUBRID_*` environment variables
+## Native CUBRID direction
 
-Example environment values:
+- [CUBRID-specific migration design and verification](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)
+- [CUBRID-only implementation and dependency gate](https://github.com/cubrid-lab/drizzle-cubrid/issues/192)
+- [Real CUBRID verification](https://github.com/cubrid-lab/drizzle-cubrid/issues/164)
+- [Native architecture overview](https://github.com/cubrid-lab/drizzle-cubrid/issues/155)
 
-```bash
-export CUBRID_HOST=localhost
-export CUBRID_PORT=33000
-export CUBRID_USER=dba
-export CUBRID_PASSWORD=
-export CUBRID_DATABASE=demodb
-```
+The future migration implementation must generate and apply **CUBRID-native SQL** from verified CUBRID metadata and semantics, with versioned journals, idempotency, failure recovery and real-server tests. No SQL generated for other database engines and no cross-dialect transpilation or fallback are permitted.
 
-## 3) Generate SQL migration files
-
-```bash
-npx drizzle-kit generate --config=./examples/migration/drizzle.config.ts
-```
-
-Generated files are written to `./examples/migration/drizzle`.
-
-## 4) Apply migrations
-
-Use either of these approaches:
-
-```bash
-npx drizzle-kit migrate --config=./examples/migration/drizzle.config.ts
-```
-
-Or run generated SQL manually through your CUBRID SQL client.
-
-## 5) Use runtime client
-
-After schema migration, use the normal `drizzle-cubrid` runtime:
-
-```ts
-import { createClient } from 'cubrid-client';
-import { drizzle } from 'drizzle-cubrid';
-
-const client = createClient({
-	host: process.env.CUBRID_HOST ?? 'localhost',
-	port: Number(process.env.CUBRID_PORT ?? 33000),
-	database: process.env.CUBRID_DATABASE ?? 'demodb',
-	user: process.env.CUBRID_USER ?? 'dba',
-	password: process.env.CUBRID_PASSWORD ?? '',
-});
-
-const db = drizzle(client);
-```
-
-## CUBRID migration limitations
-
-- DDL auto-commits in CUBRID, so migrations are not fully transactional
-- `RENAME COLUMN` is unavailable in older CUBRID versions
-- `ALTER TYPE` is limited for several type conversions
-
-Prefer additive changes (`ADD COLUMN`, backfill, then drop old columns) when changing production schemas.
+Until such a tool exists and has passed the real CUBRID test gate, prepare schema changes using an independently verified **CUBRID-native** DDL procedure and your organization's review, backup and rollback requirements. This is a manual operational alternative, **not** a supported adapter migration API.
