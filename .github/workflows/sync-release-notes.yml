@@ -11,12 +11,18 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-notes-sync
+  cancel-in-progress: false
+
 jobs:
   sync:
+    # Only reviewed notes on main may overwrite public Release descriptions.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Validate this repository's release descriptions
@@ -46,9 +52,13 @@ jobs:
           set -euo pipefail
           for file in docs/releases/v*.md; do
             tag=$(basename "$file" .md)
-            if ! gh release view "$tag" --repo "$GH_REPO" > /dev/null 2>&1; then
-              echo "::notice::No existing GitHub Release for $tag; no new release created."
-              continue
+            if ! err=$(gh release view "$tag" --repo "$GH_REPO" 2>&1 >/dev/null); then
+              if [[ "$err" == *"release not found"* ]]; then
+                echo "::notice::No existing GitHub Release for $tag; no new release created."
+                continue
+              fi
+              echo "::error::Could not read GitHub Release $tag: $err"
+              exit 1
             fi
             gh release edit "$tag" --repo "$GH_REPO" --title "drizzle-cubrid $tag" --notes-file "$file"
             echo "Updated GitHub Release $tag"
