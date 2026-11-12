@@ -8,6 +8,8 @@
 
 **Drizzle ORM dialect for the CUBRID database** — TypeScript-first, type-safe schema definition and query builder for Node.js.
 
+> **Community adapter:** `drizzle-cubrid` is independently maintained by CUBRID Lab. It is not an official `drizzle-orm` dialect or a built-in Drizzle Kit integration. CUBRID-native schema migration support is under design; do not assume that Drizzle Kit's MySQL dialect is compatible with CUBRID. See [migration design tracking](https://github.com/cubrid-lab/drizzle-cubrid/issues/163) and [native dialect design](https://github.com/cubrid-lab/drizzle-cubrid/issues/155).
+
 [🇰🇷 한국어](docs/README.ko.md) · [🇺🇸 English](README.md)
 
 <!-- BADGES:START -->
