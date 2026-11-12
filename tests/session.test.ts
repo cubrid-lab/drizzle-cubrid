@@ -756,6 +756,61 @@ describe('CubridSession with a driver that owns transaction connections', () => 
 		expect((error as Error & { rollbackError?: unknown }).rollbackError).toBe(client.rollbackError);
 	});
 
+	it('opens a default transaction when the config sets no isolation level', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		// Drizzle's type requires isolationLevel, but JavaScript callers can omit it.
+		await session.transaction(async () => 'ok', {} as MySqlTransactionConfig);
+
+		expect(client.transactionOptions).toEqual([undefined]);
+	});
+
+	it('rethrows the callback error as is when the driver does not wrap it', async () => {
+		const client = new OwnedTransactionClient();
+		client.transaction = async <T>(callback: (tx: CubridQueryable) => Promise<T>): Promise<T> =>
+			callback(new MockClient());
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		const failure = new Error('callback failed');
+
+		const error = await session
+			.transaction(async () => {
+				throw failure;
+			})
+			.catch((e: unknown) => e);
+
+		expect(error).toBe(failure);
+		expect(error).not.toHaveProperty('rollbackError');
+	});
+
+	it('rethrows a non-Error callback value without touching it', async () => {
+		const client = new OwnedTransactionClient();
+		client.rollbackError = new Error('rollback failed');
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await expect(
+			session.transaction(async () => {
+				throw 'plain string';
+			}),
+		).rejects.toBe('plain string');
+	});
+
+	it('keeps an existing rollbackError on the callback error', async () => {
+		const client = new OwnedTransactionClient();
+		client.rollbackError = new Error('outer rollback failed');
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		const inner = new Error('inner rollback failed');
+		const failure = Object.assign(new Error('callback failed'), { rollbackError: inner });
+
+		const error = await session
+			.transaction(async () => {
+				throw failure;
+			})
+			.catch((e: unknown) => e);
+
+		expect((error as Error & { rollbackError?: unknown }).rollbackError).toBe(inner);
+	});
+
 	it('propagates a commit failure from the driver', async () => {
 		const client = new OwnedTransactionClient();
 		client.commitError = new Error('commit failed');
