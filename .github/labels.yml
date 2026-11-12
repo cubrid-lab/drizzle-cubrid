@@ -53,3 +53,43 @@
 - name: "stale"
   color: "ededed"
   description: "Inactive issue or pull request"
+
+- name: "status: needs triage"
+  color: "fbca04"
+  description: "New issue waiting for maintainer triage"
+
+- name: "priority: critical"
+  color: "b60205"
+  description: "Must be fixed before any other work"
+
+- name: "priority: high"
+  color: "d93f0b"
+  description: "Important; schedule next"
+
+- name: "priority: medium"
+  color: "fbca04"
+  description: "Normal priority"
+
+- name: "priority: low"
+  color: "0e8a16"
+  description: "Nice to have"
+
+- name: "size: XS"
+  color: "c2e0c6"
+  description: "Trivial change"
+
+- name: "size: S"
+  color: "c2e0c6"
+  description: "Small change"
+
+- name: "size: M"
+  color: "bfd4f2"
+  description: "Medium change"
+
+- name: "size: L"
+  color: "d4c5f9"
+  description: "Large change"
+
+- name: "size: XL"
+  color: "f9d0c4"
+  description: "Very large change; consider splitting"

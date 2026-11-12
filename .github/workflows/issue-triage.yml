@@ -5,11 +5,11 @@ on:
     types: [opened]
 
 permissions:
-  contents: read
   issues: write
 
 jobs:
   intake:
+    if: github.repository == 'cubrid-lab/drizzle-cubrid'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

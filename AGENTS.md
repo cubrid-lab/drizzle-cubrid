@@ -336,8 +336,8 @@ it explicitly because their own events may not retrigger the workflow.
 2. Inspect **all currently open issues in this repository** (all pages) and
    compare urgency, effect on users/data, existing priorities, active work and
    unresolved prerequisites rather than issue age.
-3. Select exactly one `priority: critical/high/medium/low` and one original
-   `size: XS/S/M/L/XL`, based on effort; split very large independent work
+3. Select exactly one `priority: critical/high/medium/low` and one
+   `size: XS/S/M/L/XL` (all defined in `.github/labels.yml`), based on effort; split very large independent work
    while preserving issue ownership and accepted criteria.
 4. Re-fetch the saved issue, check type, priority, size and duplicate decision
    against the actual labels, then remove `status: needs triage` only when
