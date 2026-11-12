@@ -94,6 +94,21 @@ npm run build
 
 ---
 
+## Pull Request Review and Merge Policy
+
+The same contributor process applies to human-written and AI-assisted
+changes (OpenCode, Codex, Claude Code, ChatGPT, Copilot, etc.).
+Use the repository's GitHub Actions CI checks for authoritative final
+validation, with local checks encouraged but not separately required.
+Review the implementation, tests, security, compatibility and documentation.
+Oracle, Copilot and other AI review output is optional advisory context.
+The responsible maintainer makes the final merge decision after required
+checks and actionable findings are resolved or documented. Security,
+CI permissions and release/publishing changes get independent maintainer
+scrutiny. No existing repository CI or release safeguards are waived.
+
+---
+
 ## Pull Request Guidelines
 
 ### Before Submitting
@@ -105,7 +120,7 @@ npm run build
 
 2. **Write tests** for any new functionality.
 
-3. **Run the full test suite** and ensure all tests pass:
+3. **Run the test suite locally** (recommended; the final-head GitHub CI is authoritative):
    ```bash
    npm test
    npm run typecheck
@@ -123,8 +138,8 @@ npm run build
 
 ### Review Process
 
-- All PRs require at least one review before merge.
-- CI must pass (lint, type check, tests).
+- See [Pull Request Review and Merge Policy](#pull-request-review-and-merge-policy).
+- Required CI (type check, build, tests) must pass at the final head.
 - Maintain backward compatibility unless explicitly approved.
 
 ---
