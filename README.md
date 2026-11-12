@@ -44,6 +44,8 @@ flowchart TD
     D --> E[CUBRID Server]
 ```
 
+**Node support policy:** The planned `drizzle-cubrid@1.x` line will support **Node 18 throughout all 1.x releases**, matching `cubrid-client@1.x`'s runtime generation without synchronizing patch/minor versions. Node 22 is used for modern development tools only. Raising the runtime minimum is a possible **2.0 MAJOR** change requiring review, never a 1.x tooling fix. See [ADR 0006](docs/adr/0006-node-18-support-through-1x.md); the packed adapter and its tested peer dependencies require independent Node 18 consumer checks.
+
 ## Installation
 
 ```bash
@@ -271,6 +273,11 @@ try {
 | [Migration Example](examples/migration/README.md) | Drizzle Kit config, schema, and CUBRID migration notes |
 
 ## Development
+
+### Reproducible contributor setup
+
+Use the [development setup guide](docs/DEVELOPMENT_SETUP.md) for the actual language-specific toolchain, clean dependency install, offline tests, **real CUBRID integration readiness** and known setup blockers. The [ADR index](docs/adr/README.md) records proposed release, architecture, TDD and setup decisions. Documentation alone is not a claim that those tests have run or that an unverified runtime/database version is supported.
+
 
 ```bash
 git clone https://github.com/cubrid-labs/drizzle-cubrid.git

@@ -95,7 +95,7 @@ type QueryResultRow = Record<string, unknown>;
 ### Setup
 
 ```bash
-git clone https://github.com/cubrid-labs/drizzle-cubrid.git
+git clone https://github.com/cubrid-lab/drizzle-cubrid.git
 cd drizzle-cubrid
 npm install
 ```
@@ -109,18 +109,12 @@ npm run build         # Build ESM + CJS via tsup
 npm run lint          # ESLint check
 npm run format        # ESLint auto-fix
 npm run typecheck     # tsc --noEmit
-npm run integration   # Integration tests (requires Docker CUBRID)
+npm run integration   # Defined in package.json, but its target test file is not checked in; do not claim this passes
 ```
 
-### Docker (Integration Tests)
+### Real CUBRID integration tests
 
-```bash
-docker compose up -d                          # Default CUBRID 11.2
-CUBRID_VERSION=11.4 docker compose up -d      # Specific version
-export CUBRID_TEST_URL="cubrid://dba@localhost:33000/testdb"
-npm run integration
-docker compose down -v                        # Cleanup
-```
+This repository currently has **no checked-in Docker Compose manifest or `tests/integration.test.ts`**, despite having an `npm run integration` script. Do not run non-existent setup commands or represent unit tests as live database proof. The real CUBRID harness, explicit server version and non-empty integration cases are tracked in [#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164). Use an approved disposable test environment when that implementation exists.
 
 ## Code Conventions
 
@@ -132,7 +126,7 @@ docker compose down -v                        # Cleanup
 - **Target**: ES2022, Node.js 18+
 - **Imports**: ESM-first (`import/export`)
 - **Type hints**: Full TypeScript strict mode, no `any` escapes
-- **super()**: Always `super()`, never `super(ClassName, self)`
+- **Class inheritance**: Use TypeScript/JavaScript `super()` syntax and the actual Drizzle extension interface.
 
 ### Naming
 
@@ -143,10 +137,10 @@ docker compose down -v                        # Cleanup
 ### Patterns to Follow
 
 - All Drizzle entity classes must have `static readonly [entityKind]: string = 'ClassName'`
-- Session methods follow the `MySqlSession` abstract contract exactly
-- PreparedQuery follows the `MySqlPreparedQuery` abstract contract
+- **Current implementation only:** `src/session.ts` subclasses MySQL session types; this is transitional and **not** the target CUBRID API contract. The proposed native dialect follows verified Drizzle extension points and real CUBRID SQL behavior.
+- **Current implementation only:** prepared queries use MySQL-derived types. Do not treat them as native CUBRID semantics; verify independent prepared-binding behavior before replacing these adapters.
 - Use `fillPlaceholders()` from `drizzle-orm/sql` for parameter mapping
-- Use `mapResultRow()` from `drizzle-orm/utils` for result mapping
+- Use `mapResultRow()` only where the current row/field shape is proven compatible; native CUBRID duplicate-column and value mapping require separate verification.
 - HKT types: `CubridQueryResultHKT`, `CubridPreparedQueryHKT` — required for type inference
 
 ### Anti-Patterns (Never Do)
@@ -157,16 +151,39 @@ docker compose down -v                        # Cleanup
 - No empty `catch` blocks
 - No `console.log` in production code (use Drizzle's Logger interface)
 
-## Development Workflow (cubrid-labs org standard)
 
-All non-trivial work across cubrid-labs repositories MUST follow this 4-phase cycle:
 
-1. **Oracle Design Review** — Consult Oracle before implementation to validate architecture, API surface, and approach. Raise concerns early.
-2. **Implementation** — Build the feature/fix with tests. Follow existing codebase patterns.
-3. **Documentation Update** — Update ALL affected docs (README, CHANGELOG, ROADMAP, API docs, SUPPORT_MATRIX, PRD, etc.) in the same PR or as an immediate follow-up. Code without doc updates is incomplete.
-4. **Oracle Post-Implementation Review** — Consult Oracle to review the completed work for correctness, edge cases, and consistency before merging.
 
-Skipping any phase requires explicit justification. Trivial changes (typos, single-line fixes) may skip phases 1 and 4.
+## Node.js 18 compatibility throughout stable 1.x
+
+The eventual `drizzle-cubrid@1.0.0` and **every 1.x release** must retain `engines.node >=18`, coordinated with the independent Node 18 guarantee of `cubrid-client@1.x`. [ADR 0006](docs/adr/0006-node-18-support-through-1x.md) is the source for this compatibility decision. Build, lint and test on modern Node where toolchain dependencies require it, but run **Node 18 smoke tests of packed ESM/CJS artifacts with verified peer versions**. The minimum Node floor may be reconsidered **no earlier than a reviewed 2.0 MAJOR**. Do not implement #100 by raising `engines.node` in 1.x or by skipping the Node 18 consumer lane.
+
+## Development setup before design and TDD implementation
+
+Use the repository-specific [development setup guide](docs/DEVELOPMENT_SETUP.md) and [setup ADR 0005](docs/adr/0005-development-setup.md) (**Proposed**) before changing this repository's public behavior or tooling. Verify the **actual** manifest, supported developer toolchain, dependency resolution, read-only offline checks, and availability/absence of real CUBRID integration separately. Do not invent a nonexistent integration harness, lint command, published package, or dependency path. A successful unit build is not a successful real-database test or a published package. Record observed setup blockers as issues; do not silently change the project's public compatibility contract, weaken CI, or modify release credentials to make onboarding appear green.
+
+## Test-first implementation after architecture review
+
+Before implementing a CUBRID behavior change, check the approved API/SQL/protocol contract and [TDD ADR 0004](docs/adr/0004-test-first-development.md) (**currently Proposed**). Follow **Red → Green → Refactor** in focused slices: execute a deterministic failure for the intended reason first, implement the smallest fix, rerun the case and relevant regressions, then refactor. Explain the initial failure and actual checks in the PR without inventing command output. A final PR must pass its required CI; never keep a deliberately failing regression as proof of Red. Confirm database-dependent behavior through real CUBRID tests and the release candidate matrix; mocks alone cannot certify it. Upstream feasibility prototypes and docs-only changes are exempt from ritual Red steps but must show their own accurate evidence. Release policy and architecture decisions must be approved before classifying design as completed.
+
+## Architecture decisions and release order
+
+Read the [repository ADR index](docs/adr/README.md) before proposing changes to public behavior, release contracts, this repository's architecture, transaction ownership or public API. ADR 0001 records release governance; ADR 0002 records this repository's correctness-evidence requirements; architecture ADR 0003 remains **Proposed** in its own design PR. Do not treat a Proposed ADR as approved. Adopt the release policy before accepting the architecture ADR; require actual tested evidence before claiming implementation or release readiness. Use the [ADR template](docs/adr/TEMPLATE.md) for material new decisions, not for every trivial change.
+
+## CUBRID correctness lessons and native regression review
+
+Before changing Drizzle query/schema generation, type codecs, transaction/result mapping, npm peer compatibility or releases, review [the repository-specific engineering invariants](docs/ENGINEERING_INVARIANTS.md). These rules are grounded in the TypeScript Drizzle adapter and its own ORM/driver integration contract, and verifiable CUBRID behavior. Distinguish mock tests, live CUBRID execution and independent differential evidence; never claim a check ran without its actual CI result. For an unrelated docs-only change, the checklist is advisory and does not mandate unnecessary database jobs. Existing repository review and merge requirements remain authoritative.
+
+## Development Workflow (drizzle-cubrid)
+
+Apply this repository's own Drizzle/TypeScript/CUBRID contracts. Do not inherit a different repository's architecture or mandate any named AI reviewer.
+
+1. **Scope and design:** Identify this adapter's affected public API, Drizzle extension contract, real CUBRID SQL/driver behavior, compatibility requirements, and any proposed ADR. Mark proposed decisions as proposed.
+2. **Test-first implementation:** For behavioral changes, reproduce an observed RED case, make the minimal GREEN change, then refactor and preserve regression tests. Explain why TDD is not applicable for pure docs updates.
+3. **Verification and documentation:** Record actually executed typecheck, build, tests/coverage and, where behavior requires, real CUBRID integration and Node 18 packed-consumer evidence. Update only documentation affected by the change and do not claim missing tests passed.
+4. **Review and merge:** Address review findings and check final-head CI, repository protections and relevant maintainer review requirements. Independent maintainer review is necessary for high-risk security, release/publishing or protection changes where required. Optional Oracle/Copilot/agent reviews are **advisory**, never substitutes for human judgment or automatic approval.
+
+There are no mandatory AI-specific pre/post review calls. Trivial docs edits do not require invented integration results or unrelated CI jobs.
 
 ## Test Structure
 
@@ -178,14 +195,14 @@ flowchart TD
     A --> E[types.test.ts - SET, MULTISET, SEQUENCE, MONETARY]
     A --> F[query.test.ts - SELECT, INSERT, UPDATE, DELETE]
     A --> G[table.test.ts - cubridTable builder]
-    A --> H[integration.test.ts - Live DB tests]
+    A --> H[Future real-CUBRID integration tests - not yet checked in]
 ```
 
 ### Testing Approach
 
 - **Unit tests** — mock `cubrid-client` with fake implementations
 - **Query tests** — use Drizzle's `drizzle.mock()` or equivalent for SQL generation verification
-- **Integration tests** — real CUBRID via Docker, guarded by env var
+- **Integration tests** — **not implemented in this repository yet**: the script refers to a missing test file, and no Docker Compose setup is checked in. See #164. Do not claim real database verification until an actual nonempty harness passes.
 
 ### Coverage
 
@@ -266,7 +283,7 @@ documentation, presentations, and other maintainer-facing writing.
   Do not substitute `P1`/`P2` for repository priority labels.
 - When an internal identifier is necessary for accurate cross-reference,
   **describe the subject first**, then add the identifier in context:
-  `pycubrid introduction (0:20; storyboard shot P1)`. Use descriptive
+  `package introduction (0:20; storyboard shot 1)`. Use descriptive
   names and timestamps, section titles, or paths wherever practical.
 - Use natural, actionable wording. Prefer `Listen to the full narration and
   verify the pronunciation of each project name` to `Maintainer full listen`.
@@ -300,3 +317,9 @@ and is not changed here. This rule is a writing convention checked during
 normal review by any contributor or tool, not a CI gate or required
 reviewer. Do not rename test names, fixtures or other machine-readable
 identifiers only to improve prose.
+
+## Repository ownership in issues, PRs, and design documents
+
+This repository owns **the TypeScript Drizzle CUBRID dialect and ORM adapter**. Author issue and PR titles, summaries, ADR context, acceptance criteria, and release decisions from **drizzle-cubrid**'s actual code, public contract and evidence. For changes affecting Drizzle extension APIs, native CUBRID SQL/DDL, typed column mappings, driver result contracts, npm peer ranges, and real CUBRID ORM tests, cite local files/tests, expected behavior and actual verification. Do not use another repository's failures, ADRs, issue tracker or language-specific tooling as a governing authority or as the motivation in a title. Do not copy issue/PR templates from an unrelated package. The cubrid-client npm package is a real dependency; cite its verified public API and tested peer range, not its internal architecture or independent release schedule.
+
+Cross-repository links are appropriate only for a **verified dependency/API compatibility boundary**, independently executed semantic comparison (such as official JDBC), or an explicitly identified coordination requirement. Label such references as context, not as this repository's acceptance proof, and keep tracking and release decisions local. During PR review, check issue title/body, PR title/body, ADRs, AGENTS/CONTRIBUTING, and user-facing release notes for misplaced external project references before merge.
