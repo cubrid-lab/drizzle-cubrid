@@ -323,3 +323,25 @@ identifiers only to improve prose.
 This repository owns **the TypeScript Drizzle CUBRID dialect and ORM adapter**. Author issue and PR titles, summaries, ADR context, acceptance criteria, and release decisions from **drizzle-cubrid**'s actual code, public contract and evidence. For changes affecting Drizzle extension APIs, native CUBRID SQL/DDL, typed column mappings, driver result contracts, npm peer ranges, and real CUBRID ORM tests, cite local files/tests, expected behavior and actual verification. Do not use another repository's failures, ADRs, issue tracker or language-specific tooling as a governing authority or as the motivation in a title. Do not copy issue/PR templates from an unrelated package. The cubrid-client npm package is a real dependency; cite its verified public API and tested peer range, not its internal architecture or independent release schedule.
 
 Cross-repository links are appropriate only for a **verified dependency/API compatibility boundary**, independently executed semantic comparison (such as official JDBC), or an explicitly identified coordination requirement. Label such references as context, not as this repository's acceptance proof, and keep tracking and release decisions local. During PR review, check issue title/body, PR title/body, ADRs, AGENTS/CONTRIBUTING, and user-facing release notes for misplaced external project references before merge.
+
+## Issue triage lifecycle
+
+Every new issue in this repository starts with `status: needs triage`.
+Issue forms mark it at creation; the `issues: opened` workflow covers other
+human submissions. Agents creating issues using `GITHUB_TOKEN` must include
+it explicitly because their own events may not retrigger the workflow.
+
+1. Verify observed problem and evidence, unknowns, duplicates and open PRs,
+   local ownership/type, scope/non-goals, acceptance and dependencies.
+2. Inspect **all currently open issues in this repository** (all pages) and
+   compare urgency, effect on users/data, existing priorities, active work and
+   unresolved prerequisites rather than issue age.
+3. Select exactly one `priority: critical/high/medium/low` and one
+   `size: XS/S/M/L/XL` (all defined in `.github/labels.yml`), based on effort; split very large independent work
+   while preserving issue ownership and accepted criteria.
+4. Re-fetch the saved issue, check type, priority, size and duplicate decision
+   against the actual labels, then remove `status: needs triage` only when
+   this manual review is complete. Keep it for unresolved questions.
+
+Do not automatically assign a priority or mark triage complete. Existing
+code, tests, security and release safeguards are unaffected.
