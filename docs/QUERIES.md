@@ -266,6 +266,29 @@ await db.transaction(async (tx) => {
 });
 ```
 
+Each `db.transaction()` runs on its own connection, taken through
+`cubrid-client`'s `transaction(callback, options)` on a `CubridClient` or a
+`CubridPool`. Queries made through `db` outside the callback, including from
+concurrent requests, never join, commit or roll back that transaction. The
+error the callback throws (including the `TransactionRollbackError` from
+`tx.rollback()`) is rethrown unchanged; if rolling back also failed, that
+failure is attached as `error.rollbackError`.
+
+`isolationLevel` accepts `"read committed"`, `"repeatable read"` and
+`"serializable"`. CUBRID has no `"read uncommitted"` level, read-only mode or
+consistent-snapshot start, so `accessMode`, `withConsistentSnapshot` and
+`"read uncommitted"` are rejected before the transaction starts:
+
+```ts
+await db.transaction(async (tx) => {
+  // ...
+}, { isolationLevel: "serializable" });
+```
+
+A custom client object without `transaction()` falls back to `BEGIN`/`COMMIT`
+on its single connection, which is only safe if nothing else uses that
+connection at the same time.
+
 ### Transaction with Rollback
 
 ```ts
