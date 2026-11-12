@@ -41,8 +41,14 @@
   ],
   "author": "Gyeongjun Paik <paikend@gmail.com>",
   "contributors": [
-    { "name": "Gyeongjun Paik", "email": "paikend@gmail.com" },
-    { "name": "Yeongseon Choe", "email": "yeongseon.choe@gmail.com" }
+    {
+      "name": "Gyeongjun Paik",
+      "email": "paikend@gmail.com"
+    },
+    {
+      "name": "Yeongseon Choe",
+      "email": "yeongseon.choe@gmail.com"
+    }
   ],
   "license": "MIT",
   "repository": {
@@ -54,19 +60,19 @@
   },
   "homepage": "https://github.com/cubrid-lab/drizzle-cubrid#readme",
   "peerDependencies": {
-    "drizzle-orm": ">=0.38.0",
-    "cubrid-client": ">=0.1.0"
+    "cubrid-client": ">=0.1.0",
+    "drizzle-orm": ">=0.38.0"
   },
   "devDependencies": {
-    "cubrid-client": "^1.0.0",
     "@typescript-eslint/eslint-plugin": "^8.61.0",
     "@typescript-eslint/parser": "^8.0.0",
-    "@vitest/coverage-v8": "^4.0.0",
+    "@vitest/coverage-v8": "^5.1.0",
+    "cubrid-client": "^1.0.0",
     "drizzle-orm": "^0.45.1",
     "eslint": "^10.0.3",
     "tsup": "^8.0.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.0"
+    "vitest": "^5.1.0"
   },
   "engines": {
     "node": ">=18.0.0"
