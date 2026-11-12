@@ -270,7 +270,7 @@ try {
 | [Schema Guide](docs/SCHEMA.md) | Column types, CUBRID types, relations, custom types |
 | [Queries Guide](docs/QUERIES.md) | SELECT, INSERT, UPDATE, DELETE, joins, aggregations, raw SQL |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common errors, TypeScript issues, performance tips |
-| [Migration Example](examples/migration/README.md) | Drizzle Kit config, schema, and CUBRID migration notes |
+| [Schema migration status](examples/migration/README.md) | Native CUBRID migration is not yet supported; no other database dialect fallback |
 
 ## Development
 
