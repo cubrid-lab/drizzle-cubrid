@@ -27,11 +27,74 @@ type QueryRow = Record<string, unknown>;
 
 export type CubridRawQueryResult = QueryRow[];
 
+/** Transaction settings `cubrid-client` accepts in `transaction(callback, options)`. */
+export interface CubridTransactionOptions {
+	isolationLevel?: 'read committed' | 'repeatable read' | 'serializable';
+}
+
 export interface CubridQueryable {
 	query<T extends QueryRow = QueryRow>(sql: string, params?: readonly unknown[]): Promise<T[]>;
+	/**
+	 * Runs `callback` on a connection the driver owns for the whole transaction,
+	 * then commits, or rolls back if the callback throws. `CubridClient` and
+	 * `CubridPool` from `cubrid-client` provide it. When present, Drizzle
+	 * transactions use it, so unrelated statements on the shared client cannot
+	 * join or end the transaction.
+	 */
+	transaction?<T>(
+		callback: (tx: CubridQueryable) => Promise<T>,
+		options?: CubridTransactionOptions,
+	): Promise<T>;
 	beginTransaction?(): Promise<void>;
 	commit?(): Promise<void>;
 	rollback?(): Promise<void>;
+}
+
+const SUPPORTED_ISOLATION_LEVELS = new Set(['read committed', 'repeatable read', 'serializable']);
+
+/**
+ * Turns Drizzle's MySQL-shaped transaction config into the options
+ * `cubrid-client` understands. CUBRID has no READ UNCOMMITTED level, no
+ * read-only transaction mode and no consistent-snapshot start, so those are
+ * refused before a connection is taken rather than silently ignored.
+ */
+function toDriverTransactionOptions(
+	config: MySqlTransactionConfig | undefined,
+): CubridTransactionOptions | undefined {
+	if (!config) {
+		return undefined;
+	}
+	if (config.accessMode !== undefined) {
+		throw new Error(`CUBRID transactions do not support accessMode '${config.accessMode}'`);
+	}
+	if (config.withConsistentSnapshot) {
+		throw new Error('CUBRID transactions do not support withConsistentSnapshot');
+	}
+	if (config.isolationLevel === undefined) {
+		return undefined;
+	}
+	if (!SUPPORTED_ISOLATION_LEVELS.has(config.isolationLevel)) {
+		throw new Error(
+			`CUBRID does not support isolation level '${config.isolationLevel}'; use 'read committed', 'repeatable read' or 'serializable'`,
+		);
+	}
+	return { isolationLevel: config.isolationLevel as CubridTransactionOptions['isolationLevel'] };
+}
+
+/**
+ * Records `value` on the error being rethrown, for diagnosis, without replacing
+ * that error. Skips values that are not extensible errors and keeps a property
+ * that is already set.
+ */
+function attachDiagnostic(primary: unknown, key: 'rollbackError' | 'transactionError', value: unknown): void {
+	if (primary instanceof Error && Object.isExtensible(primary) && !(key in primary)) {
+		Object.defineProperty(primary, key, {
+			value,
+			configurable: true,
+			enumerable: true,
+			writable: true,
+		});
+	}
 }
 
 interface CubridSessionOptions {
@@ -213,6 +276,66 @@ export class CubridSession<
 		) => Promise<T>,
 		config?: MySqlTransactionConfig,
 	): Promise<T> {
+		if (typeof this.client.transaction === 'function') {
+			const options = toDriverTransactionOptions(config);
+			if (options !== undefined && this.client.transaction.length < 2) {
+				// cubrid-client before 1.3.0 has transaction(callback) only and would
+				// silently run at the server's default isolation level. A wrapper
+				// declared as `(...args)` also has length 0 and is refused here.
+				throw new Error(
+					"isolationLevel needs a client whose transaction() declares an options parameter (cubrid-client 1.3.0 or later)",
+				);
+			}
+			let callbackFailure: { error: unknown } | undefined;
+			const run = async (txClient: CubridQueryable): Promise<T> => {
+				// Every statement in the callback, including savepoints, runs on the
+				// connection the driver reserved for this transaction.
+				const txSession = new CubridSession<TFullSchema, TSchema>(
+					txClient,
+					this.dialect,
+					this.schema,
+					this.options,
+				);
+				const tx = new CubridTransaction<TFullSchema, TSchema>(
+					this.dialect,
+					txSession as unknown as MySqlSessionBase,
+					this.schema,
+					0,
+					this.mode,
+				);
+				try {
+					return await transaction(tx);
+				} catch (error) {
+					callbackFailure = { error };
+					throw error;
+				}
+			};
+			try {
+				return options === undefined
+					? await this.client.transaction(run)
+					: await this.client.transaction(run, options);
+			} catch (driverError) {
+				// cubrid-client wraps a callback failure in its own TransactionError.
+				// Rethrow the callback's error itself, so Drizzle's rollback signal
+				// (TransactionRollbackError) and application errors reach the caller
+				// as the same object. The driver's error (with its rollbackError,
+				// closeError and outcomeUnknown) is kept as `transactionError`, and a
+				// failed rollback also as `rollbackError`.
+				if (callbackFailure && driverError !== callbackFailure.error) {
+					const rollbackError = (driverError as { rollbackError?: unknown } | null)?.rollbackError;
+					if (rollbackError !== undefined) {
+						attachDiagnostic(callbackFailure.error, 'rollbackError', rollbackError);
+					}
+					attachDiagnostic(callbackFailure.error, 'transactionError', driverError);
+					throw callbackFailure.error;
+				}
+				throw driverError;
+			}
+		}
+
+		// Fallback for custom queryables without transaction(): BEGIN/COMMIT on the
+		// same connection. Only safe when nothing else uses that connection at the
+		// same time.
 		const tx = new CubridTransaction<TFullSchema, TSchema>(
 			this.dialect,
 			this as unknown as MySqlSessionBase,
@@ -300,7 +423,11 @@ export class CubridTransaction<
 		try {
 			return await transaction(tx);
 		} catch (error) {
-			await tx.execute(sql.raw(`rollback to savepoint ${savepointName}`));
+			try {
+				await tx.execute(sql.raw(`rollback to savepoint ${savepointName}`));
+			} catch (rollbackError) {
+				attachDiagnostic(error, 'rollbackError', rollbackError);
+			}
 			throw error;
 		}
 	}

@@ -9,6 +9,7 @@ import type {
 } from 'drizzle-orm/mysql-core/session';
 import type { SelectedFieldsOrdered } from 'drizzle-orm/mysql-core/query-builders/select.types';
 import { sql } from 'drizzle-orm/sql/sql';
+import { TransactionRollbackError } from 'drizzle-orm/errors';
 
 const hoistedMocks = vi.hoisted(() => {
 	const mapResultRowMock = vi.fn(
@@ -584,5 +585,359 @@ describe('CubridTransaction', () => {
 
 	it('has CubridTransaction entity kind', () => {
 		expect(CubridTransaction[entityKind]).toBe('CubridTransaction');
+	});
+});
+
+// cubrid-client's `transaction(callback, options)` runs the callback on a
+// connection it owns, so statements from unrelated requests cannot join the
+// transaction (#185). This mock records which client each statement ran on.
+class OwnedTransactionClient extends MockClient {
+	readonly txClients: MockClient[] = [];
+	readonly transactionOptions: unknown[] = [];
+	commitError: Error | undefined;
+	rollbackError: Error | undefined;
+
+	async transaction<T>(
+		callback: (tx: CubridQueryable) => Promise<T>,
+		options?: unknown,
+	): Promise<T> {
+		const txClient = new MockClient();
+		this.txClients.push(txClient);
+		this.transactionOptions.push(options);
+		let result: T;
+		try {
+			result = await callback(txClient);
+		} catch (cause) {
+			// Imitates only how cubrid-client reports a failed callback: a
+			// TransactionError whose `cause` is the callback's error, with
+			// `rollbackError` set when rolling back also failed.
+			const wrapped = new Error('Transaction failed.', { cause }) as Error & {
+				rollbackError?: Error;
+			};
+			if (this.rollbackError) {
+				wrapped.rollbackError = this.rollbackError;
+			}
+			throw wrapped;
+		}
+		if (this.commitError) {
+			throw this.commitError;
+		}
+		return result;
+	}
+
+	beginTransaction = vi.fn(async () => {});
+	commit = vi.fn(async () => {});
+	rollback = vi.fn(async () => {});
+}
+
+describe('CubridSession with a driver that owns transaction connections', () => {
+	const dialect = new MySqlDialect({});
+
+	it('runs every callback statement on the owned transaction client', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		const result = await session.transaction(async (tx) => {
+			await tx.execute(sql`insert into users (id) values (1)`);
+			await tx.transaction(async (nested) => {
+				await nested.execute(sql`insert into users (id) values (2)`);
+			});
+			return 'done';
+		});
+
+		expect(result).toBe('done');
+		expect(client.queries).toEqual([]);
+		expect(client.beginTransaction).not.toHaveBeenCalled();
+		expect(client.commit).not.toHaveBeenCalled();
+		expect(client.txClients).toHaveLength(1);
+		expect(client.txClients[0]?.queries.map((q) => q.sql.toLowerCase())).toEqual([
+			'insert into users (id) values (1)',
+			'savepoint sp1',
+			'insert into users (id) values (2)',
+		]);
+	});
+
+	it('keeps statements outside the callback off the transaction connection', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		let release!: () => void;
+		const inside = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+
+		const pending = session.transaction(async (tx) => {
+			await tx.execute(sql`insert into users (id) values (1)`);
+			await inside;
+		});
+		await session.all(sql`insert into users (id) values (99)`);
+		release();
+		await pending;
+
+		expect(client.queries.map((q) => q.sql.toLowerCase())).toEqual([
+			'insert into users (id) values (99)',
+		]);
+		expect(client.txClients[0]?.queries.map((q) => q.sql.toLowerCase())).toEqual([
+			'insert into users (id) values (1)',
+		]);
+	});
+
+	it('gives concurrent transactions separate connections', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await Promise.all([
+			session.transaction(async (tx) => tx.execute(sql`select 1`)),
+			session.transaction(async (tx) => tx.execute(sql`select 2`)),
+		]);
+
+		expect(client.txClients).toHaveLength(2);
+		expect(client.txClients[0]).not.toBe(client.txClients[1]);
+	});
+
+	it('passes a supported isolation level to the driver', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await session.transaction(async () => 'ok', { isolationLevel: 'serializable' });
+		await session.transaction(async () => 'ok');
+
+		expect(client.transactionOptions).toEqual([{ isolationLevel: 'serializable' }, undefined]);
+		expect(client.txClients[0]?.queries).toEqual([]);
+	});
+
+	it.each<[string, MySqlTransactionConfig]>([
+		['read uncommitted isolation', { isolationLevel: 'read uncommitted' }],
+		['an access mode', { accessMode: 'read only' }],
+		['a consistent snapshot', { withConsistentSnapshot: true }],
+	])('refuses %s before opening a transaction', async (_name, config) => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await expect(session.transaction(async () => 'ok', config)).rejects.toThrow(/CUBRID/);
+		expect(client.txClients).toHaveLength(0);
+	});
+
+	it('propagates the callback error and runs no manual rollback', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		const failure = new Error('callback failed');
+
+		await expect(
+			session.transaction(async () => {
+				throw failure;
+			}),
+		).rejects.toBe(failure);
+		expect(client.rollback).not.toHaveBeenCalled();
+	});
+
+	it('rethrows Drizzle rollback signals unchanged', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await expect(
+			session.transaction(async (tx) => {
+				tx.rollback();
+			}),
+		).rejects.toBeInstanceOf(TransactionRollbackError);
+	});
+
+	it('attaches a failed driver rollback to the callback error', async () => {
+		const client = new OwnedTransactionClient();
+		client.rollbackError = new Error('rollback failed');
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		const failure = new Error('callback failed');
+
+		const error = await session
+			.transaction(async () => {
+				throw failure;
+			})
+			.catch((e: unknown) => e);
+
+		expect(error).toBe(failure);
+		expect((error as Error & { rollbackError?: unknown }).rollbackError).toBe(client.rollbackError);
+	});
+
+	it('opens a default transaction when the config sets no isolation level', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		// Drizzle's type requires isolationLevel, but JavaScript callers can omit it.
+		await session.transaction(async () => 'ok', {} as MySqlTransactionConfig);
+
+		expect(client.transactionOptions).toEqual([undefined]);
+	});
+
+	it('rethrows the callback error as is when the driver does not wrap it', async () => {
+		const client = new OwnedTransactionClient();
+		client.transaction = async <T>(callback: (tx: CubridQueryable) => Promise<T>): Promise<T> =>
+			callback(new MockClient());
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		const failure = new Error('callback failed');
+
+		const error = await session
+			.transaction(async () => {
+				throw failure;
+			})
+			.catch((e: unknown) => e);
+
+		expect(error).toBe(failure);
+		expect(error).not.toHaveProperty('rollbackError');
+	});
+
+	it('rethrows a non-Error callback value without touching it', async () => {
+		const client = new OwnedTransactionClient();
+		client.rollbackError = new Error('rollback failed');
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await expect(
+			session.transaction(async () => {
+				throw 'plain string';
+			}),
+		).rejects.toBe('plain string');
+	});
+
+	it('keeps an existing rollbackError on the callback error', async () => {
+		const client = new OwnedTransactionClient();
+		client.rollbackError = new Error('outer rollback failed');
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		const inner = new Error('inner rollback failed');
+		const failure = Object.assign(new Error('callback failed'), { rollbackError: inner });
+
+		const error = await session
+			.transaction(async () => {
+				throw failure;
+			})
+			.catch((e: unknown) => e);
+
+		expect((error as Error & { rollbackError?: unknown }).rollbackError).toBe(inner);
+	});
+
+	it('refuses isolationLevel when the driver transaction() takes no options', async () => {
+		const client = new OwnedTransactionClient();
+		// cubrid-client before 1.3.0: transaction(callback) only.
+		client.transaction = async function <T>(callback: (tx: CubridQueryable) => Promise<T>) {
+			return callback(new MockClient());
+		};
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await expect(
+			session.transaction(async () => 'ok', { isolationLevel: 'serializable' }),
+		).rejects.toThrow(/1\.3\.0/);
+		await expect(session.transaction(async () => 'ok')).resolves.toBe('ok');
+	});
+
+	it('keeps the driver error on the callback error as transactionError', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		const failure = new Error('callback failed');
+
+		const error = (await session
+			.transaction(async () => {
+				throw failure;
+			})
+			.catch((e: unknown) => e)) as Error & { transactionError?: Error };
+
+		expect(error).toBe(failure);
+		expect(error.transactionError?.message).toBe('Transaction failed.');
+		expect(error.transactionError?.cause).toBe(failure);
+		expect(Object.keys(error)).toContain('transactionError');
+	});
+
+	it('leaves a frozen callback error as is', async () => {
+		const client = new OwnedTransactionClient();
+		client.rollbackError = new Error('rollback failed');
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		const failure = Object.freeze(new Error('frozen'));
+
+		await expect(
+			session.transaction(async () => {
+				throw failure;
+			}),
+		).rejects.toBe(failure);
+	});
+
+	it('rethrows a driver failure that happens before the callback runs', async () => {
+		const client = new OwnedTransactionClient();
+		const closed = new Error('Client is closed.');
+		client.transaction = async () => {
+			throw closed;
+		};
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await expect(session.transaction(async () => 'ok')).rejects.toBe(closed);
+	});
+
+	it('commits when the callback handles its own statement error', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		const result = await session.transaction(async (tx) => {
+			await tx.execute(sql`select 1`).then(() => {
+				throw new Error('handled');
+			}).catch(() => undefined);
+			return 'committed';
+		});
+
+		expect(result).toBe('committed');
+	});
+
+	it('sends ROLLBACK TO SAVEPOINT on the owned connection', async () => {
+		const client = new OwnedTransactionClient();
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await session.transaction(async (tx) => {
+			await tx
+				.transaction(async () => {
+					throw new Error('inner');
+				})
+				.catch(() => undefined);
+		});
+
+		expect(client.queries).toEqual([]);
+		expect(client.txClients[0]?.queries.map((q) => q.sql.toLowerCase())).toEqual([
+			'savepoint sp1',
+			'rollback to savepoint sp1',
+		]);
+	});
+
+	it('propagates a commit failure from the driver', async () => {
+		const client = new OwnedTransactionClient();
+		client.commitError = new Error('commit failed');
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+
+		await expect(session.transaction(async () => 'ok')).rejects.toBe(client.commitError);
+	});
+});
+
+describe('CubridTransaction savepoint rollback failure', () => {
+	it('keeps the callback error and attaches the rollback error', async () => {
+		const client = new MockClient();
+		const rollbackFailure = new Error('rollback to savepoint failed');
+		const query = client.query.bind(client);
+		client.query = (async (sqlText: string, params?: readonly unknown[]) => {
+			if (sqlText.toLowerCase().startsWith('rollback to savepoint')) {
+				throw rollbackFailure;
+			}
+			return query(sqlText, params);
+		}) as typeof client.query;
+		const dialect = new MySqlDialect({});
+		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
+		const rootTx = new CubridTransaction(
+			dialect,
+			session as unknown as MySqlSessionBase,
+			undefined,
+			0,
+			'default',
+		);
+		const callbackFailure = new Error('nested-fail');
+
+		const error = await rootTx
+			.transaction(async () => {
+				throw callbackFailure;
+			})
+			.catch((e: unknown) => e);
+
+		expect(error).toBe(callbackFailure);
+		expect((error as Error & { rollbackError?: unknown }).rollbackError).toBe(rollbackFailure);
 	});
 });
