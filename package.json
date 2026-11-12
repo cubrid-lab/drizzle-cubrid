@@ -47,12 +47,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cubrid-labs/drizzle-cubrid.git"
+    "url": "git+https://github.com/cubrid-lab/drizzle-cubrid.git"
   },
   "bugs": {
-    "url": "https://github.com/cubrid-labs/drizzle-cubrid/issues"
+    "url": "https://github.com/cubrid-lab/drizzle-cubrid/issues"
   },
-  "homepage": "https://github.com/cubrid-labs/drizzle-cubrid#readme",
+  "homepage": "https://github.com/cubrid-lab/drizzle-cubrid#readme",
   "peerDependencies": {
     "drizzle-orm": ">=0.38.0",
     "cubrid-client": ">=0.1.0"
