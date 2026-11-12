@@ -1,5 +1,7 @@
 # Product Requirements Document — drizzle-cubrid
 
+> **Implementation note (2026-11-12):** v0.2.1 uses legacy MySQL-derived Drizzle classes and does **not** have a verified CUBRID-native dialect or migration path. The target design exclusively uses native CUBRID SQL and database-neutral verified Drizzle primitives; other database dialects, migration tools, compatibility modes, and SQL rewriting are prohibited. See [#155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155) and [#192](https://github.com/cubrid-lab/drizzle-cubrid/issues/192). This file's historical architecture diagram describes the legacy implementation and is not an approved design for the native adapter.
+
 ## Overview
 
 **drizzle-cubrid** is a Drizzle ORM dialect for the CUBRID relational database. It extends
@@ -24,7 +26,7 @@ dialect for CUBRID. Developers using CUBRID must fall back to raw SQL or use leg
 2. **CUBRID-specific features** — SET/MULTISET/SEQUENCE types, MERGE INTO, ON DUPLICATE KEY UPDATE
 3. **Driver bridge** — wraps `cubrid-client` (`CubridClient`) into Drizzle's session/query system
 4. **Transaction support** — full transaction lifecycle including nested savepoints (with CUBRID's no-RELEASE-SAVEPOINT limitation)
-5. **Migration-ready** — compatible with `drizzle-kit` for schema generation
+5. **Native migration design (not implemented)** — provide CUBRID-specific generation and migration only after feasibility and real-server verification; do not use other database dialects as a substitute
 6. **Type safety** — full TypeScript generics, no `any` escapes
 7. **95%+ test coverage** — offline unit tests, integration tests with Docker
 
@@ -64,14 +66,14 @@ flowchart TD
     B2 --> B26[integration.test.ts - Live DB tests]
 ```
 
-### How It Works
+### How It Works — legacy v0.2.1 implementation (to be replaced)
 
 1. **User calls `drizzle(client)`** — creates `CubridDatabase` instance
 2. **`CubridDatabase`** extends `MySqlDatabase` — gets all query builders for free
 3. **`CubridSession`** extends `MySqlSession` — bridges `cubrid-client` queries
 4. **`CubridPreparedQuery`** extends `MySqlPreparedQuery` — executes SQL via client.query()
 5. **`CubridTransaction`** extends `MySqlTransaction` — uses begin/commit/rollback via client.transaction()
-6. **`MySqlDialect`** is reused directly — CUBRID SQL is MySQL-compatible for most operations
+6. **`MySqlDialect`** is reused directly in the current legacy implementation; this does **not** prove CUBRID compatibility and must be removed in the native rewrite
 
 ## CUBRID vs MySQL Differences
 
