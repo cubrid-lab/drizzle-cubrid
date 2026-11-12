@@ -1,9 +1,6 @@
 name: Task
 description: A general task or chore (refactoring, maintenance, etc.)
 title: "chore: "
-labels: ["chore"]
-
-title: "[Task]: "
 labels: ["chore", "status: needs triage"]
 body:
   - type: markdown
