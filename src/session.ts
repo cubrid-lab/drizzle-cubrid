@@ -280,8 +280,11 @@ export class CubridSession<
 			const options = toDriverTransactionOptions(config);
 			if (options !== undefined && this.client.transaction.length < 2) {
 				// cubrid-client before 1.3.0 has transaction(callback) only and would
-				// silently run at the server's default isolation level.
-				throw new Error('isolationLevel requires cubrid-client 1.3.0 or later');
+				// silently run at the server's default isolation level. A wrapper
+				// declared as `(...args)` also has length 0 and is refused here.
+				throw new Error(
+					"isolationLevel needs a client whose transaction() declares an options parameter (cubrid-client 1.3.0 or later)",
+				);
 			}
 			let callbackFailure: { error: unknown } | undefined;
 			const run = async (txClient: CubridQueryable): Promise<T> => {
