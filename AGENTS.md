@@ -260,9 +260,10 @@ Describe what changed and why.
 Refs #N
 ```
 
-Keep authorship and actual coauthors accurate. A human contributor, Codex,
-Claude Code, OpenCode or another agent is never required to append a particular
-coauthor or AI-tool trailer, nor to run a mandatory Oracle pre/post review.
+Use Conventional Commits types (`feat`, `fix`, `docs`, `chore`, `ci`, `style`,
+`test`, `refactor`). Keep authorship and actual coauthors accurate. A human
+contributor, Codex, Claude Code, OpenCode or another agent is never required to
+append a particular coauthor or AI-tool trailer.
 
 ## Release Process
 

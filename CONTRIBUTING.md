@@ -147,17 +147,15 @@ scrutiny. No existing repository CI or release safeguards are waived.
 ## Issue ownership and coding agents
 
 Before implementation, compare the latest code, all open issues and any PRs
-touching the same behavior. New issues begin with `status: needs triage`;
-maintainers verify evidence, duplicates, scope, issue type and relative
-urgency before confirming one `priority: critical/high/medium/low` and one
-`size: XS/S/M/L/XL`. Read back the saved labels before clearing triage.
+touching the same behavior. New issues start with `status: needs triage`; see
+the [triage procedure](AGENTS.md#issue-triage-lifecycle).
 
-Outside contributors can work on unclaimed issues without a required Oracle
-review or GitHub Assignee access. Maintainer-operated autonomous agents must
-have authorization and a confirmed implementer for reserved work. Required
-GitHub CI on the final PR head and project maintainers decide merge readiness.
-The review policy is in "Pull Request Review and Merge Policy" above, and the
-triage procedure is in [AGENTS.md](AGENTS.md#issue-triage-lifecycle).
+An issue is claimed when it has an assignee or a linked open PR. Comment on the
+issue before starting so overlapping PRs are avoided. Outside contributors can
+work on unclaimed issues without a required AI review or GitHub Assignee
+access. Maintainer-operated autonomous agents must have authorization and must
+not take over claimed work. Merge readiness follows the
+[Pull Request Review and Merge Policy](#pull-request-review-and-merge-policy).
 
 ## Reporting Issues
 
