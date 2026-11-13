@@ -50,8 +50,8 @@ The CUBRID broker must be running and accessible:
 # Check if CUBRID is running
 docker ps | grep cubrid
 
-# Start CUBRID with Docker
-docker compose up -d
+# Start a disposable CUBRID with Docker
+docker run -d --name cubrid-test -e CUBRID_DB=testdb -p 33000:33000 cubrid/cubrid:11.4
 ```
 
 Connection config:

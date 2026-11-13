@@ -133,6 +133,14 @@ describe('transactions run on a driver-owned connection (#185)', () => {
 		expect(await ids(table)).toEqual([10]);
 	});
 
+});
+
+describe('transaction semantics', () => {
+	const table = name('txsem');
+	const t = cubridTable(table, { id: int('id').primaryKey() });
+
+	beforeAll(() => createTable(table, 'id INT PRIMARY KEY'));
+
 	it('rolls back to a savepoint and keeps the outer work', async () => {
 		await client.query(`DELETE FROM ${table}`);
 		const db = drizzle(client);
@@ -165,10 +173,13 @@ describe('transactions run on a driver-owned connection (#185)', () => {
 		expect(await ids(table)).toEqual([]);
 	});
 
-	it('runs with a CUBRID isolation level', async () => {
+	it('accepts a CUBRID isolation level and refuses one CUBRID lacks', async () => {
 		const db = drizzle(client);
 
 		await expect(db.transaction(async () => 'ran', { isolationLevel: 'serializable' })).resolves.toBe('ran');
+		await expect(db.transaction(async () => 'ran', { isolationLevel: 'read uncommitted' })).rejects.toThrow(
+			/isolation level/,
+		);
 	});
 });
 
@@ -235,6 +246,7 @@ describe('writes report affected rows and generated keys (#182)', () => {
 		const [inserted] = await db.insert(auto).values({ v: 'a' }).$returningId();
 		const [stored] = await db.select().from(auto).where(eq(auto.v, 'a'));
 
+		expect(typeof inserted?.id).toBe('number');
 		expect(inserted?.id).toBe(stored?.id);
 	});
 
@@ -246,13 +258,18 @@ describe('writes report affected rows and generated keys (#182)', () => {
 		expect(await ids(autoName)).toEqual(before);
 	});
 
-	it('reports no key when onDuplicateKeyUpdate() updated an existing row', async () => {
+	it('reports the real key from onDuplicateKeyUpdate(), and none when it updated a row', async () => {
 		const db = drizzle(client);
-		await db.insert(auto).values({ v: 'dup' });
+		const upsert = (v: string) => db.insert(auto).values({ v }).onDuplicateKeyUpdate({ set: { v } }).$returningId();
 
-		const keys = await db.insert(auto).values({ v: 'dup' }).onDuplicateKeyUpdate({ set: { v: 'dup' } }).$returningId();
+		const [fresh] = await upsert('dup');
+		const updated = await upsert('dup');
+		const stored = await db.select().from(auto).where(eq(auto.v, 'dup'));
 
-		expect(keys).toEqual([]);
+		// The conflict consumes an AUTO_INCREMENT value that belongs to no row.
+		expect(stored).toHaveLength(1);
+		expect(fresh?.id).toBe(stored[0]?.id);
+		expect(updated).toEqual([]);
 	});
 
 	it('reports affectedRows for update and delete', async () => {
@@ -291,25 +308,32 @@ describe('collection columns round-trip (#184)', () => {
 		createTable(table, 'id INT PRIMARY KEY, s SET(VARCHAR(20)), m MULTISET(INTEGER), q SEQUENCE(VARCHAR(20))'),
 	);
 
-	it('writes and reads SET, MULTISET and SEQUENCE values with special characters', async () => {
+	// SET and MULTISET define no order, so their elements are compared sorted.
+	const sorted = <T>(values: T[] | null) => (values === null ? null : [...values].sort());
+
+	it('writes, updates and reads SET, MULTISET and SEQUENCE values, empty and NULL included', async () => {
 		const db = drizzle(client);
 
 		await db.insert(docs).values({ id: 1, s: ['b', 'a', 'b'], m: [3, 1, 3], q: ["it's", 'back\\slash', '한글', null] });
 		await db.insert(docs).values({ id: 2, s: [], m: [], q: [] });
-		await db.update(docs).set({ q: ['z', 'y'] }).where(eq(docs.id, 2));
+		await db.insert(docs).values({ id: 3, s: null, m: null, q: null });
+		await db.update(docs).set({ q: ['z', 'y'], m: [7] }).where(eq(docs.id, 2));
 
-		expect(await db.select().from(docs).orderBy(docs.id)).toEqual([
-			// SET removes duplicates; SET and MULTISET order is the server's.
+		const rows = await db.select().from(docs).orderBy(docs.id);
+		expect(rows.map((row) => ({ ...row, s: sorted(row.s), m: sorted(row.m) }))).toEqual([
+			// SET removes the duplicate 'b'; MULTISET keeps both 3s; SEQUENCE keeps order.
 			{ id: 1, s: ['a', 'b'], m: [1, 3, 3], q: ["it's", 'back\\slash', '한글', null] },
-			{ id: 2, s: [], m: [], q: ['z', 'y'] },
+			{ id: 2, s: [], m: [7], q: ['z', 'y'] },
+			{ id: 3, s: null, m: null, q: null },
 		]);
 	});
 
 	it('filters on a collection value', async () => {
 		const db = drizzle(client);
+		await db.insert(docs).values({ id: 10, q: ['f', 'g'] });
 
-		const rows = await db.select({ id: docs.id }).from(docs).where(eq(docs.q, ['z', 'y']));
+		const rows = await db.select({ id: docs.id }).from(docs).where(eq(docs.q, ['f', 'g']));
 
-		expect(rows).toEqual([{ id: 2 }]);
+		expect(rows).toEqual([{ id: 10 }]);
 	});
 });

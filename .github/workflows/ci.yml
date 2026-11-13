@@ -126,7 +126,8 @@ jobs:
     timeout-minutes: 20
     services:
       cubrid:
-        image: cubrid/cubrid:11.4
+        # Pinned so runs are reproducible; update the digest on purpose.
+        image: cubrid/cubrid:11.4@sha256:a8c8792f8092cb4ddf200cf0ab1bb6caac164194d9aec9d6ff2a828c3ec1b604
         env:
           CUBRID_DB: testdb
         ports:
@@ -150,7 +151,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "CUBRID image: $(docker image inspect cubrid/cubrid:11.4 --format '{{index .RepoDigests 0}}')"
+            echo "CUBRID image: cubrid/cubrid:11.4@sha256:a8c8792f8092cb4ddf200cf0ab1bb6caac164194d9aec9d6ff2a828c3ec1b604"
             echo "Node: $(node --version)"
             echo "drizzle-orm: $(node -p "require('./node_modules/drizzle-orm/package.json').version")"
             echo "cubrid-client: $(node -p "require('./node_modules/cubrid-client/package.json').version")"
@@ -160,8 +161,8 @@ jobs:
       - name: Run live CUBRID tests
         run: npm run integration -- --reporter=json --outputFile=live-results.json
       - name: Require every live test to run and pass
-        if: ${{ always() }}
-        run: node scripts/check-live-results.mjs live-results.json | tee -a "$GITHUB_STEP_SUMMARY"
+        if: ${{ !cancelled() }}
+        run: node scripts/check-live-results.mjs live-results.json
 
   package-artifact:
     name: Build packed npm package
