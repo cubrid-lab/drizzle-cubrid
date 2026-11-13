@@ -358,7 +358,8 @@ git clone https://github.com/cubrid-lab/drizzle-cubrid.git
 cd drizzle-cubrid
 npm install
 npm run build        # TypeScript compilation
-npm run check        # Lint + type-check + test
+npm run lint         # Biome lint + format check
+npm run typecheck    # tsc --noEmit
 npm test             # Run tests
 ```
 

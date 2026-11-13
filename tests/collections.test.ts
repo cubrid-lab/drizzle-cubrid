@@ -1,32 +1,32 @@
 import { sql } from 'drizzle-orm';
-import { MySqlDialect, json } from 'drizzle-orm/mysql-core';
+import { json, MySqlDialect } from 'drizzle-orm/mysql-core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
 	bigint,
 	boolean,
 	char,
-	date,
-	datetime,
-	double,
-	float,
-	mysqlEnum,
-	text,
-	time,
-	timestamp,
 	cubridMultiset,
 	cubridSequence,
 	cubridSet,
+	date,
+	datetime,
 	decimal,
+	double,
+	float,
 	int,
 	mediumint,
+	mysqlEnum,
 	smallint,
+	text,
+	time,
+	timestamp,
 	tinyint,
 	varchar,
 } from '../src/columns';
 import { drizzle } from '../src/driver';
-import { monetary } from '../src/types';
 import { cubridTable } from '../src/table';
+import { monetary } from '../src/types';
 
 type CustomTypeParams = {
 	dataType: (config?: unknown) => string;
@@ -40,8 +40,7 @@ function paramsOf(builder: unknown): CustomTypeParams {
 }
 
 function sqlTypeOf(element?: unknown): string {
-	return paramsOf(cubridSet('col', element ? { element: element as never } : undefined))
-		.dataType({ element });
+	return paramsOf(cubridSet('col', element ? { element: element as never } : undefined)).dataType({ element });
 }
 
 describe('collection element SQL types', () => {
@@ -108,7 +107,14 @@ describe('collection values', () => {
 		counts: cubridMultiset<number>('counts', { element: int('n') }),
 		steps: cubridSequence('steps'),
 	});
-	const db = drizzle({ async query() { return []; } }, { binding: 'literal' });
+	const db = drizzle(
+		{
+			async query() {
+				return [];
+			},
+		},
+		{ binding: 'literal' },
+	);
 
 	it('returns the array cubrid-client decoded, element types included', () => {
 		expect(docs.tags.mapFromDriverValue(['a', 'b'])).toEqual(['a', 'b']);
@@ -142,7 +148,12 @@ describe('collection values', () => {
 
 	it('refuses a value that is not an array before building SQL', () => {
 		expect(() =>
-			dialect.sqlToQuery(db.update(docs).set({ tags: 'a,b' as never }).getSQL()),
+			dialect.sqlToQuery(
+				db
+					.update(docs)
+					.set({ tags: 'a,b' as never })
+					.getSQL(),
+			),
 		).toThrow(/array/);
 	});
 
@@ -153,19 +164,33 @@ describe('collection values', () => {
 		['NaN', Number.NaN],
 	])('refuses %s as an element', (_name, element) => {
 		expect(() =>
-			dialect.sqlToQuery(db.update(docs).set({ tags: [element] as never }).getSQL()),
+			dialect.sqlToQuery(
+				db
+					.update(docs)
+					.set({ tags: [element] as never })
+					.getSQL(),
+			),
 		).toThrow(/element/);
 	});
 
 	it('sends Uint8Array elements as a Buffer, as cubrid-client requires', () => {
-		const query = db.update(docs).set({ tags: [new Uint8Array([1, 2]) as never] }).toSQL();
+		const query = db
+			.update(docs)
+			.set({ tags: [new Uint8Array([1, 2]) as never] })
+			.toSQL();
 
 		expect(Buffer.isBuffer(query.params[0])).toBe(true);
 		expect([...(query.params[0] as Buffer)]).toEqual([1, 2]);
 	});
 
 	it('refuses a placeholder for the whole collection value when the query runs', async () => {
-		const client = { queries: 0, async query() { this.queries++; return []; } };
+		const client = {
+			queries: 0,
+			async query() {
+				this.queries++;
+				return [];
+			},
+		};
 		const prepared = drizzle(client, { binding: 'literal' })
 			.update(docs)
 			.set({ tags: sql.placeholder('tags') as never })
@@ -188,10 +213,22 @@ enum Color {
 
 describe('collection element types', () => {
 	const dialect = new MySqlDialect();
-	const db = drizzle({ async query() { return []; } }, { binding: 'literal' });
+	const db = drizzle(
+		{
+			async query() {
+				return [];
+			},
+		},
+		{ binding: 'literal' },
+	);
 	const castOf = (element?: unknown) => {
 		const t = cubridTable('t', { c: cubridSequence('c', element ? { element: element as never } : undefined) });
-		return dialect.sqlToQuery(db.update(t).set({ c: ['x'] as never }).getSQL()).sql;
+		return dialect.sqlToQuery(
+			db
+				.update(t)
+				.set({ c: ['x'] as never })
+				.getSQL(),
+		).sql;
 	};
 
 	it.each([

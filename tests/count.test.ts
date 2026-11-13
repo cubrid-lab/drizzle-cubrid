@@ -32,9 +32,7 @@ describe('db.$count()', () => {
 		const count = await drizzle(client).$count(users);
 
 		expect(count).toBe(3);
-		expect(client.calls).toEqual([
-			{ sql: 'select count(*) from `users`', params: [], options: { rowMode: 'array' } },
-		]);
+		expect(client.calls).toEqual([{ sql: 'select count(*) from `users`', params: [], options: { rowMode: 'array' } }]);
 	});
 
 	it('passes the filter values as parameters', async () => {

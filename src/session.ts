@@ -1,6 +1,6 @@
-import { Column } from 'drizzle-orm/column';
 import type { Cache } from 'drizzle-orm/cache/core/cache';
 import type { WithCacheConfig } from 'drizzle-orm/cache/core/types';
+import { Column } from 'drizzle-orm/column';
 import { entityKind, is } from 'drizzle-orm/entity';
 import type { Logger } from 'drizzle-orm/logger';
 import { NoopLogger } from 'drizzle-orm/logger';
@@ -8,19 +8,19 @@ import type { MySqlDialect } from 'drizzle-orm/mysql-core/dialect';
 import type { SelectedFieldsOrdered } from 'drizzle-orm/mysql-core/query-builders/select.types';
 import type {
 	Mode,
-	MySqlSession as MySqlSessionBase,
 	MySqlPreparedQueryConfig,
 	MySqlPreparedQueryHKT,
 	MySqlQueryResultHKT,
+	MySqlSession as MySqlSessionBase,
 	MySqlTransaction as MySqlTransactionBase,
 	MySqlTransactionConfig,
 	PreparedQueryKind,
 } from 'drizzle-orm/mysql-core/session';
 import { MySqlPreparedQuery, MySqlSession, MySqlTransaction } from 'drizzle-orm/mysql-core/session';
 import type { RelationalSchemaConfig, TablesRelationalConfig } from 'drizzle-orm/relations';
-import { fillPlaceholders, SQL, sql } from 'drizzle-orm/sql/sql';
 import type { Query } from 'drizzle-orm/sql/sql';
-import { type Assume } from 'drizzle-orm/utils';
+import { fillPlaceholders, SQL, sql } from 'drizzle-orm/sql/sql';
+import type { Assume } from 'drizzle-orm/utils';
 import * as drizzleUtils from 'drizzle-orm/utils';
 
 import { isCubridTemporalColumn, TEMPORAL_COLUMN_TYPES } from './columns/temporal.js';
@@ -87,10 +87,7 @@ export interface CubridQueryable {
 	 * transactions use it, so unrelated statements on the shared client cannot
 	 * join or end the transaction.
 	 */
-	transaction?<T>(
-		callback: (tx: CubridQueryable) => Promise<T>,
-		options?: CubridTransactionOptions,
-	): Promise<T>;
+	transaction?<T>(callback: (tx: CubridQueryable) => Promise<T>, options?: CubridTransactionOptions): Promise<T>;
 	/**
 	 * Runs INSERT, UPDATE or DELETE and reports what it changed. `CubridClient`,
 	 * `CubridPool` and their transaction clients provide it (cubrid-client 1.3.0
@@ -111,9 +108,7 @@ const SUPPORTED_ISOLATION_LEVELS = new Set(['read committed', 'repeatable read',
  * read-only transaction mode and no consistent-snapshot start, so those are
  * refused before a connection is taken rather than silently ignored.
  */
-function toDriverTransactionOptions(
-	config: MySqlTransactionConfig | undefined,
-): CubridTransactionOptions | undefined {
+function toDriverTransactionOptions(config: MySqlTransactionConfig | undefined): CubridTransactionOptions | undefined {
 	if (!config) {
 		return undefined;
 	}
@@ -203,13 +198,15 @@ function withBinding(client: CubridQueryable, binding: CubridBinding | undefined
 	return bound;
 }
 
-const mapResultRow = (drizzleUtils as unknown as {
-	mapResultRow: (
-		fields: SelectedFieldsOrdered,
-		row: unknown[],
-		joinsNotNullableMap: Record<string, boolean> | undefined,
-	) => unknown;
-}).mapResultRow;
+const mapResultRow = (
+	drizzleUtils as unknown as {
+		mapResultRow: (
+			fields: SelectedFieldsOrdered,
+			row: unknown[],
+			joinsNotNullableMap: Record<string, boolean> | undefined,
+		) => unknown;
+	}
+).mapResultRow;
 
 const ARRAY_ROWS = { rowMode: 'array' } as const;
 
@@ -302,9 +299,7 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 		private params: unknown[],
 		private logger: Logger,
 		cache: Cache | undefined,
-		private statementMetadata:
-			| { type: 'select' | 'update' | 'delete' | 'insert'; tables: string[] }
-			| undefined,
+		private statementMetadata: { type: 'select' | 'update' | 'delete' | 'insert'; tables: string[] } | undefined,
 		cacheConfig: WithCacheConfig | undefined,
 		private fields: SelectedFieldsOrdered | undefined,
 		private customResultMapper?: (rows: unknown[][]) => T['execute'],
@@ -357,9 +352,11 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 			return this.customResultMapper(rowArrays);
 		}
 
-		const joinsNotNullableMap = (this as unknown as {
-			joinsNotNullableMap: Record<string, boolean> | undefined;
-		}).joinsNotNullableMap;
+		const joinsNotNullableMap = (
+			this as unknown as {
+				joinsNotNullableMap: Record<string, boolean> | undefined;
+			}
+		).joinsNotNullableMap;
 
 		return rowArrays.map((row) => mapResultRow(this.fields!, row, joinsNotNullableMap)) as T['execute'];
 	}
@@ -414,6 +411,7 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 		return response;
 	}
 
+	// biome-ignore lint/correctness/useYield: Drizzle's iterator() must be an async generator; CUBRID has no streaming, so it throws on first use.
 	override async *iterator(): AsyncGenerator<T['iterator']> {
 		throw new Error('Streaming is not supported by the CUBRID driver');
 	}
@@ -517,19 +515,14 @@ export class CubridSession<
 				// silently run at the server's default isolation level. A wrapper
 				// declared as `(...args)` also has length 0 and is refused here.
 				throw new Error(
-					"isolationLevel needs a client whose transaction() declares an options parameter (cubrid-client 1.3.0 or later)",
+					'isolationLevel needs a client whose transaction() declares an options parameter (cubrid-client 1.3.0 or later)',
 				);
 			}
 			let callbackFailure: { error: unknown } | undefined;
 			const run = async (txClient: CubridQueryable): Promise<T> => {
 				// Every statement in the callback, including savepoints, runs on the
 				// connection the driver reserved for this transaction.
-				const txSession = new CubridSession<TFullSchema, TSchema>(
-					txClient,
-					this.dialect,
-					this.schema,
-					this.options,
-				);
+				const txSession = new CubridSession<TFullSchema, TSchema>(txClient, this.dialect, this.schema, this.options);
 				const tx = new CubridTransaction<TFullSchema, TSchema>(
 					this.dialect,
 					txSession as unknown as MySqlSessionBase,
@@ -545,9 +538,7 @@ export class CubridSession<
 				}
 			};
 			try {
-				return options === undefined
-					? await this.client.transaction(run)
-					: await this.client.transaction(run, options);
+				return options === undefined ? await this.client.transaction(run) : await this.client.transaction(run, options);
 			} catch (driverError) {
 				// cubrid-client wraps a callback failure in its own TransactionError.
 				// Rethrow the callback's error itself, so Drizzle's rollback signal

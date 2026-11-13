@@ -12,22 +12,22 @@ import type { ColumnBaseConfig } from 'drizzle-orm/column';
 import type { ColumnBuilderBaseConfig } from 'drizzle-orm/column-builder';
 import { entityKind } from 'drizzle-orm/entity';
 import {
-	date as drizzleDate,
+	type date as drizzleDate,
 	MySqlDate,
 	MySqlDateBuilder,
 	MySqlDateString,
 	MySqlDateStringBuilder,
 } from 'drizzle-orm/mysql-core/columns/date';
 import {
-	datetime as drizzleDatetime,
+	type datetime as drizzleDatetime,
 	MySqlDateTime,
 	MySqlDateTimeBuilder,
 	MySqlDateTimeString,
 	MySqlDateTimeStringBuilder,
 } from 'drizzle-orm/mysql-core/columns/datetime';
-import { time as drizzleTime, MySqlTime, MySqlTimeBuilder } from 'drizzle-orm/mysql-core/columns/time';
+import { type time as drizzleTime, MySqlTime, MySqlTimeBuilder } from 'drizzle-orm/mysql-core/columns/time';
 import {
-	timestamp as drizzleTimestamp,
+	type timestamp as drizzleTimestamp,
 	MySqlTimestamp,
 	MySqlTimestampBuilder,
 	MySqlTimestampString,
@@ -115,7 +115,6 @@ export class CubridTimestamp extends MySqlTimestamp<ColumnBaseConfig<'date', 'My
 	override mapFromDriverValue(value: unknown): Date {
 		return value instanceof Date ? value : super.mapFromDriverValue(value as string);
 	}
-
 }
 
 export class CubridTimestampStringBuilder extends MySqlTimestampStringBuilder<
@@ -161,7 +160,9 @@ export class CubridDate extends MySqlDate<ColumnBaseConfig<'date', 'MySqlDate'>>
 	}
 }
 
-export class CubridDateStringBuilder extends MySqlDateStringBuilder<ColumnBuilderBaseConfig<'string', 'MySqlDateString'>> {
+export class CubridDateStringBuilder extends MySqlDateStringBuilder<
+	ColumnBuilderBaseConfig<'string', 'MySqlDateString'>
+> {
 	static override readonly [entityKind]: string = 'CubridDateStringBuilder';
 
 	/** @internal */

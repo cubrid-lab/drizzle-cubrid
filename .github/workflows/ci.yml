@@ -87,6 +87,42 @@ jobs:
       - name: Test with coverage
         run: npx vitest run --coverage --reporter=verbose
 
+  lint:
+    name: Lint and format
+    needs: impact
+    if: ${{ needs.impact.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # biome ci changes nothing; it fails on lint findings, formatting
+      # differences and unsorted imports (see biome.json).
+      - name: Biome
+        run: npm run lint
+      - name: Biome rejects a misformatted file
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'export const probe = "double quotes and no semicolon"\n' > src/format-probe.ts
+          # Require the formatting error itself: biome ci also exits non-zero
+          # when it checks no file at all.
+          if out=$(npx biome ci src/format-probe.ts 2>&1); then
+            echo '::error::biome ci accepted a misformatted file'
+            exit 1
+          fi
+          grep -q 'File content differs from formatting output' <<<"$out" || {
+            echo "$out"
+            echo '::error::biome ci failed without reporting the formatting difference'
+            exit 1
+          }
+          rm src/format-probe.ts
+
   peer-floor:
     name: Lowest supported drizzle-orm
     needs: impact
@@ -255,12 +291,13 @@ jobs:
   ci-gate:
     name: CI gate
     if: always()
-    needs: [impact, docs-check, lint-and-test, peer-floor, live-cubrid, package-artifact, node18-consumer]
+    needs: [impact, docs-check, lint, lint-and-test, peer-floor, live-cubrid, package-artifact, node18-consumer]
     runs-on: ubuntu-latest
     env:
       IMPACT: ${{ needs.impact.result }}
       DOCS_ONLY: ${{ needs.impact.outputs.docs_only }}
       DOCS_CHECK: ${{ needs.docs-check.result }}
+      LINT: ${{ needs.lint.result }}
       TESTS: ${{ needs.lint-and-test.result }}
       PEER_FLOOR: ${{ needs.peer-floor.result }}
       LIVE_CUBRID: ${{ needs.live-cubrid.result }}
@@ -274,11 +311,11 @@ jobs:
           [[ "$IMPACT" == success ]] || { echo '::error::CI change classification failed'; exit 1; }
           if [[ "$DOCS_ONLY" == true ]]; then
             [[ "$DOCS_CHECK" == success ]] || { echo "::error::Docs checks: $DOCS_CHECK"; exit 1; }
-            for result in "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18"; do
+            for result in "$LINT" "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18"; do
               [[ "$result" == skipped ]] || { echo "::error::Unexpected runtime job on docs-only PR: $result"; exit 1; }
             done
           else
-            for result in "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18"; do
+            for result in "$LINT" "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18"; do
               [[ "$result" == success ]] || { echo "::error::Required runtime check: $result"; exit 1; }
             done
           fi

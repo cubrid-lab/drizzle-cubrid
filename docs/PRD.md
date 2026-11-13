@@ -161,14 +161,14 @@ const products = cubridTable('products', {
 - `typescript` ^5.7
 - `vitest` ^3.0 (test runner)
 - `tsup` ^8.0 (bundler)
-- `eslint` + `@typescript-eslint` (linter)
+- `@biomejs/biome` (linter and formatter)
 - `c8` or vitest coverage (coverage)
 
 ## Quality Requirements
 
 - **Test coverage**: ≥ 95% (CI-enforced)
 - **TypeScript**: strict mode, no `any` escapes, no `@ts-ignore`
-- **Linting**: ESLint with @typescript-eslint, no warnings
+- **Linting**: Biome, no warnings (`npm run lint`)
 - **Build**: ESM + CJS dual output via tsup
 - **CI**: GitHub Actions — lint + test on push/PR
 

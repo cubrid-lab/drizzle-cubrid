@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Lint and formatting are enforced in CI with Biome, pinned to 2.6.7: `npm run lint` runs `biome ci --error-on-warnings .` and `npm run format` applies fixes. The unused ESLint scripts and dependencies, which had no configuration and could not run, are removed (#167).
 - Live CUBRID tests (`tests/integration.test.ts`, `npm run integration`) for transactions, joins, write metadata and collections, run in CI against CUBRID 11.4 (#181, #164).
 
 ### Fixed
