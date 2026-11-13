@@ -336,7 +336,7 @@ const names = await db.select({ name: users.name }).from(users);
 
 ## Getting Help
 
-- [GitHub Issues](https://github.com/cubrid-labs/drizzle-cubrid/issues) — Bug reports and feature requests
+- [GitHub Issues](https://github.com/cubrid-lab/drizzle-cubrid/issues) — Bug reports and feature requests
 - [Schema Guide](./SCHEMA.md) — Column types and table definitions
 - [Queries Guide](./QUERIES.md) — Full query examples
 - [Drizzle ORM Docs](https://orm.drizzle.team/) — General Drizzle ORM documentation

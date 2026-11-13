@@ -11,13 +11,14 @@
 [🇰🇷 한국어](README.ko.md) · [🇺🇸 English](../README.md)
 
 [![npm](https://img.shields.io/npm/v/drizzle-cubrid.svg)](https://www.npmjs.com/package/drizzle-cubrid)
-[![CI](https://github.com/cubrid-labs/drizzle-cubrid/actions/workflows/ci.yml/badge.svg)](https://github.com/cubrid-labs/drizzle-cubrid/actions/workflows/ci.yml)
+[![CI](https://github.com/cubrid-lab/drizzle-cubrid/actions/workflows/ci.yml/badge.svg)](https://github.com/cubrid-lab/drizzle-cubrid/actions/workflows/ci.yml)
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-blue.svg)](https://nodejs.org/)
 [![Drizzle ORM](https://img.shields.io/badge/Drizzle_ORM-0.44.1–0.45-green.svg)](https://orm.drizzle.team/)
-[![Coverage 99%](https://img.shields.io/badge/coverage-99%25-brightgreen.svg)](https://github.com/cubrid-labs/drizzle-cubrid)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
+
+> **커뮤니티 어댑터:** `drizzle-cubrid`는 CUBRID Lab이 독립적으로 유지보수하는 어댑터이며, 공식 `drizzle-orm` 다이얼렉트나 Drizzle Kit 내장 통합이 아닙니다. CUBRID 전용 스키마 마이그레이션은 설계 중이며, Drizzle Kit의 MySQL 다이얼렉트가 CUBRID와 호환된다고 가정하지 마세요. [마이그레이션 설계](https://github.com/cubrid-lab/drizzle-cubrid/issues/163), [네이티브 다이얼렉트 설계](https://github.com/cubrid-lab/drizzle-cubrid/issues/155) 참고.
 
 ## 왜 drizzle-cubrid인가?
 
@@ -28,8 +29,8 @@ CUBRID는 한국 공공기관 및 기업 환경에서 널리 사용되는 고성
 **drizzle-cubrid**가 그 공백을 채웁니다:
 
 - **완전한 타입 안전성**을 갖춘 TypeScript 우선 Drizzle ORM 다이얼렉트
-- **49개 오프라인 테스트**, **99% 이상의 코드 커버리지**
-- [`cubrid-client`](https://github.com/cubrid-labs/cubrid-client) 기반 — 모던 TypeScript CUBRID 드라이버
+- 커버리지 95% 기준의 오프라인 단위 테스트와, CI에서 코드 변경마다 실행되는 CUBRID 11.4 실서버 테스트
+- [`cubrid-client`](https://github.com/cubrid-lab/cubrid-client) 기반 — 모던 TypeScript CUBRID 드라이버
 - CUBRID 고유 타입 지원: `SET`, `MULTISET`, `SEQUENCE`, `MONETARY`
 - drizzle-orm의 `mysql-core`를 통한 MySQL 호환 SQL 생성
 - 세이브포인트를 활용한 트랜잭션 지원
@@ -123,11 +124,10 @@ await db.transaction(async (tx) => {
 
 | 계층 | 패키지 | 설명 |
 |------|---------|------|
-| 드라이버 | [cubrid-client](https://github.com/cubrid-labs/cubrid-client) | TypeScript CUBRID 드라이버 |
-| ORM 다이얼렉트 | [drizzle-cubrid](https://github.com/cubrid-labs/drizzle-cubrid) | Drizzle ORM 다이얼렉트 (이 패키지) |
-| Python 드라이버 | [pycubrid](https://github.com/cubrid-labs/pycubrid) | 순수 Python CUBRID 드라이버 |
-| Python ORM | [sqlalchemy-cubrid](https://github.com/cubrid-labs/sqlalchemy-cubrid) | SQLAlchemy 2.0 다이얼렉트 |
-| 쿡북 | [cubrid-cookbook](https://github.com/cubrid-labs/cubrid-cookbook) | 사용 예제 및 레시피 |
+| 드라이버 | [cubrid-client](https://github.com/cubrid-lab/cubrid-client) | TypeScript CUBRID 드라이버 |
+| ORM 다이얼렉트 | [drizzle-cubrid](https://github.com/cubrid-lab/drizzle-cubrid) | Drizzle ORM 다이얼렉트 (이 패키지) |
+| Python 드라이버 | [pycubrid](https://github.com/cubrid-lab/pycubrid) | 순수 Python CUBRID 드라이버 |
+| Python ORM | [sqlalchemy-cubrid](https://github.com/cubrid-lab/sqlalchemy-cubrid) | SQLAlchemy 2.0 다이얼렉트 |
 
 ## 기여
 

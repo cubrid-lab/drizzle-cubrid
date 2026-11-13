@@ -34,7 +34,7 @@
 - **CUBRID-specific types** — `SET`, `MULTISET`, `SEQUENCE`, `MONETARY` as native column builders
 - **Transactions with savepoints** — Nested transaction support via CUBRID savepoints
 - **Relational queries** — `db.query.users.findMany()` / `findFirst()` with `where`, `columns`, `orderBy` and `limit`; loading relations with `with` is not supported yet (#200)
-- **99%+ test coverage** — 52 offline tests, no database required for CI
+- **Tested** — offline unit tests with a 95% coverage gate, plus a live CUBRID 11.4 suite on every code change in CI
 
 ### Architecture
 
@@ -312,7 +312,7 @@ try {
 | `INSERT ... RETURNING` | ❌ Not supported | Use separate SELECT after INSERT |
 | Streaming / iterators | ❌ Not supported | Use LIMIT/OFFSET for pagination |
 | JSON columns | ❌ Not supported | Use VARCHAR with manual serialization |
-| Native BOOLEAN | ❌ Not supported | Mapped to SMALLINT (0/1) |
+| Native BOOLEAN | ❌ Not supported | Declare `boolean()` columns as SMALLINT (0/1) |
 | Sequences | ❌ Not supported | Use AUTO_INCREMENT |
 
 ## Documentation
@@ -332,7 +332,7 @@ Use the [development setup guide](docs/DEVELOPMENT_SETUP.md) for the actual lang
 
 
 ```bash
-git clone https://github.com/cubrid-labs/drizzle-cubrid.git
+git clone https://github.com/cubrid-lab/drizzle-cubrid.git
 cd drizzle-cubrid
 npm install
 npm run build        # TypeScript compilation
@@ -344,8 +344,8 @@ npm test             # Run tests
 
 | Package | Description |
 |---------|-------------|
-| [cubrid-client](https://github.com/cubrid-labs/cubrid-client) | TypeScript CUBRID driver |
-| [drizzle-cubrid](https://github.com/cubrid-labs/drizzle-cubrid) | Drizzle ORM dialect (this package) |
+| [cubrid-client](https://github.com/cubrid-lab/cubrid-client) | TypeScript CUBRID driver |
+| [drizzle-cubrid](https://github.com/cubrid-lab/drizzle-cubrid) | Drizzle ORM dialect (this package) |
 
 ## Roadmap
 
