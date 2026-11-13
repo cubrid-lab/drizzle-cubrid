@@ -58,7 +58,13 @@ vi.mock('drizzle-orm/sql/sql', async () => {
 const { mapResultRowMock, fillPlaceholdersMock } = hoistedMocks;
 
 import { int, varchar } from '../src/columns';
-import { CubridPreparedQuery, CubridSession, CubridTransaction, type CubridQueryable } from '../src/session';
+import {
+	CubridPreparedQuery,
+	CubridSession,
+	CubridTransaction,
+	type CubridQueryable,
+	type CubridRawQueryResult,
+} from '../src/session';
 import { cubridTable } from '../src/table';
 
 class MockClient implements CubridQueryable {
@@ -90,6 +96,19 @@ class LabelledRowsClient implements CubridQueryable {
 		return this.rows.map((row) =>
 			Object.fromEntries(this.labels.map((label, i) => [label, row[i]])),
 		) as T[];
+	}
+}
+
+class ExecutingClient extends MockClient {
+	executed: { sql: string; params?: readonly unknown[] }[] = [];
+
+	constructor(private executeResult: { affectedRows: number; lastInsertId?: number | bigint }) {
+		super();
+	}
+
+	async execute(sqlText: string, params?: readonly unknown[]) {
+		this.executed.push({ sql: sqlText, params });
+		return this.executeResult;
 	}
 }
 
@@ -257,107 +276,153 @@ describe('CubridPreparedQuery', () => {
 		).rejects.toThrow(/rowMode/);
 	});
 
-	it('execute() returns AUTO_INCREMENT ids when returningIds is configured', async () => {
-		const client = new MockClient();
-		client.results.push([{ insertId: 10, affectedRows: 2 }]);
-		const logger: Logger = { logQuery: vi.fn() };
-		const returningIds = [{ path: ['id'], field: users.id }] as unknown as SelectedFieldsOrdered;
-
-		const query = new CubridPreparedQuery<MySqlPreparedQueryConfig>(
+	// insert/update/delete report what they changed through cubrid-client's
+	// execute(), which returns { affectedRows, lastInsertId? }; query() returns
+	// [] for them (#182).
+	function returningQuery(
+		client: CubridQueryable,
+		returningIds: SelectedFieldsOrdered,
+		generatedIds: Record<string, unknown>[] | undefined,
+		sqlText = 'insert into users (token) values (?)',
+	) {
+		return new CubridPreparedQuery<MySqlPreparedQueryConfig>(
 			client,
-			'insert into users (token) values (?)',
+			sqlText,
 			['a'],
-			logger,
+			new NoopLoggerForTests(),
 			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			returningIds,
-		);
-
-		const result = await query.execute();
-
-		expect(result).toEqual([{ id: 10 }, { id: 11 }]);
-	});
-
-	it('execute() returns generated ids for defaultFn columns', async () => {
-		const client = new MockClient();
-		client.results.push([{ insertId: 20, affectedRows: 2 }]);
-		const logger: Logger = { logQuery: vi.fn() };
-		const returningIds = [{ path: ['token'], field: users.token }] as unknown as SelectedFieldsOrdered;
-		const generatedIds = [{ token: 'gen-1' }, { token: 'gen-2' }];
-
-		const query = new CubridPreparedQuery<MySqlPreparedQueryConfig>(
-			client,
-			'insert into users (token) values (?), (?)',
-			['a', 'b'],
-			logger,
-			undefined,
-			undefined,
+			{ type: 'insert', tables: ['users'] },
 			undefined,
 			undefined,
 			undefined,
 			generatedIds,
 			returningIds,
 		);
+	}
 
-		const result = await query.execute();
+	const idField = [{ path: ['id'], field: users.id }] as unknown as SelectedFieldsOrdered;
+	const tokenField = [{ path: ['token'], field: users.token }] as unknown as SelectedFieldsOrdered;
+
+	it.each(['insert', 'update', 'delete'] as const)(
+		'execute() reports affectedRows for %s through client.execute()',
+		async (type) => {
+			const client = new ExecutingClient({ affectedRows: 3 });
+			const result = (await new CubridPreparedQuery<MySqlPreparedQueryConfig>(
+				client,
+				`${type} statement`,
+				[1],
+				new NoopLoggerForTests(),
+				undefined,
+				{ type, tables: ['users'] },
+				undefined,
+				undefined,
+			).execute()) as CubridRawQueryResult;
+
+			expect(client.executed).toEqual([{ sql: `${type} statement`, params: [1] }]);
+			expect(client.queries).toEqual([]);
+			expect([...result]).toEqual([]);
+			expect(result.affectedRows).toBe(3);
+			expect(result.lastInsertId).toBeUndefined();
+		},
+	);
+
+	it('execute() keeps a bigint lastInsertId', async () => {
+		const client = new ExecutingClient({ affectedRows: 1, lastInsertId: 9007199254740993n });
+		const result = (await new CubridPreparedQuery<MySqlPreparedQueryConfig>(
+			client,
+			'insert into users (token) values (?)',
+			['a'],
+			new NoopLoggerForTests(),
+			undefined,
+			{ type: 'insert', tables: ['users'] },
+			undefined,
+			undefined,
+		).execute()) as CubridRawQueryResult;
+
+		expect(result.lastInsertId).toBe(9007199254740993n);
+	});
+
+	it('execute() falls back to query() for writes when the client has no execute()', async () => {
+		const client = new MockClient();
+		client.results.push([]);
+		const result = await new CubridPreparedQuery<MySqlPreparedQueryConfig>(
+			client,
+			'update users set token = ?',
+			['x'],
+			new NoopLoggerForTests(),
+			undefined,
+			{ type: 'update', tables: ['users'] },
+			undefined,
+			undefined,
+		).execute();
+
+		expect(client.queries).toHaveLength(1);
+		expect(result).toEqual([]);
+	});
+
+	it('$returningId() reports the AUTO_INCREMENT key of a one-row insert', async () => {
+		const client = new ExecutingClient({ affectedRows: 1, lastInsertId: 10 });
+
+		const result = await returningQuery(client, idField, [{}]).execute();
+
+		expect(result).toEqual([{ id: 10 }]);
+	});
+
+	it('$returningId() keeps a bigint AUTO_INCREMENT key', async () => {
+		const client = new ExecutingClient({ affectedRows: 1, lastInsertId: 9007199254740993n });
+
+		const result = await returningQuery(client, idField, [{}]).execute();
+
+		expect(result).toEqual([{ id: 9007199254740993n }]);
+	});
+
+	it('$returningId() omits the key when the server generated none', async () => {
+		// An INSERT that supplies the id itself generates no key.
+		const client = new ExecutingClient({ affectedRows: 1 });
+
+		const result = await returningQuery(client, idField, [{}]).execute();
+
+		expect(result).toEqual([]);
+	});
+
+	it('$returningId() refuses AUTO_INCREMENT keys of a multi-row insert before sending it', async () => {
+		// CUBRID reports only the first generated key and does not promise the
+		// rest are consecutive, so they cannot be derived.
+		const client = new ExecutingClient({ affectedRows: 2, lastInsertId: 20 });
+
+		await expect(
+			returningQuery(client, idField, [{}, {}], 'insert into users (token) values (?), (?)').execute(),
+		).rejects.toThrow(/one row/);
+		expect(client.executed).toEqual([]);
+	});
+
+	it('$returningId() returns $defaultFn keys of every inserted row', async () => {
+		const client = new ExecutingClient({ affectedRows: 2 });
+
+		const result = await returningQuery(
+			client,
+			tokenField,
+			[{ token: 'gen-1' }, { token: 'gen-2' }],
+			'insert into users (token) values (?), (?)',
+		).execute();
 
 		expect(result).toEqual([{ token: 'gen-1' }, { token: 'gen-2' }]);
 	});
 
-	it('execute() handles string insert metadata for returning ids', async () => {
+	it('$returningId() refuses a client without execute() before sending', async () => {
 		const client = new MockClient();
-		client.results.push([{ insertId: '30', affectedRows: '2' }]);
-		const logger: Logger = { logQuery: vi.fn() };
-		const returningIds = [{ path: ['id'], field: users.id }] as unknown as SelectedFieldsOrdered;
 
-		const query = new CubridPreparedQuery<MySqlPreparedQueryConfig>(
-			client,
-			'insert into users (token) values (?)',
-			['a'],
-			logger,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			returningIds,
-		);
-
-		const result = await query.execute();
-
-		expect(result).toEqual([{ id: 30 }, { id: 31 }]);
+		await expect(returningQuery(client, idField, [{}]).execute()).rejects.toThrow(/execute\(\)/);
+		expect(client.queries).toEqual([]);
 	});
 
-	it('execute() skips non-column returning fields and falls back on invalid metadata', async () => {
-		const client = new MockClient();
-		client.results.push([{ insertId: 'not-a-number', affectedRows: null }]);
-		const logger: Logger = { logQuery: vi.fn() };
-		const returningIds = [
-			{ path: ['id'], field: { name: 'id' } },
-		] as unknown as SelectedFieldsOrdered;
+	it('$returningId() skips returning fields that are not columns', async () => {
+		const client = new ExecutingClient({ affectedRows: 1, lastInsertId: 5 });
+		const fields = [{ path: ['id'], field: { name: 'id' } }] as unknown as SelectedFieldsOrdered;
 
-		const query = new CubridPreparedQuery<MySqlPreparedQueryConfig>(
-			client,
-			'insert into users (token) values (?)',
-			['a'],
-			logger,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			returningIds,
-		);
+		const result = await returningQuery(client, fields, [{}]).execute();
 
-		const result = await query.execute();
-
-		expect(result).toEqual([{ insertId: 'not-a-number', affectedRows: null }]);
+		expect(result).toEqual([]);
 	});
 
 	it('execute() fills placeholders before execution', async () => {

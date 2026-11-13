@@ -224,6 +224,39 @@ await db.insert(users).values({
 });
 ```
 
+### Affected rows and generated keys
+
+`insert`, `update` and `delete` run through cubrid-client's `execute()`. The
+result is an empty array that carries `affectedRows`, and for an INSERT that
+generated an AUTO_INCREMENT value, `lastInsertId` (a `bigint` when it is beyond
+`Number.MAX_SAFE_INTEGER`):
+
+```ts
+const result = await db.update(users).set({ age: 31 }).where(eq(users.id, 1));
+result.affectedRows; // 1
+
+const inserted = await db.insert(users).values({ name: "Alice", email: "a@example.com" });
+inserted.lastInsertId; // 42
+```
+
+`$returningId()` returns the keys of the inserted rows:
+
+```ts
+const [{ id }] = await db.insert(users).values({ name: "Alice", email: "a@example.com" }).$returningId();
+```
+
+- An AUTO_INCREMENT key is reported only for an INSERT of **one row**. CUBRID
+  reports just the first key of a multi-row INSERT and does not promise the
+  others are consecutive, so a multi-row `$returningId()` with an
+  AUTO_INCREMENT key is refused before anything is inserted. Insert those rows
+  one at a time.
+- When the INSERT sets the key itself, the server generates none and the key is
+  left out of the result.
+- Keys from `$defaultFn()` are returned for every row.
+
+`db.execute(sql\`...\`)` returns rows and reports no counts; use the query
+builders when you need `affectedRows`.
+
 ## UPDATE
 
 ```ts
