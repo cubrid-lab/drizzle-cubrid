@@ -8,12 +8,12 @@ ADRs preserve **why** a consequential technical or release decision was made, th
 | --- | --- | --- |
 | [0001](0001-release-governance.md) | Release, SemVer and compatibility governance | Proposed (pending review of release policy) |
 | [0002](0002-database-correctness-evidence.md) | CUBRID correctness and failure-evidence requirements | Proposed |
-| [0003 — draft PR #166](https://github.com/cubrid-lab/drizzle-cubrid/pull/166) | Native CUBRID architecture boundaries | Proposed in separate Draft PR; not yet accepted |
+| [0003](0003-native-architecture-boundaries.md) | Native CUBRID architecture boundaries | Proposed (merged in #166; not yet accepted) |
 | [0004](0004-test-first-development.md) | TDD: design contract, Red–Green–Refactor and live-CUBRID verification | Proposed |
 | [0005](0005-development-setup.md) | Reproducible language-native developer setup and verification | Proposed |
 | [0006](0006-node-18-support-through-1x.md) | Retain Node.js 18 consumer support throughout 1.x; consider removal no earlier than 2.0 | Proposed |
 
-The CUBRID-native architecture ADR 0003 is already **Proposed** in [architecture Draft PR #166](https://github.com/cubrid-lab/drizzle-cubrid/pull/166); it must not be accepted until the release-policy PR is reviewed and merged. When the architecture ADR is accepted and merged, replace the index's draft-PR link with the local ADR file link. A draft is not an approved decision.
+The CUBRID-native architecture ADR 0003 was merged as **Proposed** in #166, together with [the architecture plan](../CUBRID_NATIVE_ARCHITECTURE.md) and [design sign-off checklist](../DESIGN_SIGNOFF.md). It is accepted only by an explicit maintainer decision recorded in the ADR, after ADR 0001 is accepted. A merged Proposed ADR is not an approved decision.
 
 ## ADR lifecycle
 
