@@ -131,6 +131,23 @@ const stats = await db
 // SELECT COUNT(*), AVG(`age`), MAX(`age`), MIN(`age`) FROM `users`
 ```
 
+### Counting rows with `$count()`
+
+```ts
+const total = await db.$count(users);
+const adults = await db.$count(users, gte(users.age, 18));
+// select count(*) from `users` where `users`.`age` >= ?
+
+// As a correlated subquery in a select:
+const withPosts = await db
+  .select({ id: users.id, posts: db.$count(posts, eq(posts.author_id, users.id)) })
+  .from(users);
+```
+
+`$count()` returns a `number`. Drizzle's MySQL builder names the column
+`count`, a reserved word in CUBRID, so drizzle-cubrid sends the statement
+without that alias and reads the count by position.
+
 ### GROUP BY
 
 ```ts

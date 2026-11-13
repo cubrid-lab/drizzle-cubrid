@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Live CUBRID tests (`tests/integration.test.ts`, `npm run integration`) for transactions, joins, write metadata and collections, run in CI against CUBRID 11.4 (#181, #164).
 
 ### Fixed
+- `db.$count(table, where?)` failed with `SqlSyntaxError`: Drizzle aliases the count `as count`, a reserved word in CUBRID, and read a mysql2-shaped result. The alias is dropped and the count read by position; it works in transactions and as a subquery (#199).
 - Statement values are sent as typed binds through cubrid-client's `queryPrepared()`/`executePrepared()` instead of being written into the SQL text, despite the prepared-query naming (#191).
 - Collection values are written as `CAST(SET{?, ?} AS SET(<element type>))`: with typed binds CUBRID refused `UPDATE ... SET q = SEQUENCE{?, ?}` (-494, cannot coerce host var). String elements, and collections without `element`, cast to `STRING`, except CHAR elements, which cast to their `CHAR(n)` so `eq()` on a CHAR collection still matches; element types with no known SQL type are not cast.
 - Collection DDL now maps `bigint`, `double`, `float`, `boolean`, `datetime`, `timestamp`, `date` and `time` elements to their CUBRID types instead of `NUMBER`, `DATE` or the Drizzle JavaScript category.

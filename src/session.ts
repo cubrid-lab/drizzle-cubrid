@@ -209,6 +209,9 @@ const mapResultRow = (drizzleUtils as unknown as {
 
 const ARRAY_ROWS = { rowMode: 'array' } as const;
 
+/** How drizzle-orm's MySqlCountBuilder starts the statement behind `db.$count()`. */
+const DRIZZLE_COUNT_PREFIX = 'select count(*) as count from ';
+
 /**
  * A column whose value is written as SQL, such as a SET/MULTISET/SEQUENCE
  * literal, cannot take a placeholder for the whole value: Drizzle encodes the
@@ -412,6 +415,29 @@ export class CubridSession<
 			generatedIds,
 			returningIds,
 		) as PreparedQueryKind<CubridPreparedQueryHKT, T>;
+	}
+
+	/**
+	 * `db.$count()`. Drizzle's MySQL count names its column `count`, a reserved
+	 * word in CUBRID, and reads a mysql2-shaped `[rows, fields]` result. The
+	 * alias is dropped and the count read by position instead.
+	 */
+	override async count(countSql: SQL): Promise<number> {
+		const query = this.dialect.sqlToQuery(countSql);
+		if (!query.sql.startsWith(DRIZZLE_COUNT_PREFIX)) {
+			throw new Error(
+				`Unexpected $count() SQL from this drizzle-orm version; expected it to start with '${DRIZZLE_COUNT_PREFIX}'`,
+			);
+		}
+		const countQuery = `select count(*) from ${query.sql.slice(DRIZZLE_COUNT_PREFIX.length)}`;
+		this.logger.logQuery(countQuery, query.params);
+		const rows = await this.client.query(countQuery, query.params, ARRAY_ROWS);
+		const [row] = rows.map(assertArrayRow);
+		if (row === undefined) {
+			throw new Error('$count() returned no row');
+		}
+		// COUNT(*) is a BIGINT, which cubrid-client returns as a bigint.
+		return Number(row[0]);
 	}
 
 	async all<T = unknown>(query: SQL): Promise<T[]> {
