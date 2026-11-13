@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-13 (proposed)
-- **Accepted:** 2026-11-14 by maintainer yeongseon, recorded in PR #ACCEPT_PR
+- **Accepted:** 2026-11-14 by maintainer yeongseon, recorded in PR #227
 - **Decision scope:** Which Drizzle ORM modules the native CUBRID dialect may import, how it touches Drizzle internals, and the supported Drizzle version envelope
 - **Prerequisites:** [ADR 0003](0003-native-architecture-boundaries.md) (accepted), feasibility issue [#156](https://github.com/cubrid-lab/drizzle-cubrid/issues/156)
 - **Relation to ADR 0003:** ADR 0003 prefers Drizzle's *public* database-neutral extension points and, where they are insufficient, an upstream change or "an explicitly scoped standalone implementation". Drizzle has no public dialect API, so this ADR chooses the **explicitly scoped standalone implementation**, with a narrow, bounded exception for the Drizzle internals listed in decision 2.
@@ -62,7 +62,7 @@ ADR 0003 requires a CUBRID-native dialect with no foreign-database implementatio
 - [ ] CI type-checks the native dialect against the drizzle-orm peer floor and latest 0.45.x, runs the packed package on Node 18, and has a non-required canary for the next minor and 1.0.
 - [ ] The current `src/` export paths (including `cache/core/*` and the `mysql-core/*` re-exports) are confirmed from a clean consumer before the 0.x paths are removed.
 - [x] The upstream request (decision 6) is drafted and linked here ([#156 draft](https://github.com/cubrid-lab/drizzle-cubrid/issues/156#issuecomment-6865978359)); filing it is left to the maintainer.
-- [x] A maintainer accepts this ADR explicitly, recorded in this file (2026-11-14, PR #ACCEPT_PR).
+- [x] A maintainer accepts this ADR explicitly, recorded in this file (2026-11-14, PR #227).
 
 ## References
 
