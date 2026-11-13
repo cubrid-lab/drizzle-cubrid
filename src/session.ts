@@ -25,7 +25,19 @@ import * as drizzleUtils from 'drizzle-orm/utils';
 
 type QueryRow = Record<string, unknown>;
 
-export type CubridRawQueryResult = QueryRow[];
+/** What cubrid-client's `execute()` reports for INSERT, UPDATE and DELETE. */
+export interface CubridExecuteResult {
+	affectedRows: number;
+	/** The generated AUTO_INCREMENT value; a `bigint` beyond `Number.MAX_SAFE_INTEGER`. */
+	lastInsertId?: number | bigint;
+}
+
+/**
+ * Rows for a SELECT. For INSERT, UPDATE and DELETE built with Drizzle's query
+ * builders it is an empty array carrying `affectedRows` and, when the server
+ * reported one, `lastInsertId`.
+ */
+export type CubridRawQueryResult = QueryRow[] & Partial<CubridExecuteResult>;
 
 /** Transaction settings `cubrid-client` accepts in `transaction(callback, options)`. */
 export interface CubridTransactionOptions {
@@ -56,6 +68,13 @@ export interface CubridQueryable {
 		callback: (tx: CubridQueryable) => Promise<T>,
 		options?: CubridTransactionOptions,
 	): Promise<T>;
+	/**
+	 * Runs INSERT, UPDATE or DELETE and reports what it changed. `CubridClient`,
+	 * `CubridPool` and their transaction clients provide it (cubrid-client 1.3.0
+	 * and later). Without it, writes still run through `query()` but report no
+	 * counts, and `$returningId()` is refused.
+	 */
+	execute?(sql: string, params?: readonly unknown[]): Promise<CubridExecuteResult>;
 	beginTransaction?(): Promise<void>;
 	commit?(): Promise<void>;
 	rollback?(): Promise<void>;
@@ -124,6 +143,29 @@ const mapResultRow = (drizzleUtils as unknown as {
 const ARRAY_ROWS = { rowMode: 'array' } as const;
 
 /**
+ * Converts a generated key to the column's JavaScript type, such as `bigint`
+ * for `bigint({ mode: 'bigint' })`. Refuses a key the column type would round.
+ */
+function toKeyValue(column: Column, lastInsertId: number | bigint): unknown {
+	const value = column.mapFromDriverValue(lastInsertId);
+	if (typeof lastInsertId === 'bigint' && typeof value === 'number' && BigInt(value) !== lastInsertId) {
+		throw new Error(
+			`Generated key ${lastInsertId} of column ${column.name} is not exact as a number; declare the column with { mode: 'bigint' }`,
+		);
+	}
+	return value;
+}
+
+function withExecuteResult(rows: QueryRow[], meta: CubridExecuteResult): CubridRawQueryResult {
+	const result: CubridRawQueryResult = rows;
+	result.affectedRows = meta.affectedRows;
+	if (meta.lastInsertId !== undefined) {
+		result.lastInsertId = meta.lastInsertId;
+	}
+	return result;
+}
+
+/**
  * Object rows cannot be mapped by position: a repeated column label keeps only
  * one value and the key order is not the select-list order. Refuse them rather
  * than mapping values to the wrong fields.
@@ -137,19 +179,6 @@ function assertArrayRow(row: unknown): unknown[] {
 	);
 }
 
-function toNumber(value: unknown): number | undefined {
-	if (typeof value === 'number' && Number.isFinite(value)) {
-		return value;
-	}
-
-	if (typeof value === 'string') {
-		const parsed = Number(value);
-		return Number.isFinite(parsed) ? parsed : undefined;
-	}
-
-	return undefined;
-}
-
 export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MySqlPreparedQuery<T> {
 	static override readonly [entityKind] = 'CubridPreparedQuery';
 
@@ -159,7 +188,7 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 		private params: unknown[],
 		private logger: Logger,
 		cache: Cache | undefined,
-		queryMetadata:
+		private statementMetadata:
 			| { type: 'select' | 'update' | 'delete' | 'insert'; tables: string[] }
 			| undefined,
 		cacheConfig: WithCacheConfig | undefined,
@@ -168,7 +197,7 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 		private generatedIds?: Record<string, unknown>[],
 		private returningIds?: SelectedFieldsOrdered,
 	) {
-		super(cache, queryMetadata, cacheConfig);
+		super(cache, statementMetadata, cacheConfig);
 	}
 
 	async execute(placeholderValues: Record<string, unknown> = {}): Promise<T['execute']> {
@@ -176,43 +205,16 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 		this.logger.logQuery(this.queryString, params);
 
 		if (!this.fields && !this.customResultMapper) {
-			const result = await this.client.query(this.queryString, params);
 			if (this.returningIds) {
-				const meta = result[0] as QueryRow | undefined;
-				const insertId = toNumber(meta?.insertId);
-				const affectedRows = toNumber(meta?.affectedRows);
-
-				if (insertId !== undefined && affectedRows !== undefined) {
-					const returningResponse: Record<string, unknown>[] = [];
-					for (let rowOffset = 0; rowOffset < affectedRows; rowOffset++) {
-						const generated = this.generatedIds?.[rowOffset];
-						for (const column of this.returningIds) {
-							if (!is(column.field, Column)) {
-								continue;
-							}
-
-							const key = column.path[0];
-							const fieldMeta = column.field as Column & {
-								autoIncrement?: boolean;
-								defaultFn?: (() => unknown) | undefined;
-							};
-
-							if (column.field.primary && fieldMeta.autoIncrement) {
-								returningResponse.push({ [key]: insertId + rowOffset });
-								continue;
-							}
-
-							if (fieldMeta.defaultFn && generated && key in generated) {
-								returningResponse.push({ [key]: generated[key] });
-							}
-						}
-					}
-
-					return returningResponse as T['execute'];
-				}
+				return (await this.executeReturningIds(params)) as T['execute'];
 			}
-
-			return result as T['execute'];
+			const type = this.statementMetadata?.type;
+			const isWrite = type === 'insert' || type === 'update' || type === 'delete';
+			if (isWrite && typeof this.client.execute === 'function') {
+				const meta = await this.client.execute(this.queryString, params);
+				return withExecuteResult([], meta) as T['execute'];
+			}
+			return (await this.client.query(this.queryString, params)) as T['execute'];
 		}
 
 		const rows = await this.client.query(this.queryString, params, ARRAY_ROWS);
@@ -227,6 +229,56 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 		}).joinsNotNullableMap;
 
 		return rowArrays.map((row) => mapResultRow(this.fields!, row, joinsNotNullableMap)) as T['execute'];
+	}
+
+	/**
+	 * `$returningId()`: the keys of the rows an INSERT created. AUTO_INCREMENT
+	 * keys come from the `lastInsertId` the server reports, which is the first
+	 * key of the statement. CUBRID does not promise that the keys of a multi-row
+	 * INSERT are consecutive, so those are refused before anything is sent
+	 * rather than derived. `$defaultFn` keys are the values Drizzle generated.
+	 */
+	private async executeReturningIds(params: unknown[]): Promise<Record<string, unknown>[]> {
+		const returningIds = this.returningIds!;
+		const columns = returningIds.filter((column) => is(column.field, Column));
+		const isAutoIncrementKey = (column: SelectedFieldsOrdered[number]): boolean => {
+			const field = column.field as Column & { autoIncrement?: boolean };
+			return field.primary && field.autoIncrement === true;
+		};
+		const rowCount = this.generatedIds?.length ?? 0;
+		if (columns.some(isAutoIncrementKey) && rowCount !== 1) {
+			throw new Error(
+				rowCount === 0
+					? '$returningId() cannot report AUTO_INCREMENT keys of INSERT ... SELECT on CUBRID'
+					: '$returningId() can report an AUTO_INCREMENT key only for an INSERT of one row on CUBRID; insert the rows one at a time',
+			);
+		}
+		if (typeof this.client.execute !== 'function') {
+			throw new Error('$returningId() needs a client with execute() (cubrid-client 1.3.0 or later)');
+		}
+
+		const meta = await this.client.execute(this.queryString, params);
+		const response: Record<string, unknown>[] = [];
+		for (let rowOffset = 0; rowOffset < rowCount; rowOffset++) {
+			const generated = this.generatedIds?.[rowOffset];
+			for (const column of columns) {
+				const key = column.path[0]!;
+				if (isAutoIncrementKey(column)) {
+					// affectedRows is 2 when onDuplicateKeyUpdate() updated an existing
+					// row; CUBRID still reports a consumed AUTO_INCREMENT value then,
+					// which is no row's key.
+					if (meta.lastInsertId !== undefined && meta.affectedRows === 1) {
+						response.push({ [key]: toKeyValue(column.field as Column, meta.lastInsertId) });
+					}
+					continue;
+				}
+				const field = column.field as Column & { defaultFn?: (() => unknown) | undefined };
+				if (field.defaultFn && generated && key in generated) {
+					response.push({ [key]: generated[key] });
+				}
+			}
+		}
+		return response;
 	}
 
 	override async *iterator(): AsyncGenerator<T['iterator']> {

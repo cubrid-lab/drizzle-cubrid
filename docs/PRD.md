@@ -79,7 +79,7 @@ flowchart TD
 
 | Feature | MySQL | CUBRID | Impact on Dialect |
 |---------|-------|--------|-------------------|
-| RETURNING | Supported | ❌ Not supported | Use `insertId` from result |
+| RETURNING | Supported | ❌ Not supported | Use `$returningId()` (one-row INSERT) or `lastInsertId` / `affectedRows` on the result |
 | BOOLEAN | Native | ❌ Maps to SMALLINT | Type mapping |
 | JSON | Native | ❌ Not supported | Exclude JSON column type |
 | ARRAY | ❌ | SET, MULTISET, SEQUENCE | Custom column types |
