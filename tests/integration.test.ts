@@ -69,8 +69,8 @@ beforeAll(async () => {
 	const version = row?.v ?? '';
 	console.log(`CUBRID server version: ${version}`);
 	const expected = process.env.CUBRID_TEST_EXPECT_VERSION;
-	if (expected) {
-		expect(version.startsWith(expected)).toBe(true);
+	if (expected && !version.startsWith(expected)) {
+		throw new Error(`CUBRID server version ${version} does not start with CUBRID_TEST_EXPECT_VERSION=${expected}`);
 	}
 });
 
