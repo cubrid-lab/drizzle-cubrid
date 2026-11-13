@@ -6,74 +6,123 @@ export interface CubridCollectionConfig {
 	element?: ColumnBuilderBase;
 }
 
-function resolveElementSqlType(element?: ColumnBuilderBase): string {
-	if (!element) {
-		return 'VARCHAR(100)';
-	}
+// SQL types of Drizzle mysql-core columns used as collection elements, by
+// `config.columnType`. String types are handled separately because the DDL keeps
+// their declared length while the write cast does not.
+const ELEMENT_SQL_TYPES: Record<string, string> = {
+	MySqlInt: 'INTEGER',
+	MySqlMediumInt: 'INTEGER',
+	MySqlSmallInt: 'SMALLINT',
+	MySqlTinyInt: 'SMALLINT',
+	MySqlBoolean: 'SMALLINT',
+	MySqlYear: 'SMALLINT',
+	MySqlBigInt: 'BIGINT',
+	MySqlBigInt53: 'BIGINT',
+	MySqlBigInt64: 'BIGINT',
+	MySqlSerial: 'BIGINT',
+	MySqlDouble: 'DOUBLE',
+	MySqlReal: 'DOUBLE',
+	MySqlFloat: 'FLOAT',
+	MySqlDateTime: 'DATETIME',
+	MySqlDateTimeString: 'DATETIME',
+	MySqlTimestamp: 'TIMESTAMP',
+	MySqlTimestampString: 'TIMESTAMP',
+	MySqlDate: 'DATE',
+	MySqlDateString: 'DATE',
+	MySqlTime: 'TIME',
+};
 
-	const config = (element as { config?: Record<string, unknown> }).config;
-	if (!config) {
-		return 'VARCHAR(100)';
-	}
+// Cast to STRING on write. CHAR is not here: a CHAR set compares equal only to
+// a CHAR set, so its writes and filters cast to the declared CHAR(n).
+const STRING_ELEMENT_TYPES = new Set(['MySqlVarChar', 'MySqlText', 'MySqlEnumColumn', 'MySqlEnumObjectColumn']);
 
+const DECIMAL_ELEMENT_TYPES = new Set(['MySqlDecimal', 'MySqlDecimalNumber', 'MySqlDecimalBigInt']);
+
+type ElementConfig = Record<string, unknown>;
+
+function elementConfig(element?: ColumnBuilderBase): ElementConfig | undefined {
+	return (element as { config?: ElementConfig } | undefined)?.config;
+}
+
+function customElementType(config: ElementConfig): string | undefined {
 	if (
-		config.columnType === 'MySqlCustomColumn'
-		&& typeof config.customTypeParams === 'object'
-		&& config.customTypeParams !== null
-		&& 'dataType' in config.customTypeParams
-		&& typeof (config.customTypeParams as { dataType: unknown }).dataType === 'function'
+		config.columnType === 'MySqlCustomColumn' &&
+		typeof config.customTypeParams === 'object' &&
+		config.customTypeParams !== null &&
+		'dataType' in config.customTypeParams &&
+		typeof (config.customTypeParams as { dataType: unknown }).dataType === 'function'
 	) {
 		const dataType = (config.customTypeParams as { dataType: (arg: unknown) => string }).dataType;
 		return dataType(config.fieldConfig).toUpperCase();
 	}
+	return undefined;
+}
 
+function decimalElementType(config: ElementConfig): string | undefined {
+	if (typeof config.columnType !== 'string' || !DECIMAL_ELEMENT_TYPES.has(config.columnType)) {
+		return undefined;
+	}
+	const precision = typeof config.precision === 'number' ? config.precision : undefined;
+	const scale = typeof config.scale === 'number' ? config.scale : undefined;
+	if (precision !== undefined && scale !== undefined) {
+		return `DECIMAL(${precision},${scale})`;
+	}
+	return precision !== undefined ? `DECIMAL(${precision})` : 'DECIMAL';
+}
+
+/** The element type in the collection's DDL, e.g. `VARCHAR(50)` in `SET(VARCHAR(50))`. */
+function resolveElementSqlType(element?: ColumnBuilderBase): string {
+	const config = elementConfig(element);
+	if (!config) {
+		return 'VARCHAR(100)';
+	}
+	const known =
+		customElementType(config) ??
+		decimalElementType(config) ??
+		(typeof config.columnType === 'string' ? ELEMENT_SQL_TYPES[config.columnType] : undefined);
+	if (known) {
+		return known;
+	}
+	const length = typeof config.length === 'number' ? config.length : undefined;
 	if (config.columnType === 'MySqlVarChar') {
-		const length = typeof config.length === 'number' ? config.length : undefined;
 		return length ? `VARCHAR(${length})` : 'VARCHAR';
 	}
-
 	if (config.columnType === 'MySqlChar') {
-		const length = typeof config.length === 'number' ? config.length : undefined;
 		return length ? `CHAR(${length})` : 'CHAR';
 	}
-
-	if (config.columnType === 'MySqlInt') {
-		return 'INTEGER';
+	if (
+		config.columnType === 'MySqlText' ||
+		config.columnType === 'MySqlEnumColumn' ||
+		config.columnType === 'MySqlEnumObjectColumn'
+	) {
+		return 'STRING';
 	}
-
-	if (config.columnType === 'MySqlSmallInt') {
-		return 'SMALLINT';
-	}
-
-	if (config.columnType === 'MySqlTinyInt') {
-		return 'SMALLINT';
-	}
-
-	if (config.columnType === 'MySqlMediumInt') {
-		return 'INTEGER';
-	}
-
-	if (config.columnType === 'MySqlBigInt' || config.columnType === 'MySqlSerial') {
-		return 'BIGINT';
-	}
-
-	if (config.columnType === 'MySqlDecimal') {
-		const precision = typeof config.precision === 'number' ? config.precision : undefined;
-		const scale = typeof config.scale === 'number' ? config.scale : undefined;
-		if (precision !== undefined && scale !== undefined) {
-			return `DECIMAL(${precision},${scale})`;
-		}
-		if (precision !== undefined) {
-			return `DECIMAL(${precision})`;
-		}
-		return 'DECIMAL';
-	}
-
 	if (typeof config.dataType === 'string') {
 		return config.dataType.toUpperCase();
 	}
-
 	return 'VARCHAR(100)';
+}
+
+/**
+ * The element type a written value is cast to. Strings cast to `STRING`, so a
+ * schema without `element`, or with a shorter length than the table, never
+ * truncates or rejects a value the column accepts; the server still refuses a
+ * value too long for the column. An element type with no known SQL type gets
+ * no cast rather than a guessed one.
+ */
+function resolveElementCastType(element?: ColumnBuilderBase): string | undefined {
+	const config = elementConfig(element);
+	if (!config || (typeof config.columnType === 'string' && STRING_ELEMENT_TYPES.has(config.columnType))) {
+		return 'STRING';
+	}
+	if (config.columnType === 'MySqlChar') {
+		return resolveElementSqlType(element);
+	}
+	return (
+		customElementType(config) ??
+		decimalElementType(config) ??
+		(typeof config.columnType === 'string' ? ELEMENT_SQL_TYPES[config.columnType] : undefined)
+	);
 }
 
 /**
@@ -133,7 +182,7 @@ function toDriverElement(element: unknown): unknown {
  * writes each element like any other parameter, so quotes and backslashes need
  * no escaping here.
  */
-function toCollectionSql(kind: CollectionKind, value: unknown): SQL {
+function toCollectionSql(kind: CollectionKind, castType: string | undefined, value: unknown): SQL {
 	if (!Array.isArray(value)) {
 		throw new TypeError(`${kind} column value must be an array, got ${describeValue(value)}`);
 	}
@@ -142,7 +191,12 @@ function toCollectionSql(kind: CollectionKind, value: unknown): SQL {
 		value.map((element) => sql`${toDriverElement(element)}`),
 		sql`, `,
 	);
-	return sql`${sql.raw(kind)}{${elements}}`;
+	// The cast to the column's own type lets the server type the parameters:
+	// with typed binds, `SET q = SEQUENCE{?, ?}` in an UPDATE fails with -494
+	// "Cannot coerce host var to type sequence", and the cast form works on
+	// both binding paths. The cast type comes from the schema, never from values.
+	const literal = sql`${sql.raw(kind)}{${elements}}`;
+	return castType === undefined ? literal : sql`CAST(${literal} AS ${sql.raw(`${kind}(${castType})`)})`;
 }
 
 /** cubrid-client 1.x decodes collection columns into arrays. */
@@ -155,7 +209,8 @@ function fromCollectionDriverValue(kind: CollectionKind, value: unknown): unknow
 	return value;
 }
 
-function createCollectionType<TElement>(kind: CollectionKind) {
+function createCollectionType<TElement>(kind: CollectionKind, config: CubridCollectionConfig | undefined) {
+	const castType = resolveElementCastType(config?.element);
 	return customType<{
 		data: (TElement | null)[];
 		driverData: unknown[];
@@ -168,7 +223,7 @@ function createCollectionType<TElement>(kind: CollectionKind) {
 			return fromCollectionDriverValue(kind, value) as (TElement | null)[];
 		},
 		toDriver(value) {
-			return toCollectionSql(kind, value);
+			return toCollectionSql(kind, castType, value);
 		},
 	});
 }
@@ -182,7 +237,7 @@ export function cubridSet<TElement extends CubridCollectionElement = string>(
 	name: string,
 	config?: CubridCollectionConfig,
 ) {
-	return createCollectionType<TElement>('SET')(name, config);
+	return createCollectionType<TElement>('SET', config)(name, config);
 }
 export type CubridSetColumnBuilder<TElement extends CubridCollectionElement = string> = ReturnType<
 	typeof cubridSet<TElement>
@@ -193,7 +248,7 @@ export function cubridMultiset<TElement extends CubridCollectionElement = string
 	name: string,
 	config?: CubridCollectionConfig,
 ) {
-	return createCollectionType<TElement>('MULTISET')(name, config);
+	return createCollectionType<TElement>('MULTISET', config)(name, config);
 }
 export type CubridMultisetColumnBuilder<TElement extends CubridCollectionElement = string> =
 	ReturnType<typeof cubridMultiset<TElement>>;
@@ -203,7 +258,7 @@ export function cubridSequence<TElement extends CubridCollectionElement = string
 	name: string,
 	config?: CubridCollectionConfig,
 ) {
-	return createCollectionType<TElement>('SEQUENCE')(name, config);
+	return createCollectionType<TElement>('SEQUENCE', config)(name, config);
 }
 export type CubridSequenceColumnBuilder<TElement extends CubridCollectionElement = string> =
 	ReturnType<typeof cubridSequence<TElement>>;

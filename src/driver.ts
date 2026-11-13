@@ -18,12 +18,14 @@ import { isConfig } from 'drizzle-orm/utils';
 import {
 	type CubridPreparedQueryHKT,
 	type CubridQueryResultHKT,
+	type CubridBinding,
 	type CubridQueryable,
 	CubridSession,
 } from './session.js';
 
 export interface CubridDriverOptions {
 	logger?: Logger;
+	binding?: CubridBinding;
 }
 
 export class CubridDriver {
@@ -42,6 +44,7 @@ export class CubridDriver {
 		return new CubridSession(this.client, this.dialect, schema, {
 			logger: this.options.logger,
 			mode,
+			binding: this.options.binding,
 		}) as CubridSession<TFullSchema, TSchema>;
 	}
 }
@@ -53,7 +56,10 @@ export class CubridDatabase<
 }
 
 export type CubridDrizzleConfig<TSchema extends Record<string, unknown> = Record<string, never>> =
-	Omit<DrizzleConfig<TSchema>, 'schema'> &
+	Omit<DrizzleConfig<TSchema>, 'schema'> & {
+		/** How values reach the server; `'prepared'` (typed binds) by default. See {@link CubridBinding}. */
+		binding?: CubridBinding;
+	} &
 		(
 			| {
 					schema: TSchema;
@@ -102,7 +108,7 @@ function construct<TSchema extends Record<string, unknown>, TClient extends Cubr
 	}
 
 	const mode = config.mode ?? 'default';
-	const driver = new CubridDriver(client, dialect, { logger });
+	const driver = new CubridDriver(client, dialect, { logger, binding: config.binding });
 	const session = driver.createSession<TSchema, ExtractTablesWithRelations<TSchema>>(schema, mode);
 	const db = new CubridDatabase(dialect, session, schema, mode);
 	return Object.assign(db, { $client: client }) as DrizzleWithClient<TSchema, TClient>;

@@ -399,6 +399,42 @@ const result2 = await db
   .from(users);
 ```
 
+## How values reach the server
+
+By default every value travels as a **typed bind** through cubrid-client's
+`queryPrepared()` and `executePrepared()`: the SQL text keeps its `?` markers,
+so no value ever becomes part of the SQL. Pass `binding: "literal"` to have the
+driver write each value into the SQL text as an escaped literal instead, which
+saves one round trip per statement:
+
+```ts
+const db = drizzle(client);                          // typed binds (default)
+const fast = drizzle(client, { binding: "literal" }); // SQL literals
+```
+
+Both store the same values for the column types tested on CUBRID 11.4
+(integers, `bigint` beyond 2^53, decimals, doubles, strings with quotes,
+backslashes, `--` and UTF-8, NULL, `Buffer` bytes, dates, booleans), and both keep
+`WHERE` predicates intact for a negative number after `-` and for quote or
+comment payloads. The differences come from cubrid-client
+([prepared binding](https://github.com/cubrid-lab/cubrid-client/blob/main/docs/TYPES.md#prepared-binding)):
+`` sql`SELECT ${1.5}` `` returns the number `1.5` with typed binds and the
+string `"1.5"` with literals, an empty `Buffer` is refused with typed binds,
+a fraction written to a TIME column is rounded with typed binds and refused
+with literals, some value errors report a different code (an ENUM value that
+does not fit is `-181` rather than `-494`), and typed binds take more round
+trips per statement.
+
+`binary()` and `varbinary()` encode their value as a string, which a CUBRID
+`BIT VARYING` column accepts only from a literal: use `binding: "literal"` for
+them, or a `customType` that passes a `Buffer`.
+
+A custom client passed to `drizzle()` needs `queryPrepared()` (and
+`executePrepared()` for write counts) for the default; without them it is
+refused, and you can pass `binding: "literal"`. `.prepare()` builds the SQL once
+on the Drizzle side; each `execute()` still prepares and releases its own
+statement on the server.
+
 ## Placeholders (Prepared Statements)
 
 Use `placeholder()` to create reusable prepared queries:

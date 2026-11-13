@@ -15,6 +15,13 @@ class MockClient implements CubridQueryable {
 		this.queries.push({ sql: sqlText, params });
 		return [];
 	}
+
+	async queryPrepared<T extends Record<string, unknown>>(
+		sqlText: string,
+		params?: readonly unknown[],
+	): Promise<T[]> {
+		return this.query<T>(sqlText, params);
+	}
 }
 
 const users = cubridTable('users', {

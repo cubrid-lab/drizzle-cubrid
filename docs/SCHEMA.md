@@ -212,6 +212,10 @@ set<number>("ids", { element: int("id") }); // SET(INTEGER), number[]
   or `null`; nested arrays and other objects are refused before anything is
   sent. `[]` writes an empty collection. Bytes written into a string collection
   are stored as their hex text.
+- **Element types without a CUBRID mapping** (such as `json`, `binary` and
+  `varbinary` elements) are written without a cast. Under the default typed
+  binding CUBRID refuses to update such a collection (-494); use
+  `binding: "literal"` for it.
 - **Placeholders.** `sql.placeholder()` cannot stand for a whole collection
   value in a prepared query; it is refused when the query runs. Pass the array
   directly.
