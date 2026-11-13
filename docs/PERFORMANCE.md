@@ -26,7 +26,7 @@ flowchart TD
 
 ## Benchmark Results
 
-Source: [cubrid-benchmark](https://github.com/cubrid-labs/cubrid-benchmark)
+Source: [cubrid-benchmark](https://github.com/cubrid-lab/cubrid-benchmark)
 
 Environment: Intel Core i5-9400F @ 2.90GHz, 6 cores, Linux x86_64, Docker containers.
 
@@ -68,7 +68,7 @@ flowchart TD
 
 ## Running Benchmarks
 
-1. Clone `https://github.com/cubrid-labs/cubrid-benchmark`.
+1. Clone `https://github.com/cubrid-lab/cubrid-benchmark`.
 2. Start benchmark Docker services for CUBRID and MySQL.
 3. Run the TypeScript driver baseline suite (`cubrid-client` vs `mysql2`).
 4. Add Drizzle ORM scenarios using the same dataset shape for fair comparison.

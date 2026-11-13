@@ -47,4 +47,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dual module format: ESM + CJS with TypeScript declarations
 - 49 offline tests with 99%+ code coverage
 
-[0.1.0]: https://github.com/cubrid-labs/drizzle-cubrid/releases/tag/v0.1.0
+[0.1.0]: https://github.com/cubrid-lab/drizzle-cubrid/releases/tag/v0.1.0

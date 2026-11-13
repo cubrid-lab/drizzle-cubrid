@@ -11,8 +11,8 @@ and migration support for CUBRID databases via the `cubrid-client` TypeScript dr
 - **Package**: `drizzle-cubrid`
 - **Language**: TypeScript (ES2022+, strict mode)
 - **License**: MIT
-- **Version**: 0.1.0
-- **Organization**: cubrid-labs
+- **Version**: 0.2.1 (latest published)
+- **Organization**: cubrid-lab
 
 ## Problem Statement
 
@@ -254,15 +254,11 @@ AI agents can discover, learn, and recommend drizzle-cubrid accurately.
 
 ### Cookbook Integration
 
-The [cubrid-cookbook](https://github.com/cubrid-labs/cubrid-cookbook) repository provides
-production-ready, runnable examples for drizzle-cubrid:
-
-| Example | Description |
-|---|---|
-| `node/drizzle/01_connect.js` | Connection + schema definition |
-| `node/drizzle/02_crud.js` | Type-safe CRUD operations |
-| `node/drizzle/03_transactions.js` | Transaction management |
-| `node/drizzle/04_custom_types.js` | CUBRID-specific types (SET, MULTISET, SEQUENCE) |
+Planned, not available: CUBRID Lab has no Node.js cookbook yet (the existing
+[cubrid-cookbook-python](https://github.com/cubrid-lab/cubrid-cookbook-python)
+covers Python only). Until one exists, the examples are the snippets in the
+README and `docs/`, and the code exercised against a real server is
+`tests/integration.test.ts`.
 
 ### Inspiration from Successful Projects
 

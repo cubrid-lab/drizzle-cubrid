@@ -15,26 +15,24 @@ Key facts:
 
 ## Docs
 
-- [README](https://github.com/cubrid-labs/drizzle-cubrid/blob/main/README.md): Full documentation with schema definition, queries, custom types, transactions
-- [Product Requirements](https://github.com/cubrid-labs/drizzle-cubrid/blob/main/docs/PRD.md): Product requirements document with Example-first Design Philosophy
+- [README](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md): Full documentation with schema definition, queries, custom types, transactions
+- [Product Requirements](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/docs/PRD.md): Product requirements document with Example-first Design Philosophy
 
 ## Examples
 
-- [Define Schema](https://github.com/cubrid-labs/drizzle-cubrid/blob/main/README.md#define-schema): Table and column definition with cubridTable
-- [Query Examples](https://github.com/cubrid-labs/drizzle-cubrid/blob/main/README.md#query): Insert, select, where, update, delete operations
-- [CUBRID-Specific Types](https://github.com/cubrid-labs/drizzle-cubrid/blob/main/README.md#cubrid-specific-types): SET, MULTISET, SEQUENCE, MONETARY column types
-- [Transactions](https://github.com/cubrid-labs/drizzle-cubrid/blob/main/README.md#transactions): Transaction support with automatic commit/rollback
-- [CUBRID Cookbook — Drizzle](https://github.com/cubrid-labs/cubrid-cookbook/tree/main/node/drizzle): Production-ready examples — connect, CRUD, transactions, custom types
+- [Define Schema](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#define-schema): Table and column definition with cubridTable
+- [Query Examples](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#query): Insert, select, where, update, delete operations
+- [CUBRID-Specific Types](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#cubrid-specific-types): SET, MULTISET, SEQUENCE, MONETARY column types
+- [Transactions](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#transactions): Transaction support with automatic commit/rollback
 
 ## API Reference
 
-- [Source — index.ts](https://github.com/cubrid-labs/drizzle-cubrid/blob/main/src/index.ts): Public API exports — drizzle(), cubridTable, column types
-- [Source — driver.ts](https://github.com/cubrid-labs/drizzle-cubrid/blob/main/src/driver.ts): Drizzle driver adapter for cubrid-client
-- [Source — columns/](https://github.com/cubrid-labs/drizzle-cubrid/tree/main/src/columns): Column type definitions including CUBRID-specific types
+- [Source — index.ts](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/src/index.ts): Public API exports — drizzle(), cubridTable, column types
+- [Source — driver.ts](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/src/driver.ts): Drizzle driver adapter for cubrid-client
+- [Source — columns/](https://github.com/cubrid-lab/drizzle-cubrid/tree/main/src/columns): Column type definitions including CUBRID-specific types
 
 ## Ecosystem
 
-- [cubrid-client](https://github.com/cubrid-labs/cubrid-client): TypeScript CUBRID driver (required dependency)
-- [cubrid-cookbook](https://github.com/cubrid-labs/cubrid-cookbook): Production-ready examples across Python, Node.js, and Go
+- [cubrid-client](https://github.com/cubrid-lab/cubrid-client): TypeScript CUBRID driver (required dependency)
 - [Drizzle ORM](https://orm.drizzle.team/): The Drizzle ORM framework
 - [CUBRID](https://www.cubrid.org/): The CUBRID database

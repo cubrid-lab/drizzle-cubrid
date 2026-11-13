@@ -51,7 +51,11 @@ export const metrics = cubridTable("metrics", {
 });
 ```
 
-> **Note**: CUBRID does not have a native `BOOLEAN` type. The `boolean()` column compiles to `SMALLINT` with values 0/1. The `serial()` column compiles to `BIGINT UNSIGNED AUTO_INCREMENT`.
+> **Note**: The column builders are drizzle-orm's MySQL builders, re-exported unchanged, so their SQL type names are MySQL's. drizzle-cubrid generates no DDL. CUBRID has no `BOOLEAN` and no `UNSIGNED` types (CUBRID 11.4 rejects `CREATE TABLE t (b BOOLEAN)` and `BIGINT UNSIGNED`), so create the tables yourself:
+> - Declare a `boolean()` column as `SMALLINT`. `true`/`false` are stored as 1/0 and read back as `true`/`false`.
+> - Declare a `serial()` column as `BIGINT AUTO_INCREMENT`.
+>
+> Schema migrations are tracked in [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163).
 
 ### String Types
 
