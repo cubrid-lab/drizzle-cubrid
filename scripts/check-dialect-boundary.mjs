@@ -134,6 +134,9 @@ export function scanText(file, text, scope = 'src') {
 		} else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
 			const spec = stringValue(node.moduleReference.expression);
 			if (spec !== undefined) checkSpecifier(spec, node.moduleReference.expression.getStart(source));
+		} else if (ts.isModuleDeclaration(node) && ts.isStringLiteral(node.name)) {
+			// declare module 'drizzle-orm/mysql-core' { … } augments that module.
+			checkSpecifier(node.name.text, node.name.getStart(source));
 		} else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
 			const spec = stringValue(node.argument.literal);
 			if (spec !== undefined) checkSpecifier(spec, node.argument.getStart(source));

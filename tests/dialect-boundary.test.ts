@@ -36,6 +36,7 @@ describe('import rule', () => {
 		["import { Pool } from 'pg/lib';", 'import:pg/lib'],
 		["import type { Cache } from 'drizzle-orm/cache/core/cache';", 'import:drizzle-orm/cache/core/cache'],
 		["import { DrizzleError } from 'drizzle-orm/errors';", 'import:drizzle-orm/errors'],
+		["declare module 'drizzle-orm/mysql-core' { interface X {} }", 'import:drizzle-orm/mysql-core'],
 	])('catches %s', (code, finding) => {
 		expect(native(code)).toContain(finding);
 	});
