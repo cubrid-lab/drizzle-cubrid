@@ -1,0 +1,2279 @@
+{
+	"entries": [
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlBigInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlBigInt53",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlBigInt64",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlBoolean",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlChar",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlCustomColumn",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDatabase",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDate",
+			"count": 3
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDateBuilder",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDateString",
+			"count": 3
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDateStringBuilder",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDateTime",
+			"count": 3
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDateTimeBuilder",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDateTimeString",
+			"count": 3
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDateTimeStringBuilder",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDecimal",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDecimalBigInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDecimalNumber",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDialect",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlDouble",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "mysqlEnum",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlEnumColumn",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlEnumObjectColumn",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlFloat",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlMediumInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlPreparedQuery",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlReal",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlSerial",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlSession",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlSmallInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "mysqlTable",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlText",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlTime",
+			"count": 3
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlTimeBuilder",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlTimestamp",
+			"count": 3
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlTimestampBuilder",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlTimestampString",
+			"count": 3
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlTimestampStringBuilder",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlTinyInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlTransaction",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlVarChar",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
+			"match": "MySqlYear",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/logger",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/bigint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/binary",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/boolean",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/char",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/custom",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/date",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/datetime",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/decimal",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/double",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/enum",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/float",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/int",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/mediumint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/real",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/serial",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/smallint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/text",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/time",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/timestamp",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/tinyint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/varbinary",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/varchar",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/year",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/db",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/dialect",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/session",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlCustomColumn",
+			"count": 6
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlCustomColumnBuilder",
+			"count": 6
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlDatabase",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlDialect",
+			"count": 3
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "mysqlEnum",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlPreparedQuery",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlPreparedQueryConfig",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlPreparedQueryHKT",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlQueryResultHKT",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlSession",
+			"count": 3
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlTableFn",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlTransaction",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "identifier",
+			"match": "MySqlTransactionConfig",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/cache/core/cache",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/cache/core/types",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/logger",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/bigint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/binary",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/boolean",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/char",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/custom",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/date",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/datetime",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/decimal",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/double",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/enum",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/float",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/int",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/mediumint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/real",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/serial",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/smallint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/text",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/time",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/timestamp",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/tinyint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/varbinary",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/varchar",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/year",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/db",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/dialect",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/query-builders/select.types",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.cts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/session",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlCustomColumn",
+			"count": 6
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlCustomColumnBuilder",
+			"count": 6
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlDatabase",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlDialect",
+			"count": 3
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "mysqlEnum",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlPreparedQuery",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlPreparedQueryConfig",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlPreparedQueryHKT",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlQueryResultHKT",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlSession",
+			"count": 3
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlTableFn",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlTransaction",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "identifier",
+			"match": "MySqlTransactionConfig",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/cache/core/cache",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/cache/core/types",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/logger",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/bigint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/binary",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/boolean",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/char",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/custom",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/date",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/datetime",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/decimal",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/double",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/enum",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/float",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/int",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/mediumint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/real",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/serial",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/smallint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/text",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/time",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/timestamp",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/tinyint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/varbinary",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/varchar",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/year",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/db",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/dialect",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/query-builders/select.types",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.d.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/session",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlBigInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlBigInt53",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlBigInt64",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlBoolean",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlChar",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlCustomColumn",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDatabase",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDate",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDateBuilder",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDateString",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDateStringBuilder",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDateTime",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDateTimeBuilder",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDateTimeString",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDateTimeStringBuilder",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDecimal",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDecimalBigInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDecimalNumber",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDialect",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlDouble",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "mysqlEnum",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlEnumColumn",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlEnumObjectColumn",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlFloat",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlMediumInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlPreparedQuery",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlReal",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlSerial",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlSession",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlSmallInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "mysqlTable",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlText",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlTime",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlTimeBuilder",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlTimestamp",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlTimestampBuilder",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlTimestampString",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlTimestampStringBuilder",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlTinyInt",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlTransaction",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlVarChar",
+			"count": 2
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "identifier",
+			"match": "MySqlYear",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/logger",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/bigint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/binary",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/boolean",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/char",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/custom",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/date",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/datetime",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/decimal",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/double",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/enum",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/float",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/int",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/mediumint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/real",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/serial",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/smallint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/text",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/time",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/timestamp",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/tinyint",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/varbinary",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/varchar",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/year",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/db",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/dialect",
+			"count": 1
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.js",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/session",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "identifier",
+			"match": "mysqlEnum",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/bigint",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/binary",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/boolean",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/char",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/custom",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/decimal",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/double",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/enum",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/float",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/int",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/mediumint",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/real",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/serial",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/smallint",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/text",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/tinyint",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/varbinary",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/varchar",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/year",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlBigInt",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlBigInt53",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlBigInt64",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlBoolean",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlChar",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlCustomColumn",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlDate",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlDateString",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlDateTime",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlDateTimeString",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlDecimal",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlDecimalBigInt",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlDecimalNumber",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlDouble",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlEnumColumn",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlEnumObjectColumn",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlFloat",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlInt",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlMediumInt",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlReal",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlSerial",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlSmallInt",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlText",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlTime",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlTimestamp",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlTimestampString",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlTinyInt",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlVarChar",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "identifier",
+			"match": "MySqlYear",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/collections.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlDate",
+			"count": 5
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlDateBuilder",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlDateString",
+			"count": 5
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlDateStringBuilder",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlDateTime",
+			"count": 5
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlDateTimeBuilder",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlDateTimeString",
+			"count": 5
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlDateTimeStringBuilder",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlTime",
+			"count": 5
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlTimeBuilder",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlTimestamp",
+			"count": 5
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlTimestampBuilder",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlTimestampString",
+			"count": 5
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "identifier",
+			"match": "MySqlTimestampStringBuilder",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/date",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/datetime",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/time",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/columns/temporal.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/columns/timestamp",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/dialect.ts",
+			"rule": "identifier",
+			"match": "MySqlDialect",
+			"count": 15
+		},
+		{
+			"scope": "src",
+			"file": "src/dialect.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/dialect",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/driver.ts",
+			"rule": "identifier",
+			"match": "MySqlDatabase",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/driver.ts",
+			"rule": "identifier",
+			"match": "MySqlDialect",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/driver.ts",
+			"rule": "import",
+			"match": "drizzle-orm/logger",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/driver.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/db",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/driver.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/dialect",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/driver.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/session",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "identifier",
+			"match": "MySqlDialect",
+			"count": 4
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "identifier",
+			"match": "MySqlPreparedQuery",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "identifier",
+			"match": "MySqlPreparedQueryConfig",
+			"count": 4
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "identifier",
+			"match": "MySqlPreparedQueryHKT",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "identifier",
+			"match": "MySqlQueryResultHKT",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "identifier",
+			"match": "MySqlSession",
+			"count": 3
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "identifier",
+			"match": "MySqlSessionBase",
+			"count": 5
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "identifier",
+			"match": "MySqlTransaction",
+			"count": 3
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "identifier",
+			"match": "MySqlTransactionBase",
+			"count": 3
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "identifier",
+			"match": "MySqlTransactionConfig",
+			"count": 3
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "import",
+			"match": "drizzle-orm/cache/core/cache",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "import",
+			"match": "drizzle-orm/cache/core/types",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "import",
+			"match": "drizzle-orm/logger",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/dialect",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/query-builders/select.types",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/session.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core/session",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/table.ts",
+			"rule": "identifier",
+			"match": "mysqlTable",
+			"count": 2
+		},
+		{
+			"scope": "src",
+			"file": "src/table.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core",
+			"count": 1
+		},
+		{
+			"scope": "src",
+			"file": "src/types.ts",
+			"rule": "import",
+			"match": "drizzle-orm/mysql-core",
+			"count": 1
+		}
+	]
+}

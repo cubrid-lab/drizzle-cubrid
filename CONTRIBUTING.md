@@ -110,6 +110,33 @@ npm run lint
 
 ---
 
+## Foreign-dialect boundary
+
+drizzle-cubrid is moving from Drizzle's MySQL classes to a CUBRID-native
+dialect ([ADR 0003](docs/adr/0003-native-architecture-boundaries.md),
+[ADR 0007](docs/adr/0007-drizzle-extension-boundary.md)). CI runs
+`scripts/check-dialect-boundary.mjs` on `src` and on the packed npm tarball. It
+reports:
+
+- a `drizzle-orm/...` import outside ADR 0007's neutral list (for example
+  `drizzle-orm/mysql-core` or `drizzle-orm/cache/...`), or a driver package for
+  another database
+- a foreign dialect's class or builder name (`MySqlDialect`, `mysqlTable`,
+  `PgTable`, ...) or backend mode (`'planetscale'`, `dialect: 'mysql'`) in code;
+  comments are ignored
+- in native code (`src/native/**`), any Drizzle internal access outside
+  `src/native/internal.ts`
+
+Native code may have no findings at all. The 0.x code's existing findings are
+pinned by file, rule and count in `scripts/dialect-boundary-baseline.json`: a
+new or increased finding fails, and so does an entry that no longer occurs, so
+the baseline only shrinks as the native replacements land. Run
+`npm run check:boundary` locally. When a change removes 0.x findings, refresh
+the baseline with
+`node scripts/check-dialect-boundary.mjs src --update-baseline` and
+`node scripts/check-dialect-boundary.mjs package --pack --update-baseline`
+(after `npm run build`), and explain any entry that grows in the PR.
+
 ## Temporary scripts, probes and workflows
 
 One-off compatibility probes, debugging helpers, migration code and workaround
