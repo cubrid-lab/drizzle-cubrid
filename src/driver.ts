@@ -3,7 +3,7 @@ import { entityKind } from 'drizzle-orm/entity';
 import { DefaultLogger } from 'drizzle-orm/logger';
 import type { Logger } from 'drizzle-orm/logger';
 import { MySqlDatabase } from 'drizzle-orm/mysql-core/db';
-import { MySqlDialect } from 'drizzle-orm/mysql-core/dialect';
+import type { MySqlDialect } from 'drizzle-orm/mysql-core/dialect';
 import type { Mode } from 'drizzle-orm/mysql-core/session';
 import {
 	createTableRelationsHelpers,
@@ -15,6 +15,7 @@ import {
 import type { DrizzleConfig } from 'drizzle-orm/utils';
 import { isConfig } from 'drizzle-orm/utils';
 
+import { CubridDialect } from './dialect.js';
 import {
 	type CubridPreparedQueryHKT,
 	type CubridQueryResultHKT,
@@ -85,7 +86,7 @@ function construct<TSchema extends Record<string, unknown>, TClient extends Cubr
 	client: TClient,
 	config: CubridConstructConfig<TSchema> = {},
 ): DrizzleWithClient<TSchema, TClient> {
-	const dialect = new MySqlDialect({ casing: config.casing });
+	const dialect = new CubridDialect({ casing: config.casing });
 
 	let logger: Logger | undefined;
 	if (config.logger === true) {

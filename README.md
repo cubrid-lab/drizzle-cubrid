@@ -33,7 +33,7 @@
 - **Drizzle query API** — `select()`, `insert()`, `update()`, `delete()` with the familiar Drizzle chain syntax
 - **CUBRID-specific types** — `SET`, `MULTISET`, `SEQUENCE`, `MONETARY` as native column builders
 - **Transactions with savepoints** — Nested transaction support via CUBRID savepoints
-- **Relations** — Drizzle relational query API (`db.query.users.findMany({ with: { posts: true } })`)
+- **Relational queries** — `db.query.users.findMany()` / `findFirst()` with `where`, `columns`, `orderBy` and `limit`; loading relations with `with` is not supported yet (#200)
 - **99%+ test coverage** — 52 offline tests, no database required for CI
 
 ### Architecture
@@ -268,14 +268,25 @@ export const postsRelations = relations(posts, ({ one }) => ({
 ```
 
 ```ts
+import { eq } from "drizzle-cubrid";
 import * as schema from "./schema";
+import { posts, users } from "./schema";
 
 const db = drizzle(client, { schema, mode: "default" });
 
-const usersWithPosts = await db.query.users.findMany({
-  with: { posts: true },
-});
+const alice = await db.query.users.findFirst({ where: eq(users.id, 1) });
+const alicesPosts = await db.select().from(posts).where(eq(posts.author_id, 1));
 ```
+
+Loading relations with `with` is not supported on CUBRID yet and throws:
+Drizzle's MySQL SQL for it uses `LEFT JOIN LATERAL` (`mode: "default"`), which
+CUBRID lacks, or JSON aggregation (`mode: "planetscale"`), which CUBRID rejects
+for DATE/DATETIME values and which garbles non-ASCII text in an ISO-8859-1
+database; Drizzle also reads that JSON with `JSON.parse`, which rounds BIGINT
+values beyond 2^53
+([#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200)). Query the
+related table separately or use a join; native support is tracked in
+[#158](https://github.com/cubrid-lab/drizzle-cubrid/issues/158).
 
 ## Error Handling
 
