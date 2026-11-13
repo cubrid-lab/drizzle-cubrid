@@ -10,7 +10,7 @@ import { type CubridClient, type CubridPool, createClient, createPool } from 'cu
 import { eq, gt, sql, TransactionRollbackError } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { bigint, int, varchar } from '../src/columns';
+import { bigint, cubridMultiset, cubridSequence, cubridSet, int, varchar } from '../src/columns';
 import { drizzle } from '../src/driver';
 import { cubridTable } from '../src/table';
 
@@ -275,5 +275,41 @@ describe('writes report affected rows and generated keys (#182)', () => {
 
 		expect(inserted.lastInsertId).toBe(9007199254740993n);
 		expect(keys).toEqual([{ id: 9007199254740994n }]);
+	});
+});
+
+describe('collection columns round-trip (#184)', () => {
+	const table = name('coll');
+	const docs = cubridTable(table, {
+		id: int('id').primaryKey(),
+		s: cubridSet('s', { element: varchar('e', { length: 20 }) }),
+		m: cubridMultiset<number>('m', { element: int('e') }),
+		q: cubridSequence('q', { element: varchar('e', { length: 20 }) }),
+	});
+
+	beforeAll(() =>
+		createTable(table, 'id INT PRIMARY KEY, s SET(VARCHAR(20)), m MULTISET(INTEGER), q SEQUENCE(VARCHAR(20))'),
+	);
+
+	it('writes and reads SET, MULTISET and SEQUENCE values with special characters', async () => {
+		const db = drizzle(client);
+
+		await db.insert(docs).values({ id: 1, s: ['b', 'a', 'b'], m: [3, 1, 3], q: ["it's", 'back\\slash', '한글', null] });
+		await db.insert(docs).values({ id: 2, s: [], m: [], q: [] });
+		await db.update(docs).set({ q: ['z', 'y'] }).where(eq(docs.id, 2));
+
+		expect(await db.select().from(docs).orderBy(docs.id)).toEqual([
+			// SET removes duplicates; SET and MULTISET order is the server's.
+			{ id: 1, s: ['a', 'b'], m: [1, 3, 3], q: ["it's", 'back\\slash', '한글', null] },
+			{ id: 2, s: [], m: [], q: ['z', 'y'] },
+		]);
+	});
+
+	it('filters on a collection value', async () => {
+		const db = drizzle(client);
+
+		const rows = await db.select({ id: docs.id }).from(docs).where(eq(docs.q, ['z', 'y']));
+
+		expect(rows).toEqual([{ id: 2 }]);
 	});
 });

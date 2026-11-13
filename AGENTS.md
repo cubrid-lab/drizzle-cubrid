@@ -109,12 +109,25 @@ npm run build         # Build ESM + CJS via tsup
 npm run lint          # ESLint check
 npm run format        # ESLint auto-fix
 npm run typecheck     # tsc --noEmit
-npm run integration   # Defined in package.json, but its target test file is not checked in; do not claim this passes
+npm run integration   # Live CUBRID tests; needs CUBRID_TEST_HOST (see below)
 ```
 
 ### Real CUBRID integration tests
 
-This repository currently has **no checked-in Docker Compose manifest or `tests/integration.test.ts`**, despite having an `npm run integration` script. Do not run non-existent setup commands or represent unit tests as live database proof. The real CUBRID harness, explicit server version and non-empty integration cases are tracked in [#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164). Use an approved disposable test environment when that implementation exists.
+Run the live CUBRID tests against a disposable database:
+
+```bash
+docker run -d --name cubrid-test -e CUBRID_DB=testdb -p 33000:33000 cubrid/cubrid:11.4
+CUBRID_TEST_HOST=127.0.0.1 node scripts/wait-for-cubrid.mjs 300
+CUBRID_TEST_HOST=127.0.0.1 npm run integration
+```
+
+`tests/integration.test.ts` reads `CUBRID_TEST_HOST` (required), `CUBRID_TEST_PORT`,
+`CUBRID_TEST_DATABASE`, `CUBRID_TEST_USER` and `CUBRID_TEST_PASSWORD`. Without a host
+it fails instead of skipping. It creates uniquely named tables and drops them at
+the end. CI runs it on every code change in the **Live CUBRID 11.4** job, which
+also fails if any test was skipped. Mock-only unit tests are not database
+evidence; cover database behavior here.
 
 ## Code Conventions
 
@@ -202,7 +215,7 @@ flowchart TD
 
 - **Unit tests** — mock `cubrid-client` with fake implementations
 - **Query tests** — use Drizzle's `drizzle.mock()` or equivalent for SQL generation verification
-- **Integration tests** — **not implemented in this repository yet**: the script refers to a missing test file, and no Docker Compose setup is checked in. See #164. Do not claim real database verification until an actual nonempty harness passes.
+- **Integration tests** — `tests/integration.test.ts`, run by `npm run integration` against a real CUBRID server and in the **Live CUBRID 11.4** CI job; it fails rather than skips without a database.
 
 ### Coverage
 

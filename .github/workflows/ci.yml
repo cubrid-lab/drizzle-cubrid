@@ -118,6 +118,51 @@ jobs:
       - name: Test
         run: npx vitest run
 
+  live-cubrid:
+    name: Live CUBRID 11.4
+    needs: impact
+    if: ${{ needs.impact.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      cubrid:
+        image: cubrid/cubrid:11.4
+        env:
+          CUBRID_DB: testdb
+        ports:
+          - 33000:33000
+    env:
+      CUBRID_TEST_HOST: 127.0.0.1
+      CUBRID_TEST_PORT: 33000
+      CUBRID_TEST_DATABASE: testdb
+      CUBRID_TEST_EXPECT_VERSION: '11.4'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Record the database image and package versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "CUBRID image: $(docker image inspect cubrid/cubrid:11.4 --format '{{index .RepoDigests 0}}')"
+            echo "Node: $(node --version)"
+            echo "drizzle-orm: $(node -p "require('./node_modules/drizzle-orm/package.json').version")"
+            echo "cubrid-client: $(node -p "require('./node_modules/cubrid-client/package.json').version")"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Wait for the CUBRID broker
+        run: node scripts/wait-for-cubrid.mjs 300
+      - name: Run live CUBRID tests
+        run: npm run integration -- --reporter=json --outputFile=live-results.json
+      - name: Require every live test to run and pass
+        if: ${{ always() }}
+        run: node scripts/check-live-results.mjs live-results.json | tee -a "$GITHUB_STEP_SUMMARY"
+
   package-artifact:
     name: Build packed npm package
     needs: impact
@@ -206,7 +251,7 @@ jobs:
   ci-gate:
     name: CI gate
     if: always()
-    needs: [impact, docs-check, lint-and-test, peer-floor, package-artifact, node18-consumer]
+    needs: [impact, docs-check, lint-and-test, peer-floor, live-cubrid, package-artifact, node18-consumer]
     runs-on: ubuntu-latest
     env:
       IMPACT: ${{ needs.impact.result }}
@@ -214,6 +259,7 @@ jobs:
       DOCS_CHECK: ${{ needs.docs-check.result }}
       TESTS: ${{ needs.lint-and-test.result }}
       PEER_FLOOR: ${{ needs.peer-floor.result }}
+      LIVE_CUBRID: ${{ needs.live-cubrid.result }}
       PACKAGE: ${{ needs.package-artifact.result }}
       NODE18: ${{ needs.node18-consumer.result }}
     steps:
@@ -224,11 +270,11 @@ jobs:
           [[ "$IMPACT" == success ]] || { echo '::error::CI change classification failed'; exit 1; }
           if [[ "$DOCS_ONLY" == true ]]; then
             [[ "$DOCS_CHECK" == success ]] || { echo "::error::Docs checks: $DOCS_CHECK"; exit 1; }
-            for result in "$TESTS" "$PEER_FLOOR" "$PACKAGE" "$NODE18"; do
+            for result in "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18"; do
               [[ "$result" == skipped ]] || { echo "::error::Unexpected runtime job on docs-only PR: $result"; exit 1; }
             done
           else
-            for result in "$TESTS" "$PEER_FLOOR" "$PACKAGE" "$NODE18"; do
+            for result in "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18"; do
               [[ "$result" == success ]] || { echo "::error::Required runtime check: $result"; exit 1; }
             done
           fi
