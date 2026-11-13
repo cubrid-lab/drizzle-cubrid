@@ -1,7 +1,8 @@
 # ADR 0007: Build the native dialect on Drizzle's database-neutral modules
 
-- **Status:** Proposed
-- **Date:** 2026-11-13
+- **Status:** Accepted
+- **Date:** 2026-11-13 (proposed)
+- **Accepted:** 2026-11-14 by maintainer yeongseon, recorded in PR #ACCEPT_PR
 - **Decision scope:** Which Drizzle ORM modules the native CUBRID dialect may import, how it touches Drizzle internals, and the supported Drizzle version envelope
 - **Prerequisites:** [ADR 0003](0003-native-architecture-boundaries.md) (accepted), feasibility issue [#156](https://github.com/cubrid-lab/drizzle-cubrid/issues/156)
 - **Relation to ADR 0003:** ADR 0003 prefers Drizzle's *public* database-neutral extension points and, where they are insufficient, an upstream change or "an explicitly scoped standalone implementation". Drizzle has no public dialect API, so this ADR chooses the **explicitly scoped standalone implementation**, with a narrow, bounded exception for the Drizzle internals listed in decision 2.
@@ -32,7 +33,7 @@ ADR 0003 requires a CUBRID-native dialect with no foreign-database implementatio
    drizzle-cubrid writes and owns the builders, the SQL compiler, row mapping, the session and the codecs.
 4. **No copied Drizzle source by default.** If a file is later adapted from drizzle-orm (Apache-2.0), that PR adds the Apache-2.0 text and attribution in a `THIRD_PARTY_NOTICES` file and marks the file as modified, per Apache-2.0 §4. drizzle-cubrid itself stays MIT.
 5. **Version envelope.** The peer range stays `>=0.44.1 <0.46.0`, the range tested today. CI type-checks and tests the native dialect against the peer floor and the latest allowed 0.45.x, and runs the packed package on Node 18. A non-required canary job runs the same type tests against the next drizzle-orm minor and the current 1.0 release candidate. The upper bound moves to a new minor only after the type tests, unit tests and live tests pass on it. Supporting Drizzle 1.x is a separate port.
-6. **Upstream.** File a narrow upstream request: public table-column registration, a public `ColumnBuilder.build`/`setName`, public `SQL` decoders, and an open `Dialect` union. Native work does not wait for it.
+6. **Upstream.** A narrow upstream request is drafted in [#156](https://github.com/cubrid-lab/drizzle-cubrid/issues/156#issuecomment-6865978359): public table-column registration, a public `ColumnBuilder.build`/`setName`, public `SQL` decoders, and an open `Dialect` union. The maintainer decides whether and when to file it. Native work does not wait for it.
 7. **Identifier quoting.** Quote identifiers in the native SQL compiler with the form verified on the supported server versions. On CUBRID 11.4, double quotes, square brackets and backticks all work as identifier quotes; the choice and its escaping are made in #158.
 
 8. **Drizzle-internal foreign code.** Drizzle's own neutral modules call dialect helpers internally: `sql/sql.js` calls `isPgEnum` from `pg-core` while rendering every query, and `relations.js` loads a `pg-core` helper. drizzle-cubrid does not import, extend or call these itself. ADR 0003 and the [architecture plan](../CUBRID_NATIVE_ARCHITECTURE.md) do not ban "incidental transitive internals owned by upstream Drizzle", so this is accepted as **Drizzle's code, not drizzle-cubrid's**. The #192 guard checks drizzle-cubrid's own sources and published files, not `node_modules/drizzle-orm`. If upstream removes that coupling, nothing here changes.
@@ -60,8 +61,8 @@ ADR 0003 requires a CUBRID-native dialect with no foreign-database implementatio
 - [ ] #192 adds the guard: banned import specifiers over `src` and the packed ESM/CJS/`.d.ts`, plus a search outside `src/native/internal.ts` for `Symbol.for('drizzle:`, `.shouldDisableInsert`, any `as unknown as`, and `.decoder` on Drizzle `SQL` values (matched so that drizzle-cubrid's own codec members do not trip it). Each rule has a canary that must fail it.
 - [ ] CI type-checks the native dialect against the drizzle-orm peer floor and latest 0.45.x, runs the packed package on Node 18, and has a non-required canary for the next minor and 1.0.
 - [ ] The current `src/` export paths (including `cache/core/*` and the `mysql-core/*` re-exports) are confirmed from a clean consumer before the 0.x paths are removed.
-- [ ] The upstream request (decision 6) is filed and linked here.
-- [ ] A maintainer accepts this ADR explicitly, recorded in this file.
+- [x] The upstream request (decision 6) is drafted and linked here ([#156 draft](https://github.com/cubrid-lab/drizzle-cubrid/issues/156#issuecomment-6865978359)); filing it is left to the maintainer.
+- [x] A maintainer accepts this ADR explicitly, recorded in this file (2026-11-14, PR #ACCEPT_PR).
 
 ## References
 

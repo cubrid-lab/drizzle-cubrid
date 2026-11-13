@@ -1,6 +1,6 @@
 # Native dialect feasibility (#156)
 
-> **Result:** feasible for the core of a dialect, with caveats. Tables, column builders, SELECT with joins, INSERT, UPDATE and DELETE can be built on Drizzle ORM's database-neutral modules, with no MySQL or other foreign-database code in drizzle-cubrid's own sources, and keep Drizzle's type inference. Drizzle's own neutral modules still call a `pg-core` helper internally (see ADR 0007, decision 8). Subqueries, aliases, table extra config and relational queries were not prototyped. The decision that follows from this is [ADR 0007](adr/0007-drizzle-extension-boundary.md). Evidence date: 2026-11-13.
+> **Result:** feasible for the core of a dialect, with caveats. Tables, column builders, SELECT with joins, INSERT, UPDATE and DELETE can be built on Drizzle ORM's database-neutral modules, with no MySQL or other foreign-database code in drizzle-cubrid's own sources, and keep Drizzle's type inference. Drizzle's own neutral modules still call a `pg-core` helper internally (see ADR 0007, decision 8). Subqueries, aliases, table extra config and relational queries were not prototyped. The decision that follows from this is [ADR 0007](adr/0007-drizzle-extension-boundary.md), accepted 2026-11-14. Evidence date: 2026-11-13.
 
 ## What was tested
 
