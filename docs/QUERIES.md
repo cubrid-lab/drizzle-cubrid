@@ -418,7 +418,7 @@ backslashes, `--` and UTF-8, NULL, bytes, dates, booleans), and both keep
 `WHERE` predicates intact for a negative number after `-` and for quote or
 comment payloads. The differences come from cubrid-client
 ([prepared binding](https://github.com/cubrid-lab/cubrid-client/blob/main/docs/TYPES.md#prepared-binding)):
-`sql\`SELECT ${1.5}\`` returns the number `1.5` with typed binds and the
+`` sql`SELECT ${1.5}` `` returns the number `1.5` with typed binds and the
 string `"1.5"` with literals, an empty `Buffer` is refused with typed binds,
 and typed binds take more round trips per statement.
 
