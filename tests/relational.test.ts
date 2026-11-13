@@ -40,9 +40,9 @@ describe('relational queries', () => {
 			await expect(db.query.users.findMany({ with: { posts: true } })).rejects.toThrow(
 				"Relational queries with 'with' (posts) are not supported on CUBRID",
 			);
-			await expect(
-				db.query.posts.findFirst({ with: { author: { columns: { name: true } } } }),
-			).rejects.toThrow("'with' (author)");
+			await expect(db.query.posts.findFirst({ with: { author: { columns: { name: true } } } })).rejects.toThrow(
+				"'with' (author)",
+			);
 			expect(client.sent).toEqual([]);
 		});
 

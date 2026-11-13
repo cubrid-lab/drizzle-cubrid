@@ -1,21 +1,29 @@
-import { createClient, createPool, CubridTransaction, NativeCubridAdapter } from 'cubrid-client';
+import { CubridTransaction, createClient, createPool, NativeCubridAdapter } from 'cubrid-client';
 import { eq, sql } from 'drizzle-orm';
 import { is } from 'drizzle-orm/entity';
 import { NoopLogger } from 'drizzle-orm/logger';
 import { customType } from 'drizzle-orm/mysql-core';
-import { relations } from 'drizzle-orm/relations';
 import { MySqlDate, MySqlDateString } from 'drizzle-orm/mysql-core/columns/date';
-import { MySqlDateTime, MySqlDateTimeString } from 'drizzle-orm/mysql-core/columns/datetime';
+import {
+	type datetime as drizzleDatetime,
+	MySqlDateTime,
+	MySqlDateTimeString,
+} from 'drizzle-orm/mysql-core/columns/datetime';
 import { MySqlTime } from 'drizzle-orm/mysql-core/columns/time';
 import { MySqlTimestamp, MySqlTimestampString } from 'drizzle-orm/mysql-core/columns/timestamp';
+import { relations } from 'drizzle-orm/relations';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
-
 import { cubridSequence, date, datetime, int, time, timestamp } from '../src/columns';
-import { datetime as drizzleDatetime } from 'drizzle-orm/mysql-core/columns/datetime';
 import { drizzle } from '../src/driver';
 import { CubridPreparedQuery, type CubridQueryable } from '../src/session';
 import { cubridTable } from '../src/table';
-import { assertUtcDecoding, declaredClientZone, isProcessZoneUtc, NOT_UTC_MESSAGE, ZONE_PROBE_SQL } from '../src/timezone';
+import {
+	assertUtcDecoding,
+	declaredClientZone,
+	isProcessZoneUtc,
+	NOT_UTC_MESSAGE,
+	ZONE_PROBE_SQL,
+} from '../src/timezone';
 
 const events = cubridTable('events', {
 	id: int('id').primaryKey(),
@@ -310,9 +318,9 @@ describe('reading temporal columns through drizzle', () => {
 
 		await expect(db.select().from(events)).rejects.toThrow(NOT_UTC_MESSAGE);
 		await expect(db.select({ n: sql`${events.at}`.mapWith(events.at) }).from(events)).rejects.toThrow(NOT_UTC_MESSAGE);
-		await expect(
-			db.select({ n: sql`${events.day}`.mapWith(events.day).as('n') }).from(events),
-		).rejects.toThrow(NOT_UTC_MESSAGE);
+		await expect(db.select({ n: sql`${events.day}`.mapWith(events.day).as('n') }).from(events)).rejects.toThrow(
+			NOT_UTC_MESSAGE,
+		);
 		expect(client.statements).toEqual([]);
 	});
 
@@ -381,9 +389,7 @@ describe('reading temporal columns through drizzle', () => {
 			for (const mode of ['default', 'planetscale'] as const) {
 				const db = drizzle(client, { schema, mode, binding: 'literal' });
 				await expect(db.query.events.findFirst()).rejects.toThrow(NOT_UTC_MESSAGE);
-				await expect(db.query.events.findMany({ columns: { id: true, clock: true } })).rejects.toThrow(
-					NOT_UTC_MESSAGE,
-				);
+				await expect(db.query.events.findMany({ columns: { id: true, clock: true } })).rejects.toThrow(NOT_UTC_MESSAGE);
 			}
 			expect(client.statements).toEqual([]);
 		});

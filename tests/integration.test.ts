@@ -150,7 +150,6 @@ describe('transactions run on a driver-owned connection (#185)', () => {
 
 		expect(await ids(table)).toEqual([10]);
 	});
-
 });
 
 describe('transaction semantics', () => {
@@ -329,7 +328,12 @@ describe('writes report affected rows and generated keys (#182)', () => {
 		const db = drizzle(client);
 		const before = await ids(autoName);
 
-		await expect(db.insert(auto).values([{ v: 'm1' }, { v: 'm2' }]).$returningId()).rejects.toThrow(/one row/);
+		await expect(
+			db
+				.insert(auto)
+				.values([{ v: 'm1' }, { v: 'm2' }])
+				.$returningId(),
+		).rejects.toThrow(/one row/);
 		expect(await ids(autoName)).toEqual(before);
 	});
 
@@ -352,7 +356,10 @@ describe('writes report affected rows and generated keys (#182)', () => {
 		await db.insert(auto).values([{ v: 'u1' }, { v: 'u2' }]);
 		const matching = (await ids(autoName)).length;
 
-		const updated = await db.update(auto).set({ v: sql`${auto.v}` }).where(gt(auto.id, 0));
+		const updated = await db
+			.update(auto)
+			.set({ v: sql`${auto.v}` })
+			.where(gt(auto.id, 0));
 		const deleted = await db.delete(auto).where(eq(auto.v, 'u1'));
 
 		expect(updated.affectedRows).toBe(matching);
@@ -393,7 +400,10 @@ describe('collection columns round-trip (#184)', () => {
 		await db.insert(docs).values({ id: 1, s: ['b', 'a', 'b'], m: [3, 1, 3], q: ["it's", 'back\\slash', '한글', null] });
 		await db.insert(docs).values({ id: 2, s: [], m: [], q: [] });
 		await db.insert(docs).values({ id: 3, s: null, m: null, q: null });
-		await db.update(docs).set({ q: ['z', 'y'], m: [7] }).where(eq(docs.id, 2));
+		await db
+			.update(docs)
+			.set({ q: ['z', 'y'], m: [7] })
+			.where(eq(docs.id, 2));
 
 		const rows = await db.select().from(docs).orderBy(docs.id);
 		expect(rows.map((row) => ({ ...row, s: sorted(row.s), m: sorted(row.m) }))).toEqual([
@@ -408,7 +418,10 @@ describe('collection columns round-trip (#184)', () => {
 		const db = drizzle(client);
 		await db.insert(docs).values({ id: 10, q: ['f', 'g'] });
 
-		const rows = await db.select({ id: docs.id }).from(docs).where(eq(docs.q, ['f', 'g']));
+		const rows = await db
+			.select({ id: docs.id })
+			.from(docs)
+			.where(eq(docs.q, ['f', 'g']));
 
 		expect(rows).toEqual([{ id: 10 }]);
 	});
@@ -485,8 +498,13 @@ describe('collection element types round-trip under both bindings (#191, #184)',
 			// against the driver's own date handling rather than a fixed zone.
 			const [plain] = await client.query<{ v: Date }>(`SELECT CAST(? AS DATETIME) AS v FROM db_root`, [instant]);
 
-			await db.insert(t).values({ id, dt: [instant], dbl: [0.1, -2.5], flag: [true], big: [9007199254740993n], wide: [long] });
-			await db.update(t).set({ dbl: [1.5] }).where(eq(t.id, id));
+			await db
+				.insert(t)
+				.values({ id, dt: [instant], dbl: [0.1, -2.5], flag: [true], big: [9007199254740993n], wide: [long] });
+			await db
+				.update(t)
+				.set({ dbl: [1.5] })
+				.where(eq(t.id, id));
 			const [row] = await db.select().from(t).where(eq(t.id, id));
 
 			expect(row?.dt?.[0]?.getTime()).toBe(plain?.v.getTime());
@@ -529,7 +547,10 @@ describe('CHAR, decimal and enum elements under both bindings (#191)', () => {
 			const chars = binding === 'prepared' ? ['ab'] : ['cd'];
 
 			await db.insert(t).values({ id, ch: chars, dn: [1.5], db: ['12345678901234567890'], en: [Shade.Dark] });
-			await db.update(t).set({ dn: [2.5], db: ['1'], en: [Shade.Light] }).where(eq(t.id, id));
+			await db
+				.update(t)
+				.set({ dn: [2.5], db: ['1'], en: [Shade.Light] })
+				.where(eq(t.id, id));
 			const matched = await db.select({ id: t.id }).from(t).where(eq(t.ch, chars));
 			const [row] = await db.select().from(t).where(eq(t.id, id));
 
@@ -636,7 +657,10 @@ describe('DATETIME, TIMESTAMP, DATE and TIME columns round-trip (#207)', () => {
 					}
 					const id = base + offset;
 					const next = cases[1]!;
-					await db.update(t).set({ ...next, ats: [next.at, next.at] }).where(eq(t.id, id));
+					await db
+						.update(t)
+						.set({ ...next, ats: [next.at, next.at] })
+						.where(eq(t.id, id));
 					const [updated] = await db.select().from(t).where(eq(t.id, id));
 					expect(updated).toEqual({ id, ...next, ats: [next.at, next.at] });
 					await db.update(t).set(nulls).where(eq(t.id, id));
@@ -658,7 +682,10 @@ describe('DATETIME, TIMESTAMP, DATE and TIME columns round-trip (#207)', () => {
 
 		const [row] = await db.select({ stamp: t.stamp }).from(t).where(eq(t.id, 90));
 		expect(row?.stamp).toEqual(new Date('2024-01-02T03:04:05.000Z'));
-		const later = await db.select({ id: t.id }).from(t).where(and(eq(t.id, 90), gt(t.stamp, new Date('2024-01-02T03:04:04.999Z'))));
+		const later = await db
+			.select({ id: t.id })
+			.from(t)
+			.where(and(eq(t.id, 90), gt(t.stamp, new Date('2024-01-02T03:04:04.999Z'))));
 		expect(later).toEqual([{ id: 90 }]);
 	});
 

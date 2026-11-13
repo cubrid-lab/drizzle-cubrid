@@ -106,8 +106,8 @@ npm install
 npm test              # Unit tests with vitest
 npm run test:cov      # Tests with coverage (95% threshold)
 npm run build         # Build ESM + CJS via tsup
-npm run lint          # ESLint check
-npm run format        # ESLint auto-fix
+npm run lint          # Biome lint + format check, no changes (CI)
+npm run format        # Biome: rewrite formatting and safe fixes
 npm run typecheck     # tsc --noEmit
 npm run integration   # Live CUBRID tests; needs CUBRID_TEST_HOST (see below)
 ```
@@ -133,8 +133,7 @@ evidence; cover database behavior here.
 
 ### Style
 
-- **Linter**: ESLint with @typescript-eslint
-- **Formatter**: ESLint (no Prettier)
+- **Linter and formatter**: Biome (`biome.json`, pinned version); tabs, single quotes
 - **Line length**: 120 characters
 - **Target**: ES2022, Node.js 18+
 - **Imports**: ESM-first (`import/export`)

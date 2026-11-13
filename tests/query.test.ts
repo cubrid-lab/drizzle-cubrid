@@ -8,18 +8,12 @@ import { cubridTable } from '../src/table';
 class MockClient implements CubridQueryable {
 	queries: { sql: string; params?: readonly unknown[] }[] = [];
 
-	async query<T extends Record<string, unknown>>(
-		sqlText: string,
-		params?: readonly unknown[],
-	): Promise<T[]> {
+	async query<T extends Record<string, unknown>>(sqlText: string, params?: readonly unknown[]): Promise<T[]> {
 		this.queries.push({ sql: sqlText, params });
 		return [];
 	}
 
-	async queryPrepared<T extends Record<string, unknown>>(
-		sqlText: string,
-		params?: readonly unknown[],
-	): Promise<T[]> {
+	async queryPrepared<T extends Record<string, unknown>>(sqlText: string, params?: readonly unknown[]): Promise<T[]> {
 		return this.query<T>(sqlText, params);
 	}
 }

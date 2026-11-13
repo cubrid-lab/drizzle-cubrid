@@ -99,13 +99,13 @@ npm run typecheck
 
 ## Code Style
 
-The manifest currently uses ESLint (`npm run lint`, `npm run format`), **not Biome**. The inspected main branch does not include an ESLint flat configuration, so lint setup is an **open blocker**; report its actual failure rather than calling it passed. Formatting (`npm run format`) mutates files and should be an intentional action, never a read-only setup check. Follow `.editorconfig` and the [development setup guide](docs/DEVELOPMENT_SETUP.md) while the lint configuration is designed.
+[Biome](https://biomejs.dev) lints and formats the code, configured in `biome.json` (tabs, single quotes, 120 columns) and pinned to an exact version in `package.json`. `npm run lint` runs `biome ci --error-on-warnings .`: it changes nothing and fails on any lint finding, formatting difference or unsorted import, and CI runs it on every code change. `npm run format` (`biome check --write .`) rewrites files to match; run it on purpose, never as a read-only check.
 
 ```bash
 npm run typecheck
 npm test
 npm run build
-# npm run lint  # run after a reviewed ESLint config has been added
+npm run lint
 ```
 
 ---
@@ -142,7 +142,7 @@ scrutiny. No existing repository CI or release safeguards are waived.
    npm run typecheck
    ```
 
-4. **Track lint setup explicitly:** `npm run lint` is declared but the inspected branch lacks a compatible ESLint flat config. Do not substitute an unpinned `npx biome` download or report a lint pass until the tooling issue is resolved.
+4. **Run lint:** `npm run lint` must pass; use the pinned Biome from `npm ci`, not an unpinned `npx @biomejs/biome` download.
 
 ### PR Content
 

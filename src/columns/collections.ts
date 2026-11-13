@@ -186,7 +186,9 @@ function toCollectionSql(kind: CollectionKind, castType: string | undefined, val
 	if (!Array.isArray(value)) {
 		throw new TypeError(`${kind} column value must be an array, got ${describeValue(value)}`);
 	}
-	value.forEach((element, index) => assertElement(kind, element, index));
+	for (const [index, element] of value.entries()) {
+		assertElement(kind, element, index);
+	}
 	const elements = sql.join(
 		value.map((element) => sql`${toDriverElement(element)}`),
 		sql`, `,
@@ -250,8 +252,9 @@ export function cubridMultiset<TElement extends CubridCollectionElement = string
 ) {
 	return createCollectionType<TElement>('MULTISET', config)(name, config);
 }
-export type CubridMultisetColumnBuilder<TElement extends CubridCollectionElement = string> =
-	ReturnType<typeof cubridMultiset<TElement>>;
+export type CubridMultisetColumnBuilder<TElement extends CubridCollectionElement = string> = ReturnType<
+	typeof cubridMultiset<TElement>
+>;
 
 /** A `SEQUENCE` (LIST) column: duplicates and stored order are kept. */
 export function cubridSequence<TElement extends CubridCollectionElement = string>(
@@ -260,5 +263,6 @@ export function cubridSequence<TElement extends CubridCollectionElement = string
 ) {
 	return createCollectionType<TElement>('SEQUENCE', config)(name, config);
 }
-export type CubridSequenceColumnBuilder<TElement extends CubridCollectionElement = string> =
-	ReturnType<typeof cubridSequence<TElement>>;
+export type CubridSequenceColumnBuilder<TElement extends CubridCollectionElement = string> = ReturnType<
+	typeof cubridSequence<TElement>
+>;

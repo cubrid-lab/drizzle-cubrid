@@ -7,7 +7,7 @@ The repository separates developer-tool tests, published-package runtime compati
 | Change type | CI work | What the result demonstrates |
 | --- | --- | --- |
 | Markdown/documentation-only PR | Diff classification, `git diff --check`, `CI gate` | Text and whitespace validation only; no package or database behavior was exercised |
-| Source code, dependency, CI, toolchain or ambiguous PR | Node 20 and Node 22 typecheck/build/Vitest coverage, lowest supported `drizzle-orm` typecheck/build/Vitest (Node 22), live CUBRID 11.4 tests (`npm run integration`, no skipped tests allowed), Node 22 npm packaging, Node 18 clean packed-package ESM/CJS consumer, `CI gate` | Runtime and package compatibility with declared locked peers, and the behavior covered by the live CUBRID 11.4 tests |
+| Source code, dependency, CI, toolchain or ambiguous PR | Biome lint and format check (`npm run lint`, Node 22, plus a misformatted-file probe that must fail), Node 20 and Node 22 typecheck/build/Vitest coverage, lowest supported `drizzle-orm` typecheck/build/Vitest (Node 22), live CUBRID 11.4 tests (`npm run integration`, no skipped tests allowed), Node 22 npm packaging, Node 18 clean packed-package ESM/CJS consumer, `CI gate` | Runtime and package compatibility with declared locked peers, and the behavior covered by the live CUBRID 11.4 tests |
 | Push to `main` | Full runtime and packaging jobs | Ensures main does not rely on a docs-only shortcut |
 
 Independent security workflows are not replaced by the docs-only classifier. A documentation-only PR does not disable any security policy or release preflight.

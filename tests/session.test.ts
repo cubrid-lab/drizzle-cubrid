@@ -1,40 +1,36 @@
+import { TransactionRollbackError } from 'drizzle-orm';
 import { entityKind } from 'drizzle-orm/entity';
 import type { Logger } from 'drizzle-orm/logger';
 import { MySqlDialect } from 'drizzle-orm/mysql-core/dialect';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SelectedFieldsOrdered } from 'drizzle-orm/mysql-core/query-builders/select.types';
 import type {
 	MySqlPreparedQueryConfig,
 	MySqlSession as MySqlSessionBase,
 	MySqlTransactionConfig,
 } from 'drizzle-orm/mysql-core/session';
-import type { SelectedFieldsOrdered } from 'drizzle-orm/mysql-core/query-builders/select.types';
 import { sql } from 'drizzle-orm/sql/sql';
-import { TransactionRollbackError } from 'drizzle-orm';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hoistedMocks = vi.hoisted(() => {
 	const mapResultRowMock = vi.fn(
-		(
-			_fields: SelectedFieldsOrdered,
-			row: unknown[],
-			_joinsNotNullableMap: Record<string, boolean> | undefined,
-		) => ({ mapped: row }),
+		(_fields: SelectedFieldsOrdered, row: unknown[], _joinsNotNullableMap: Record<string, boolean> | undefined) => ({
+			mapped: row,
+		}),
 	);
 
-	const fillPlaceholdersMock = vi.fn(
-		(params: unknown[], values: Record<string, unknown>): unknown[] => {
-			return params.map((param) => {
-				if (
-					typeof param === 'object' &&
-					param !== null &&
-					'name' in param &&
-					typeof (param as { name: unknown }).name === 'string'
-				) {
-					return values[(param as { name: string }).name];
-				}
-				return param;
-			});
-		},
-	);
+	const fillPlaceholdersMock = vi.fn((params: unknown[], values: Record<string, unknown>): unknown[] => {
+		return params.map((param) => {
+			if (
+				typeof param === 'object' &&
+				param !== null &&
+				'name' in param &&
+				typeof (param as { name: unknown }).name === 'string'
+			) {
+				return values[(param as { name: string }).name];
+			}
+			return param;
+		});
+	});
 
 	return { mapResultRowMock, fillPlaceholdersMock };
 });
@@ -60,10 +56,10 @@ const { mapResultRowMock, fillPlaceholdersMock } = hoistedMocks;
 import { bigint, int, varchar } from '../src/columns';
 import {
 	CubridPreparedQuery,
-	CubridSession,
-	CubridTransaction,
 	type CubridQueryable,
 	type CubridRawQueryResult,
+	CubridSession,
+	CubridTransaction,
 } from '../src/session';
 import { cubridTable } from '../src/table';
 
@@ -98,9 +94,7 @@ class LabelledRowsClient implements CubridQueryable {
 		if ((options as { rowMode?: string } | undefined)?.rowMode === 'array') {
 			return this.rows.map((row) => [...row]) as T[];
 		}
-		return this.rows.map((row) =>
-			Object.fromEntries(this.labels.map((label, i) => [label, row[i]])),
-		) as T[];
+		return this.rows.map((row) => Object.fromEntries(this.labels.map((label, i) => [label, row[i]]))) as T[];
 	}
 }
 
@@ -182,10 +176,7 @@ describe('CubridPreparedQuery', () => {
 		const result = await query.execute();
 
 		expect(mapResultRowMock).toHaveBeenCalledTimes(2);
-		expect(result).toEqual([
-			{ mapped: [1, 'a'] },
-			{ mapped: [2, 'b'] },
-		]);
+		expect(result).toEqual([{ mapped: [1, 'a'] }, { mapped: [2, 'b'] }]);
 	});
 
 	it('execute() uses customResultMapper with row arrays', async () => {
@@ -447,11 +438,9 @@ describe('CubridPreparedQuery', () => {
 			await returningQuery(new ExecutingClient({ affectedRows: 1, lastInsertId: 5 }), asBigint, [{}]).execute(),
 		).toEqual([{ id: 5n }]);
 		await expect(
-			returningQuery(
-				new ExecutingClient({ affectedRows: 1, lastInsertId: 9007199254740993n }),
-				asNumber,
-				[{}],
-			).execute(),
+			returningQuery(new ExecutingClient({ affectedRows: 1, lastInsertId: 9007199254740993n }), asNumber, [
+				{},
+			]).execute(),
 		).rejects.toThrow(/mode: 'bigint'/);
 	});
 
@@ -547,10 +536,7 @@ describe('CubridSession', () => {
 		const dialect = new MySqlDialect({});
 		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
 
-		const prepared = session.prepareQuery<MySqlPreparedQueryConfig>(
-			{ sql: 'select 1', params: [] },
-			undefined,
-		);
+		const prepared = session.prepareQuery<MySqlPreparedQueryConfig>({ sql: 'select 1', params: [] }, undefined);
 
 		expect(prepared).toBeInstanceOf(CubridPreparedQuery);
 	});
@@ -716,13 +702,7 @@ describe('CubridTransaction', () => {
 		const client = new MockClient();
 		const dialect = new MySqlDialect({});
 		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
-		const rootTx = new CubridTransaction(
-			dialect,
-			session as unknown as MySqlSessionBase,
-			undefined,
-			0,
-			'default',
-		);
+		const rootTx = new CubridTransaction(dialect, session as unknown as MySqlSessionBase, undefined, 0, 'default');
 
 		const result = await rootTx.transaction(async (tx1) => {
 			return tx1.transaction(async (tx2) => {
@@ -740,13 +720,7 @@ describe('CubridTransaction', () => {
 		const client = new MockClient();
 		const dialect = new MySqlDialect({});
 		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
-		const rootTx = new CubridTransaction(
-			dialect,
-			session as unknown as MySqlSessionBase,
-			undefined,
-			0,
-			'default',
-		);
+		const rootTx = new CubridTransaction(dialect, session as unknown as MySqlSessionBase, undefined, 0, 'default');
 		const expectedError = new Error('nested-fail');
 
 		await expect(
@@ -773,10 +747,7 @@ class OwnedTransactionClient extends MockClient {
 	commitError: Error | undefined;
 	rollbackError: Error | undefined;
 
-	async transaction<T>(
-		callback: (tx: CubridQueryable) => Promise<T>,
-		options?: unknown,
-	): Promise<T> {
+	async transaction<T>(callback: (tx: CubridQueryable) => Promise<T>, options?: unknown): Promise<T> {
 		const txClient = new MockClient();
 		this.txClients.push(txClient);
 		this.transactionOptions.push(options);
@@ -849,12 +820,8 @@ describe('CubridSession with a driver that owns transaction connections', () => 
 		release();
 		await pending;
 
-		expect(client.queries.map((q) => q.sql.toLowerCase())).toEqual([
-			'insert into users (id) values (99)',
-		]);
-		expect(client.txClients[0]?.queries.map((q) => q.sql.toLowerCase())).toEqual([
-			'insert into users (id) values (1)',
-		]);
+		expect(client.queries.map((q) => q.sql.toLowerCase())).toEqual(['insert into users (id) values (99)']);
+		expect(client.txClients[0]?.queries.map((q) => q.sql.toLowerCase())).toEqual(['insert into users (id) values (1)']);
 	});
 
 	it('gives concurrent transactions separate connections', async () => {
@@ -991,14 +958,10 @@ describe('CubridSession with a driver that owns transaction connections', () => 
 	it('refuses isolationLevel when the driver transaction() takes no options', async () => {
 		const client = new OwnedTransactionClient();
 		// cubrid-client before 1.3.0: transaction(callback) only.
-		client.transaction = async function <T>(callback: (tx: CubridQueryable) => Promise<T>) {
-			return callback(new MockClient());
-		};
+		client.transaction = async <T>(callback: (tx: CubridQueryable) => Promise<T>) => callback(new MockClient());
 		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
 
-		await expect(
-			session.transaction(async () => 'ok', { isolationLevel: 'serializable' }),
-		).rejects.toThrow(/1\.3\.0/);
+		await expect(session.transaction(async () => 'ok', { isolationLevel: 'serializable' })).rejects.toThrow(/1\.3\.0/);
 		await expect(session.transaction(async () => 'ok')).resolves.toBe('ok');
 	});
 
@@ -1048,9 +1011,12 @@ describe('CubridSession with a driver that owns transaction connections', () => 
 		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
 
 		const result = await session.transaction(async (tx) => {
-			await tx.execute(sql`select 1`).then(() => {
-				throw new Error('handled');
-			}).catch(() => undefined);
+			await tx
+				.execute(sql`select 1`)
+				.then(() => {
+					throw new Error('handled');
+				})
+				.catch(() => undefined);
 			return 'committed';
 		});
 
@@ -1098,13 +1064,7 @@ describe('CubridTransaction savepoint rollback failure', () => {
 		}) as typeof client.query;
 		const dialect = new MySqlDialect({});
 		const session = new CubridSession(client, dialect, undefined, { mode: 'default' });
-		const rootTx = new CubridTransaction(
-			dialect,
-			session as unknown as MySqlSessionBase,
-			undefined,
-			0,
-			'default',
-		);
+		const rootTx = new CubridTransaction(dialect, session as unknown as MySqlSessionBase, undefined, 0, 'default');
 		const callbackFailure = new Error('nested-fail');
 
 		const error = await rootTx
