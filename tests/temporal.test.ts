@@ -1,6 +1,8 @@
 import { createClient, createPool, CubridTransaction, NativeCubridAdapter } from 'cubrid-client';
 import { eq, sql } from 'drizzle-orm';
 import { is } from 'drizzle-orm/entity';
+import { NoopLogger } from 'drizzle-orm/logger';
+import { customType } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm/relations';
 import { MySqlDate, MySqlDateString } from 'drizzle-orm/mysql-core/columns/date';
 import { MySqlDateTime, MySqlDateTimeString } from 'drizzle-orm/mysql-core/columns/datetime';
@@ -11,7 +13,7 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { cubridSequence, date, datetime, int, time, timestamp } from '../src/columns';
 import { datetime as drizzleDatetime } from 'drizzle-orm/mysql-core/columns/datetime';
 import { drizzle } from '../src/driver';
-import type { CubridQueryable } from '../src/session';
+import { CubridPreparedQuery, type CubridQueryable } from '../src/session';
 import { cubridTable } from '../src/table';
 import { assertUtcDecoding, declaredClientZone, isProcessZoneUtc, NOT_UTC_MESSAGE, ZONE_PROBE_SQL } from '../src/timezone';
 
@@ -373,11 +375,107 @@ describe('reading temporal columns through drizzle', () => {
 			await expect(db.query.events.findMany()).rejects.toThrow(NOT_UTC_MESSAGE);
 		});
 
-		it('pass rows without Dates', async () => {
+		it('refuse a local client before sending when a date or time column is selected', async () => {
 			offsetMinutes(-540);
 			const client = new ArrayClient([[1, null, null, null, null, null, null, null]], { utcDates: false });
+			for (const mode of ['default', 'planetscale'] as const) {
+				const db = drizzle(client, { schema, mode, binding: 'literal' });
+				await expect(db.query.events.findFirst()).rejects.toThrow(NOT_UTC_MESSAGE);
+				await expect(db.query.events.findMany({ columns: { id: true, clock: true } })).rejects.toThrow(
+					NOT_UTC_MESSAGE,
+				);
+			}
+			expect(client.statements).toEqual([]);
+		});
+
+		const stamped = cubridTable('stamped', {
+			id: int('id'),
+			at: datetime('at'),
+			raw: customType<{ data: Date; driverData: Date }>({ dataType: () => 'datetime' })('raw'),
+		});
+		const stampedSchema = { stamped, stampedRelations: relations(stamped, () => ({})) };
+
+		for (const mode of ['default', 'planetscale'] as const) {
+			it(`pass Dates from columns and extras that are not date or time columns, like select() (#210, ${mode})`, async () => {
+				offsetMinutes(-540);
+				const client = new ArrayClient([[1, instant, instant]], { utcDates: false });
+				const db = drizzle(client, { schema: stampedSchema, mode, binding: 'literal' });
+
+				await expect(
+					db.query.stamped.findFirst({
+						columns: { id: true, raw: true },
+						extras: { x: sql<Date>`${stamped.raw}`.as('x') },
+					}),
+				).resolves.toEqual({ id: 1, raw: instant, x: instant });
+				await expect(
+					db.select({ id: stamped.id, raw: stamped.raw, x: sql<Date>`${stamped.raw}` }).from(stamped),
+				).resolves.toEqual([{ id: 1, raw: instant, x: instant }]);
+				await expect(
+					db.query.stamped
+						.findFirst({ columns: { id: true, raw: true }, where: eq(stamped.id, sql.placeholder('id')) })
+						.prepare()
+						.execute({ id: 1 }),
+				).resolves.toEqual({ id: 1, raw: instant });
+				await expect(
+					db.transaction((tx) => tx.query.stamped.findMany({ columns: { id: true, raw: true } })),
+				).resolves.toEqual([{ id: 1, raw: instant }]);
+			});
+
+			it(`refuse extras that map a date column with mapWith, which Drizzle drops (${mode})`, async () => {
+				offsetMinutes(-540);
+				const client = new ArrayClient([[1, instant]], { utcDates: false });
+				const db = drizzle(client, { schema: stampedSchema, mode, binding: 'literal' });
+
+				await expect(
+					db.query.stamped.findFirst({
+						columns: { id: true },
+						extras: { x: sql`${stamped.at}`.mapWith(stamped.at).as('x') },
+					}),
+				).rejects.toThrow(NOT_UTC_MESSAGE);
+				await expect(
+					db.query.stamped.findFirst({
+						columns: { id: true },
+						extras: (t, { sql: q }) => ({ x: q`${t.at}`.mapWith(t.at).as('x') }),
+					}),
+				).rejects.toThrow(NOT_UTC_MESSAGE);
+				await expect(
+					db.query.stamped.findFirst({
+						columns: { id: true },
+						extras: (t, { sql: q }) => ({ n: q`${t.id}`.mapWith(Number).as('n') }),
+					}),
+				).resolves.toEqual({ id: 1, n: instant });
+				expect(client.statements).toHaveLength(1);
+			});
+		}
+
+		it('refuse Date cells when a row mapper comes without recorded fields', async () => {
+			offsetMinutes(-540);
+			const client = new ArrayClient([[1, instant]], { utcDates: false });
+			const prepared = (fields: unknown[] | undefined) =>
+				new CubridPreparedQuery(
+					client,
+					'select id, at from events',
+					[],
+					new NoopLogger(),
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					(rows) => rows as never,
+					undefined,
+					undefined,
+					client,
+					fields,
+				);
+			await expect(prepared(undefined).execute()).rejects.toThrow(NOT_UTC_MESSAGE);
+			await expect(prepared([events.id]).execute()).resolves.toEqual([[1, instant]]);
+		});
+
+		it('pass a relational query on date columns only after they are left out', async () => {
+			offsetMinutes(-540);
+			const client = new ArrayClient([[1]], { utcDates: false });
 			const db = drizzle(client, { schema, mode: 'default', binding: 'literal' });
-			await expect(db.query.events.findFirst()).resolves.toMatchObject({ id: 1, at: null });
+			await expect(db.query.events.findMany({ columns: { id: true } })).resolves.toEqual([{ id: 1 }]);
 		});
 	});
 });
