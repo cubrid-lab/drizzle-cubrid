@@ -143,8 +143,8 @@ export const products = cubridTable("products", {
   // MULTISET — unordered, allows duplicates → MULTISET(VARCHAR(50))
   categories: cubridMultiset("categories", { element: varchar("category_item", { length: 50 }) }),
 
-  // SEQUENCE — ordered, allows duplicates → SEQUENCE(INTEGER)
-  rankings: cubridSequence("rankings", { element: int("rank_item") }),
+  // SEQUENCE — ordered, allows duplicates → SEQUENCE(INTEGER), number[]
+  rankings: cubridSequence<number>("rankings", { element: int("rank_item") }),
 
   // MONETARY — CUBRID native monetary type → MONETARY
   price: monetary("price"),
@@ -157,10 +157,10 @@ await db.insert(products).values({
   name: "Widget",
   tags: ["sale", "new"],           // string[] → SET
   categories: ["electronics"],     // string[] → MULTISET
-  rankings: ["1", "3", "5"],       // string[] → SEQUENCE
+  rankings: [1, 3, 5],             // number[] → SEQUENCE
 });
 
-// Select — collections return string[]
+// Select — collections return arrays; elements keep their JavaScript types
 const rows = await db.select().from(products);
 console.log(rows[0].tags); // ["sale", "new"]
 ```
