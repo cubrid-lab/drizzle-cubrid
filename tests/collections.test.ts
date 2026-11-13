@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { MySqlDialect } from 'drizzle-orm/mysql-core';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
 	bigint,
 	char,
+	cubridMultiset,
 	cubridSequence,
 	cubridSet,
 	decimal,
@@ -12,6 +15,7 @@ import {
 	tinyint,
 	varchar,
 } from '../src/columns';
+import { drizzle } from '../src/driver';
 import { cubridTable } from '../src/table';
 
 type CustomTypeParams = {
@@ -83,38 +87,87 @@ describe('collection element SQL types', () => {
 	});
 });
 
-describe('collection literal round trip', () => {
-	const params = paramsOf(cubridSet('tags'));
+// cubrid-client 1.x returns SET, MULTISET and SEQUENCE columns as arrays and
+// cannot bind an array parameter, so a value is written as a typed collection
+// literal whose elements are ordinary parameters: SET{?, ?} (#184).
+describe('collection values', () => {
+	const dialect = new MySqlDialect();
+	const docs = cubridTable('docs', {
+		id: int('id'),
+		tags: cubridSet('tags'),
+		counts: cubridMultiset<number>('counts', { element: int('n') }),
+		steps: cubridSequence('steps'),
+	});
+	const db = drizzle({ async query() { return []; } });
 
-	it('serializes values into a brace literal', () => {
-		expect(params.toDriver(['a', 'b'])).toBe("{'a','b'}");
-		expect(params.toDriver([])).toBe('{}');
+	it('returns the array cubrid-client decoded, element types included', () => {
+		expect(docs.tags.mapFromDriverValue(['a', 'b'])).toEqual(['a', 'b']);
+		expect(docs.counts.mapFromDriverValue([1, 1, 2])).toEqual([1, 1, 2]);
+		expect(docs.steps.mapFromDriverValue(['b', null, 'a'])).toEqual(['b', null, 'a']);
+		expect(docs.tags.mapFromDriverValue([])).toEqual([]);
 	});
 
-	it('escapes quotes and backslashes', () => {
-		expect(params.toDriver(["it's"])).toBe("{'it''s'}");
-		expect(params.toDriver(['a\\b'])).toBe("{'a\\\\b'}");
+	it('refuses a driver value that is not an array instead of parsing text', () => {
+		expect(() => docs.tags.mapFromDriverValue("{'a','b'}" as never)).toThrow(/array/);
 	});
 
-	it('parses brace literals back into arrays', () => {
-		expect(params.fromDriver("{'a','b'}")).toEqual(['a', 'b']);
-		expect(params.fromDriver("{'it''s'}")).toEqual(["it's"]);
+	it('writes each element as its own parameter inside a typed literal', () => {
+		const query = db
+			.insert(docs)
+			.values({ id: 1, tags: ["it's", 'a\\b', '한글'], counts: [3, 3], steps: ['x', null] })
+			.toSQL();
+
+		expect(query.sql).toContain('SET{?, ?, ?}');
+		expect(query.sql).toContain('MULTISET{?, ?}');
+		expect(query.sql).toContain('SEQUENCE{?, ?}');
+		expect(query.params).toEqual([1, "it's", 'a\\b', '한글', 3, 3, 'x', null]);
 	});
 
-	it('parses unquoted and unwrapped content', () => {
-		expect(params.fromDriver('1,2')).toEqual(['1', '2']);
-		expect(params.fromDriver("{'a',b}")).toEqual(['a', 'b']);
+	it('writes an empty collection as an empty typed literal', () => {
+		const query = db.update(docs).set({ tags: [] }).toSQL();
+
+		expect(query.sql).toContain('SET{}');
+		expect(query.params).toEqual([]);
 	});
 
-	it('returns an empty array for empty input', () => {
-		expect(params.fromDriver('')).toEqual([]);
-		expect(params.fromDriver('   ')).toEqual([]);
-		expect(params.fromDriver('{}')).toEqual([]);
+	it('refuses a value that is not an array before building SQL', () => {
+		expect(() =>
+			dialect.sqlToQuery(db.update(docs).set({ tags: 'a,b' as never }).getSQL()),
+		).toThrow(/array/);
 	});
 
-	it('round trips through both directions', () => {
-		const original = ['x', "y'z"];
-		expect(params.fromDriver(params.toDriver(original))).toEqual(original);
+	it.each([
+		['an object', { a: 1 }],
+		['a nested array', ['x']],
+		['a function', () => 1],
+		['NaN', Number.NaN],
+	])('refuses %s as an element', (_name, element) => {
+		expect(() =>
+			dialect.sqlToQuery(db.update(docs).set({ tags: [element] as never }).getSQL()),
+		).toThrow(/element/);
+	});
+
+	it('sends Uint8Array elements as a Buffer, as cubrid-client requires', () => {
+		const query = db.update(docs).set({ tags: [new Uint8Array([1, 2]) as never] }).toSQL();
+
+		expect(Buffer.isBuffer(query.params[0])).toBe(true);
+		expect([...(query.params[0] as Buffer)]).toEqual([1, 2]);
+	});
+
+	it('refuses a placeholder for the whole collection value when the query runs', async () => {
+		const client = { queries: 0, async query() { this.queries++; return []; } };
+		const prepared = drizzle(client)
+			.update(docs)
+			.set({ tags: sql.placeholder('tags') as never })
+			.prepare();
+
+		await expect(prepared.execute({ tags: ['a'] })).rejects.toThrow(/placeholder/);
+		expect(client.queries).toBe(0);
+	});
+
+	it('types elements from the generic parameter', () => {
+		expectTypeOf(docs.counts.$inferInsert).toEqualTypeOf<(number | null)[]>();
+		expectTypeOf(docs.tags.$inferInsert).toEqualTypeOf<(string | null)[]>();
 	});
 });
 

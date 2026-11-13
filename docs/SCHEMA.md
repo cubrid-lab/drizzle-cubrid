@@ -121,11 +121,11 @@ CUBRID has unique collection types and a monetary type not found in MySQL. `driz
 An unordered collection of unique values:
 
 ```ts
-import { cubridTable, int, set } from "drizzle-cubrid";
+import { cubridTable, int, set, varchar } from "drizzle-cubrid";
 
 export const articles = cubridTable("articles", {
   id: int("id").primaryKey().autoincrement(),
-  tags: set("tags", { type: "VARCHAR", length: 50 }),
+  tags: set("tags", { element: varchar("tag", { length: 50 }) }),
 });
 ```
 
@@ -139,9 +139,10 @@ await db.insert(articles).values({
   tags: ["typescript", "cubrid", "orm"],
 });
 
-// Select — returns string[]
+// Select — returns the array the server stored. SET removes duplicates
+// and defines no order (CUBRID returned them sorted in testing).
 const rows = await db.select().from(articles);
-console.log(rows[0].tags); // ["typescript", "cubrid", "orm"]
+console.log(rows[0].tags); // ["cubrid", "orm", "typescript"]
 ```
 
 ### MULTISET
@@ -153,7 +154,7 @@ import { cubridTable, int, multiset } from "drizzle-cubrid";
 
 export const logs = cubridTable("logs", {
   id: int("id").primaryKey().autoincrement(),
-  error_codes: multiset("error_codes", { type: "INTEGER" }),
+  error_codes: multiset<number>("error_codes", { element: int("code") }),
 });
 ```
 
@@ -164,15 +165,16 @@ Generates: `error_codes MULTISET(INTEGER)`
 An ordered collection that allows duplicates:
 
 ```ts
-import { cubridTable, int, sequence } from "drizzle-cubrid";
+import { cubridTable, decimal, int, sequence } from "drizzle-cubrid";
 
 export const rankings = cubridTable("rankings", {
   id: int("id").primaryKey().autoincrement(),
-  scores: sequence("scores", { type: "NUMERIC", precision: 5, scale: 2 }),
+  scores: sequence("scores", { element: decimal("score", { precision: 5, scale: 2 }) }),
 });
 ```
 
-Generates: `scores SEQUENCE(NUMERIC(5,2))`
+Generates: `scores SEQUENCE(DECIMAL(5,2))`. NUMERIC elements are returned as
+decimal strings, as cubrid-client returns NUMERIC columns.
 
 ### MONETARY
 
@@ -191,14 +193,28 @@ Generates: `price MONETARY`
 
 ### Collection Type Configuration
 
-All collection types (`set`, `multiset`, `sequence`) accept a configuration object:
+All collection types (`set`, `multiset`, `sequence`, also exported as
+`cubridSet`, `cubridMultiset`, `cubridSequence`) take an optional `element`
+column whose SQL type becomes the element type (`VARCHAR(100)` when omitted),
+and a type parameter for the JavaScript element type (`string` by default):
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `type` | `string` | Element type name (e.g., `"VARCHAR"`, `"INTEGER"`, `"NUMERIC"`) |
-| `length` | `number` | Length for string types (e.g., `VARCHAR(50)`) |
-| `precision` | `number` | Precision for numeric types |
-| `scale` | `number` | Scale for numeric types (used with `precision`) |
+```ts
+set<number>("ids", { element: int("id") }); // SET(INTEGER), number[]
+```
+
+- **Reading.** cubrid-client 1.x returns the column as an array, with elements
+  of the same JavaScript types as columns of the element type, and `null` for a
+  NULL element. A non-array value from the driver is refused.
+- **Writing.** The value must be an array. It is written as a typed collection
+  literal with one parameter per element, such as `SET{?, ?}`, so quotes and
+  backslashes in elements need no escaping. Elements may be strings, finite
+  numbers, bigints, booleans, valid `Date`s, bytes (`Buffer` or `Uint8Array`)
+  or `null`; nested arrays and other objects are refused before anything is
+  sent. `[]` writes an empty collection. Bytes written into a string collection
+  are stored as their hex text.
+- **Placeholders.** `sql.placeholder()` cannot stand for a whole collection
+  value in a prepared query; it is refused when the query runs. Pass the array
+  directly.
 
 ## Column Modifiers
 
@@ -329,7 +345,7 @@ export const products = cubridTable("products", {
   name: varchar("name", { length: 200 }).notNull(),
   description: text("description"),
   price: monetary("price"),
-  tags: set("tags", { type: "VARCHAR", length: 50 }),
+  tags: set("tags", { element: varchar("tag", { length: 50 }) }),
 });
 
 // Orders table

@@ -5,6 +5,7 @@ export type { CubridExecuteResult, CubridQueryable, CubridRawQueryResult } from 
 export { cubridTable } from './table.js';
 export * from './columns.js';
 export {
+	type CubridCollectionElement,
 	cubridMultiset,
 	type CubridMultisetColumnBuilder,
 	cubridSequence,

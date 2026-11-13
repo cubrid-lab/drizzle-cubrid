@@ -18,8 +18,8 @@ import type {
 } from 'drizzle-orm/mysql-core/session';
 import { MySqlPreparedQuery, MySqlSession, MySqlTransaction } from 'drizzle-orm/mysql-core/session';
 import type { RelationalSchemaConfig, TablesRelationalConfig } from 'drizzle-orm/relations';
-import { fillPlaceholders, sql } from 'drizzle-orm/sql/sql';
-import type { Query, SQL } from 'drizzle-orm/sql/sql';
+import { fillPlaceholders, SQL, sql } from 'drizzle-orm/sql/sql';
+import type { Query } from 'drizzle-orm/sql/sql';
 import { type Assume } from 'drizzle-orm/utils';
 import * as drizzleUtils from 'drizzle-orm/utils';
 
@@ -143,6 +143,20 @@ const mapResultRow = (drizzleUtils as unknown as {
 const ARRAY_ROWS = { rowMode: 'array' } as const;
 
 /**
+ * A column whose value is written as SQL, such as a SET/MULTISET/SEQUENCE
+ * literal, cannot take a placeholder for the whole value: Drizzle encodes the
+ * placeholder's value only when the statement runs, after the SQL text is
+ * fixed, and would hand the SQL fragment to the driver as a parameter.
+ */
+function assertNoSqlParams(params: unknown[]): void {
+	if (params.some((param) => is(param, SQL))) {
+		throw new Error(
+			'A placeholder was used for a column whose value is written as SQL (a SET, MULTISET or SEQUENCE column); pass the value directly instead of sql.placeholder()',
+		);
+	}
+}
+
+/**
  * Converts a generated key to the column's JavaScript type, such as `bigint`
  * for `bigint({ mode: 'bigint' })`. Refuses a key the column type would round.
  */
@@ -202,6 +216,7 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 
 	async execute(placeholderValues: Record<string, unknown> = {}): Promise<T['execute']> {
 		const params = fillPlaceholders(this.params, placeholderValues);
+		assertNoSqlParams(params);
 		this.logger.logQuery(this.queryString, params);
 
 		if (!this.fields && !this.customResultMapper) {

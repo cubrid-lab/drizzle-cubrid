@@ -103,9 +103,9 @@ import { set, multiset, sequence, monetary } from 'drizzle-cubrid';
 export const products = cubridTable('products', {
   id: int('id').primaryKey().autoincrement(),
   name: varchar('name', { length: 100 }),
-  tags: set('tags', 'VARCHAR(50)'),
-  categories: multiset('categories', 'VARCHAR(50)'),
-  rankings: sequence('rankings', 'INTEGER'),
+  tags: set('tags', { element: varchar('tag', { length: 50 }) }),
+  categories: multiset('categories', { element: varchar('category', { length: 50 }) }),
+  rankings: sequence<number>('rankings', { element: int('rank') }),
   price: monetary('price'),
 });
 ```

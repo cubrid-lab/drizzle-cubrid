@@ -58,34 +58,6 @@ describe('collection and monetary types', () => {
 		expect(table.price.getSQLType()).toBe('MONETARY');
 	});
 
-	it('collection fromDriver parses brace syntax to array', () => {
-		const table = cubridTable('parse_types', {
-			tags: cubridSet('tags', { element: varchar('tag_item', { length: 50 }) }),
-		});
-
-		expect(table.tags.mapFromDriverValue("{'a','b','c'}")).toEqual(['a', 'b', 'c']);
-		expect(table.tags.mapFromDriverValue('a,b,c')).toEqual(['a', 'b', 'c']);
-	});
-
-	it('collection fromDriver handles empty string and {}', () => {
-		const table = cubridTable('parse_empty_types', {
-			tags: cubridMultiset('tags', { element: varchar('tag_item', { length: 50 }) }),
-		});
-
-		expect(table.tags.mapFromDriverValue('')).toEqual([]);
-		expect(table.tags.mapFromDriverValue('{}')).toEqual([]);
-	});
-
-	it('collection toDriver formats arrays into braces', () => {
-		const table = cubridTable('format_types', {
-			items: cubridSequence('items', { element: int('item_id') }),
-		});
-
-		expect(table.items.mapToDriverValue(['a', 'b', 'c'])).toBe("{'a','b','c'}");
-		expect(table.items.mapToDriverValue(["a'b"])).toBe("{'a''b'}");
-		expect(table.items.mapToDriverValue([])).toBe('{}');
-	});
-
 	it('collection works in a normal table definition', () => {
 		const table = cubridTable('mixed_types', {
 			id: int('id').primaryKey().autoincrement(),
