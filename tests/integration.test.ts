@@ -652,12 +652,14 @@ describe('DATETIME, TIMESTAMP, DATE and TIME columns round-trip (#207)', () => {
 		}
 	}
 
-	it('refuses a TIMESTAMP with milliseconds before writing it', async () => {
+	it('compares a TIMESTAMP with a Date that has milliseconds; CUBRID stores whole seconds', async () => {
 		const db = drizzle(client);
-		await expect(db.insert(t).values({ id: 90, stamp: new Date('2024-01-02T03:04:05.678Z') })).rejects.toThrow(
-			/whole seconds/,
-		);
-		expect(await ids(table)).not.toContain(90);
+		await db.insert(t).values({ id: 90, stamp: new Date('2024-01-02T03:04:05.678Z') });
+
+		const [row] = await db.select({ stamp: t.stamp }).from(t).where(eq(t.id, 90));
+		expect(row?.stamp).toEqual(new Date('2024-01-02T03:04:05.000Z'));
+		const later = await db.select({ id: t.id }).from(t).where(and(eq(t.id, 90), gt(t.stamp, new Date('2024-01-02T03:04:04.999Z'))));
+		expect(later).toEqual([{ id: 90 }]);
 	});
 
 	it('refuses a local-zone client unless the process zone is UTC', async () => {

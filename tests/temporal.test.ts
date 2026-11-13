@@ -161,8 +161,8 @@ describe('decoding the driver Date as a UTC wall clock', () => {
 		expect(events.day.mapToDriverValue(instant)).toBe(instant);
 	});
 
-	it('refuses a TIMESTAMP Date with milliseconds, which CUBRID would drop', () => {
-		expect(() => events.stamp.mapToDriverValue(instant)).toThrow(/TIMESTAMP column stamp stores whole seconds/);
+	it('encodes a TIMESTAMP Date with milliseconds, e.g. a gt(col, new Date()) parameter', () => {
+		expect(events.stamp.mapToDriverValue(instant)).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
 	});
 });
 

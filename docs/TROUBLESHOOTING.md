@@ -164,11 +164,10 @@ const client = createClient({ host, port, database, user, timezone: "utc" });
 or run the process with `TZ=UTC`. See
 [Date and time columns](SCHEMA.md#date-and-time-columns).
 
-### `TIMESTAMP column ... stores whole seconds`
+### A `timestamp()` or `time()` value lost its milliseconds
 
-CUBRID's TIMESTAMP has no milliseconds and drops them without an error, so a
-`Date` with milliseconds is refused. Round it (`new Date(Math.floor(d.getTime() / 1000) * 1000)`)
-or use a `datetime()` column.
+CUBRID's TIMESTAMP and TIME hold whole seconds and drop fractions without an
+error. Use a `datetime()` column when milliseconds matter.
 
 ### Column names are lowercase
 

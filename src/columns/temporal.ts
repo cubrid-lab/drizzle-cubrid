@@ -105,8 +105,9 @@ export class CubridTimestampBuilder extends MySqlTimestampBuilder<ColumnBuilderB
 
 /**
  * `timestamp({ mode: 'date' })`: the driver's `Date` as is. A CUBRID TIMESTAMP
- * holds whole seconds and the server drops milliseconds without an error, so a
- * `Date` with milliseconds is refused rather than stored as a different value.
+ * holds whole seconds and the server drops fractional seconds without an
+ * error. Writes are not refused for that: this encoder also encodes comparison
+ * parameters such as `gt(t.ts, new Date())`, which store nothing.
  */
 export class CubridTimestamp extends MySqlTimestamp<ColumnBaseConfig<'date', 'MySqlTimestamp'>> {
 	static override readonly [entityKind]: string = 'CubridTimestamp';
@@ -115,14 +116,6 @@ export class CubridTimestamp extends MySqlTimestamp<ColumnBaseConfig<'date', 'My
 		return value instanceof Date ? value : super.mapFromDriverValue(value as string);
 	}
 
-	override mapToDriverValue(value: Date): string {
-		if (value instanceof Date && value.getUTCMilliseconds() !== 0) {
-			throw new RangeError(
-				`TIMESTAMP column ${this.name} stores whole seconds and CUBRID would drop the milliseconds of ${isoOf(value)}; round the Date to a whole second or use a datetime() column`,
-			);
-		}
-		return super.mapToDriverValue(value);
-	}
 }
 
 export class CubridTimestampStringBuilder extends MySqlTimestampStringBuilder<

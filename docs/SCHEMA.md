@@ -110,7 +110,7 @@ returns. They follow Drizzle's MySQL convention: the stored wall clock is UTC.
 |---------|---------|------|
 | `datetime()` (`mode: 'date'`) | UTC fields of the `Date`, with milliseconds | the same instant |
 | `datetime({ mode: 'string' })` | the string | `YYYY-MM-DD HH:MM:SS.mmm` (CUBRID DATETIME always keeps milliseconds) |
-| `timestamp()` | UTC fields of the `Date`; a `Date` with milliseconds is refused, since CUBRID would drop them silently | the same instant |
+| `timestamp()` | UTC fields of the `Date` | the same instant, in whole seconds |
 | `timestamp({ mode: 'string' })` | the string | `YYYY-MM-DD HH:MM:SS` |
 | `date()` | the UTC date of the `Date` | midnight UTC of that date |
 | `date({ mode: 'string' })` | the string | `YYYY-MM-DD` |
@@ -137,7 +137,13 @@ per client.
 Server-side defaults such as `NOW()`, `SYS_DATETIME` or `defaultNow()` store the
 server's wall clock, which reads back as UTC only when the server's time zone is
 UTC. CUBRID's TIMESTAMP is converted between the session time zone and UTC on
-the server; drizzle-cubrid reads back the wall clock it wrote either way.
+the server; a wall clock that does not exist in the session zone (a DST gap) is
+rejected by the server.
+
+Fractional seconds: CUBRID's TIMESTAMP and TIME hold whole seconds and drop
+fractions without an error, in every mode (`.678` in a `Date` or
+`'01:02:03.456'` in a string is stored as `.000` / `01:02:03`). Use
+`datetime()` when milliseconds matter.
 
 ### Binary Types
 
