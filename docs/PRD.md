@@ -64,7 +64,7 @@ under *Unreleased* in the [CHANGELOG](../CHANGELOG.md); for example, its
 | SET / MULTISET / SEQUENCE columns | Shipped | [SCHEMA.md](SCHEMA.md#cubrid-specific-types) |
 | Date and time columns | Shipped | needs a UTC client (`timezone: 'utc'`) |
 | `db.query.*.findMany()` / `findFirst()` without `with` | Shipped | |
-| `monetary()` | Shipped, defect | reads back numbers ([#217](https://github.com/cubrid-lab/drizzle-cubrid/issues/217)) |
+| `monetary()` | Shipped | strings; double precision ([#217](https://github.com/cubrid-lab/drizzle-cubrid/issues/217)) |
 | `binary()` / `varbinary()` | Defect, do not use | [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216) |
 | Relational `with` | Refused | [#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200) |
 | `.iterator()` (streaming) | Throws | not implemented |
