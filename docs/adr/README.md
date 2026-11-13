@@ -6,14 +6,14 @@ ADRs preserve **why** a consequential technical or release decision was made, th
 
 | ADR | Decision | Status |
 | --- | --- | --- |
-| [0001](0001-release-governance.md) | Release, SemVer and compatibility governance | Accepted (2026-11-13, #ACCEPT_PR) |
+| [0001](0001-release-governance.md) | Release, SemVer and compatibility governance | Accepted (2026-11-13, #225) |
 | [0002](0002-database-correctness-evidence.md) | CUBRID correctness and failure-evidence requirements | Proposed |
-| [0003](0003-native-architecture-boundaries.md) | Native CUBRID architecture boundaries | Accepted (2026-11-13, #ACCEPT_PR) |
+| [0003](0003-native-architecture-boundaries.md) | Native CUBRID architecture boundaries | Accepted (2026-11-13, #225) |
 | [0004](0004-test-first-development.md) | TDD: design contract, Red–Green–Refactor and live-CUBRID verification | Proposed |
 | [0005](0005-development-setup.md) | Reproducible language-native developer setup and verification | Proposed |
 | [0006](0006-node-18-support-through-1x.md) | Retain Node.js 18 consumer support throughout 1.x; consider removal no earlier than 2.0 | Proposed |
 
-The CUBRID-native architecture ADR 0003 was merged as Proposed in #166, together with [the architecture plan](../CUBRID_NATIVE_ARCHITECTURE.md) and [design sign-off checklist](../DESIGN_SIGNOFF.md), and accepted after ADR 0001 in #ACCEPT_PR. Acceptance approves the direction; it does not sign off the design checklist or claim any implementation exists.
+The CUBRID-native architecture ADR 0003 was merged as Proposed in #166, together with [the architecture plan](../CUBRID_NATIVE_ARCHITECTURE.md) and [design sign-off checklist](../DESIGN_SIGNOFF.md), and accepted after ADR 0001 in #225. Acceptance approves the direction; it does not sign off the design checklist or claim any implementation exists.
 
 ## ADR lifecycle
 
@@ -26,4 +26,4 @@ Start from the [ADR template](TEMPLATE.md). Create a monotonically numbered `NNN
 
 Release policy must be reviewed **before** progressing the separate architecture proposal to acceptance. Code-level regressions remain tracked in the existing issue backlog, and real CUBRID tests remain mandatory where the release makes database-behavior claims.
 
-Release policy: [#168](https://github.com/cubrid-lab/drizzle-cubrid/pull/168). Acceptance of ADR 0001 and 0003: #ACCEPT_PR.
+Release policy: [#168](https://github.com/cubrid-lab/drizzle-cubrid/pull/168). Acceptance of ADR 0001 and 0003: #225.

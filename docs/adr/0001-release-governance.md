@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-07 (proposed)
-- **Accepted:** 2026-11-13 by maintainer yeongseon, recorded in PR #ACCEPT_PR
+- **Accepted:** 2026-11-13 by maintainer yeongseon, recorded in PR #225
 - **Decision scope:** drizzle-cubrid release and supported-consumer contract
 - **Owner:** Repository maintainers
 
@@ -34,7 +34,7 @@ Maintainers must explicitly review the supported matrix and any runtime/API remo
 
 ## Verification / acceptance criteria
 
-- [x] Maintainer reviews and accepts this ADR, links the approval and records acceptance date (2026-11-13, PR #ACCEPT_PR).
+- [x] Maintainer reviews and accepts this ADR, links the approval and records acceptance date (2026-11-13, PR #225).
 - [ ] Published README/release guide and dependency version declarations agree with the reviewed compatibility contract.
 - [ ] A candidate-specific CI check identifies supported CUBRID server versions, tests run/passed/failed/skipped, runtime and driver/ORM versions, and actual artifact.
 - [ ] Required release checks reject failed, missing, zero-case or skipped live tests, with scoped exceptions documented as unsupported/unverified—not counted as passes.

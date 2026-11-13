@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-07 (proposed)
-- **Accepted:** 2026-11-13 by maintainer yeongseon, after ADR 0001, recorded in PR #ACCEPT_PR
+- **Accepted:** 2026-11-13 by maintainer yeongseon, after ADR 0001, recorded in PR #225
 - **Prerequisite:** Release policy ADR 0001 (accepted 2026-11-13)
 - **Decision scope:** TypeScript Drizzle ORM CUBRID-native dialect and migration ownership
 
@@ -40,10 +40,10 @@ The planned stable 1.x native dialect cannot require Node >18 at runtime. Build 
 
 Compile an independently typed table and representative SELECT/JOIN without importing mysql-core; execute on actual CUBRID; verify DML metadata, duplicate aliases, transaction connection ownership, type codecs and transactional DDL under supported DB versions; resolve unsupported extension gaps before a 1.0 guarantee.
 
-- [x] Approve release/compatibility policy ADR 0001 **before** accepting this architecture ADR (accepted in the same PR, #ACCEPT_PR, in that order).
+- [x] Approve release/compatibility policy ADR 0001 **before** accepting this architecture ADR (accepted in the same PR, #225, in that order).
 - [ ] The feasibility evidence and exact supported versions are recorded; unknown or unsupported behavior is not reported as implemented.
 - [ ] Separate implementation issues, regression tests and release documentation agree with this decision.
-- [x] A maintainer reviews the decision and records acceptance explicitly; draft status alone never authorizes 1.0. (2026-11-13, PR #ACCEPT_PR.)
+- [x] A maintainer reviews the decision and records acceptance explicitly; draft status alone never authorizes 1.0. (2026-11-13, PR #225.)
 
 ## References
 

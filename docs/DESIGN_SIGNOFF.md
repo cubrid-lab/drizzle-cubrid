@@ -1,6 +1,6 @@
 # Design sign-off and TDD acceptance plan
 
-> **Status: Not signed off / design under review.** This plan captures *expected* test behavior, not tests already written or run. ADR 0001 (release governance) and the native architecture ADR 0003 were accepted on 2026-11-13 (#ACCEPT_PR); ADR 0002/0004/0005/0006 remain Proposed. Accepting ADR 0003 approves the direction, not this checklist. No implementation, CI success, approved public API or live DB outcome is implied.
+> **Status: Not signed off / design under review.** This plan captures *expected* test behavior, not tests already written or run. ADR 0001 (release governance) and the native architecture ADR 0003 were accepted on 2026-11-13 (#225); ADR 0002/0004/0005/0006 remain Proposed. Accepting ADR 0003 approves the direction, not this checklist. No implementation, CI success, approved public API or live DB outcome is implied.
 
 ## CUBRID-only final acceptance (mandatory, not yet passed)
 
