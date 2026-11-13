@@ -133,7 +133,7 @@ function assertArrayRow(row: unknown): unknown[] {
 		return row;
 	}
 	throw new Error(
-		"The CUBRID client returned an object row for { rowMode: 'array' }; drizzle-cubrid needs cubrid-client 1.4.0 or later, or a client whose query() supports rowMode 'array'",
+		`The CUBRID client returned a non-array row (${row === null ? 'null' : typeof row}) for { rowMode: 'array' }; drizzle-cubrid needs cubrid-client 1.4.0 or later, or a client whose query() supports rowMode 'array'`,
 	);
 }
 
