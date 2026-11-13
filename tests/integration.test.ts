@@ -29,6 +29,7 @@ import {
 } from '../src/columns';
 import { drizzle } from '../src/driver';
 import { cubridTable } from '../src/table';
+import { monetary } from '../src/types';
 
 const host = process.env.CUBRID_TEST_HOST;
 if (!host) {
@@ -746,4 +747,24 @@ describe('the forms suggested in place of refused SQL run on CUBRID (#189)', () 
 		expect(result.affectedRows).toBe(1);
 		expect((await ids(table)).length).toBe(3);
 	});
+});
+
+describe('MONETARY columns read back as the declared string (#217)', () => {
+	const table = name('money');
+	const t = cubridTable(table, { id: int('id').primaryKey(), price: monetary('price') });
+
+	beforeAll(() => createTable(table, 'id INT PRIMARY KEY, price MONETARY'));
+
+	for (const [id, binding] of [
+		[1, 'prepared'],
+		[2, 'literal'],
+	] as const) {
+		it(`writes '12.34' and reads '12.34' (${binding})`, async () => {
+			const db = drizzle(client, { binding });
+			await db.insert(t).values({ id, price: '12.34' });
+			await expect(db.select({ price: t.price }).from(t).where(eq(t.id, id))).resolves.toEqual([{ price: '12.34' }]);
+			const [raw] = await client.query<{ price: number }>(`SELECT price FROM ${table} WHERE id = ${id}`);
+			expect(raw?.price).toBe(12.34);
+		});
+	}
 });
