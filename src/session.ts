@@ -142,6 +142,20 @@ const mapResultRow = (drizzleUtils as unknown as {
 
 const ARRAY_ROWS = { rowMode: 'array' } as const;
 
+/**
+ * Converts a generated key to the column's JavaScript type, such as `bigint`
+ * for `bigint({ mode: 'bigint' })`. Refuses a key the column type would round.
+ */
+function toKeyValue(column: Column, lastInsertId: number | bigint): unknown {
+	const value = column.mapFromDriverValue(lastInsertId);
+	if (typeof lastInsertId === 'bigint' && typeof value === 'number' && BigInt(value) !== lastInsertId) {
+		throw new Error(
+			`Generated key ${lastInsertId} of column ${column.name} is not exact as a number; declare the column with { mode: 'bigint' }`,
+		);
+	}
+	return value;
+}
+
 function withExecuteResult(rows: QueryRow[], meta: CubridExecuteResult): CubridRawQueryResult {
 	const result: CubridRawQueryResult = rows;
 	result.affectedRows = meta.affectedRows;
@@ -234,7 +248,9 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 		const rowCount = this.generatedIds?.length ?? 0;
 		if (columns.some(isAutoIncrementKey) && rowCount !== 1) {
 			throw new Error(
-				'$returningId() can report an AUTO_INCREMENT key only for an INSERT of one row on CUBRID; insert the rows one at a time',
+				rowCount === 0
+					? '$returningId() cannot report AUTO_INCREMENT keys of INSERT ... SELECT on CUBRID'
+					: '$returningId() can report an AUTO_INCREMENT key only for an INSERT of one row on CUBRID; insert the rows one at a time',
 			);
 		}
 		if (typeof this.client.execute !== 'function') {
@@ -248,8 +264,11 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 			for (const column of columns) {
 				const key = column.path[0]!;
 				if (isAutoIncrementKey(column)) {
-					if (meta.lastInsertId !== undefined) {
-						response.push({ [key]: meta.lastInsertId });
+					// affectedRows is 2 when onDuplicateKeyUpdate() updated an existing
+					// row; CUBRID still reports a consumed AUTO_INCREMENT value then,
+					// which is no row's key.
+					if (meta.lastInsertId !== undefined && meta.affectedRows === 1) {
+						response.push({ [key]: toKeyValue(column.field as Column, meta.lastInsertId) });
 					}
 					continue;
 				}

@@ -250,8 +250,16 @@ const [{ id }] = await db.insert(users).values({ name: "Alice", email: "a@exampl
   others are consecutive, so a multi-row `$returningId()` with an
   AUTO_INCREMENT key is refused before anything is inserted. Insert those rows
   one at a time.
-- When the INSERT sets the key itself, the server generates none and the key is
-  left out of the result.
+- The key is left out when the server reports none: when the INSERT sets the
+  key itself, and when its values contain SQL functions or subqueries
+  (cubrid-client reads the key only for a plain `INSERT ... VALUES`).
+- With `onDuplicateKeyUpdate()`, an INSERT that updated an existing row reports
+  `affectedRows: 2` and a `lastInsertId` CUBRID consumed without inserting; that
+  value is no row's key, so `$returningId()` leaves it out.
+- `INSERT ... SELECT` cannot report AUTO_INCREMENT keys and is refused.
+- The key is returned in the column's JavaScript type: `bigint` for
+  `bigint({ mode: "bigint" })`. A key a `number` column cannot hold exactly is
+  refused.
 - Keys from `$defaultFn()` are returned for every row.
 
 `db.execute(sql\`...\`)` returns rows and reports no counts; use the query

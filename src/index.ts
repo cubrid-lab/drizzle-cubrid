@@ -1,6 +1,6 @@
 export { drizzle, CubridDatabase } from './driver.js';
 export { CubridPreparedQuery, CubridSession, CubridTransaction } from './session.js';
-export type { CubridQueryable, CubridRawQueryResult } from './session.js';
+export type { CubridExecuteResult, CubridQueryable, CubridRawQueryResult } from './session.js';
 
 export { cubridTable } from './table.js';
 export * from './columns.js';

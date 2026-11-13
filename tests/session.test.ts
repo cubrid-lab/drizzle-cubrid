@@ -57,7 +57,7 @@ vi.mock('drizzle-orm/sql/sql', async () => {
 
 const { mapResultRowMock, fillPlaceholdersMock } = hoistedMocks;
 
-import { int, varchar } from '../src/columns';
+import { bigint, int, varchar } from '../src/columns';
 import {
 	CubridPreparedQuery,
 	CubridSession,
@@ -414,6 +414,43 @@ describe('CubridPreparedQuery', () => {
 
 		await expect(returningQuery(client, idField, [{}]).execute()).rejects.toThrow(/execute\(\)/);
 		expect(client.queries).toEqual([]);
+	});
+
+	it('$returningId() reports no key when onDuplicateKeyUpdate() updated a row', async () => {
+		// CUBRID reports affectedRows 2 and a consumed AUTO_INCREMENT value that
+		// belongs to no row.
+		const client = new ExecutingClient({ affectedRows: 2, lastInsertId: 7 });
+
+		const result = await returningQuery(client, idField, [{}]).execute();
+
+		expect(result).toEqual([]);
+	});
+
+	it("$returningId() converts the key to the column's mode", async () => {
+		const wide = cubridTable('wide', {
+			id: bigint('id', { mode: 'bigint' }).primaryKey().autoincrement(),
+			small: bigint('small', { mode: 'number' }).primaryKey().autoincrement(),
+		});
+		const asBigint = [{ path: ['id'], field: wide.id }] as unknown as SelectedFieldsOrdered;
+		const asNumber = [{ path: ['small'], field: wide.small }] as unknown as SelectedFieldsOrdered;
+
+		expect(
+			await returningQuery(new ExecutingClient({ affectedRows: 1, lastInsertId: 5 }), asBigint, [{}]).execute(),
+		).toEqual([{ id: 5n }]);
+		await expect(
+			returningQuery(
+				new ExecutingClient({ affectedRows: 1, lastInsertId: 9007199254740993n }),
+				asNumber,
+				[{}],
+			).execute(),
+		).rejects.toThrow(/mode: 'bigint'/);
+	});
+
+	it('$returningId() refuses INSERT ... SELECT before sending it', async () => {
+		const client = new ExecutingClient({ affectedRows: 1, lastInsertId: 3 });
+
+		await expect(returningQuery(client, idField, []).execute()).rejects.toThrow(/INSERT \.\.\. SELECT/);
+		expect(client.executed).toEqual([]);
 	});
 
 	it('$returningId() skips returning fields that are not columns', async () => {
