@@ -234,6 +234,26 @@ describe('joined selects keep columns whose labels repeat (#183)', () => {
 
 		expect(rows).toEqual([{ userName: '앨리스', postName: '첫 글' }]);
 	});
+
+	for (const binding of ['prepared', 'literal'] as const) {
+		it(`counts rows with $count() under binding '${binding}' (#199)`, async () => {
+			const db = drizzle(client, { binding });
+
+			expect(await db.$count(users)).toBe(2);
+			expect(await db.$count(users, eq(users.name, 'bob'))).toBe(1);
+			expect(await db.$count(posts, gt(posts.id, 10))).toBe(0);
+			expect(
+				await db
+					.select({ id: users.id, posts: db.$count(posts, eq(posts.userId, users.id)) })
+					.from(users)
+					.orderBy(users.id),
+			).toEqual([
+				{ id: 1, posts: 1 },
+				{ id: 2, posts: 0 },
+			]);
+			expect(await db.transaction((tx) => tx.$count(users))).toBe(2);
+		});
+	}
 });
 
 describe('writes report affected rows and generated keys (#182)', () => {
