@@ -7,7 +7,7 @@
 // of skipping, so a missing database can never look like a pass.
 // CUBRID_TEST_EXPECT_VERSION, when set, must prefix the server version.
 import { type CubridClient, type CubridPool, createClient, createPool } from 'cubrid-client';
-import { eq, gt, sql, TransactionRollbackError } from 'drizzle-orm';
+import { eq, gt, relations, sql, TransactionRollbackError } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -252,6 +252,43 @@ describe('joined selects keep columns whose labels repeat (#183)', () => {
 				{ id: 2, posts: 0 },
 			]);
 			expect(await db.transaction((tx) => tx.$count(users))).toBe(2);
+		});
+	}
+});
+
+describe('relational queries without relations work; with is refused (#200)', () => {
+	const usersName = name('rusers');
+	const postsName = name('rposts');
+	const users = cubridTable(usersName, { id: int('id').primaryKey(), name: varchar('name', { length: 40 }) });
+	const posts = cubridTable(postsName, { id: int('id').primaryKey(), userId: int('user_id') });
+	const schema = {
+		users,
+		posts,
+		usersRelations: relations(users, ({ many }) => ({ posts: many(posts) })),
+		postsRelations: relations(posts, ({ one }) => ({
+			author: one(users, { fields: [posts.userId], references: [users.id] }),
+		})),
+	};
+
+	beforeAll(async () => {
+		await createTable(usersName, 'id INT PRIMARY KEY, name VARCHAR(40)');
+		await createTable(postsName, 'id INT PRIMARY KEY, user_id INT');
+		await client.query(`INSERT INTO ${usersName} VALUES (1, '앨리스'), (2, 'bob')`);
+		await client.query(`INSERT INTO ${postsName} VALUES (10, 1)`);
+	});
+
+	for (const mode of ['default', 'planetscale'] as const) {
+		it(`runs findMany and findFirst and refuses with in ${mode} mode`, async () => {
+			const db = drizzle(client, { schema, mode });
+
+			expect(await db.query.users.findMany({ orderBy: users.id })).toEqual([
+				{ id: 1, name: '앨리스' },
+				{ id: 2, name: 'bob' },
+			]);
+			expect(await db.query.posts.findFirst({ where: eq(posts.id, 10) })).toEqual({ id: 10, userId: 1 });
+			await expect(db.query.users.findMany({ with: { posts: true } })).rejects.toThrow(
+				"Relational queries with 'with' (posts) are not supported on CUBRID",
+			);
 		});
 	}
 });

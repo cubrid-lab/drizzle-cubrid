@@ -296,13 +296,17 @@ import * as schema from "./schema";
 
 const db = drizzle(client, { schema, mode: "default" });
 
-// Fetch users with their posts
-const usersWithPosts = await db.query.users.findMany({
-  with: {
-    posts: true,
-  },
-});
+const someUsers = await db.query.users.findMany({ limit: 10 });
 ```
+
+Loading relations with `with` is not supported on CUBRID yet and throws:
+Drizzle's MySQL SQL for it uses `LEFT JOIN LATERAL` (`mode: "default"`), which
+CUBRID lacks, or JSON aggregation (`mode: "planetscale"`), which CUBRID rejects
+for DATE/DATETIME values and which rounds BIGINT values beyond 2^53 and
+garbles non-ASCII text in an ISO-8859-1 database
+([#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200)). Query the
+related table separately or use a join; native support is tracked in
+[#158](https://github.com/cubrid-lab/drizzle-cubrid/issues/158).
 
 > **Note**: Relations require passing the `schema` option and `mode` to `drizzle()`.
 
