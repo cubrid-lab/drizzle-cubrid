@@ -4,8 +4,8 @@
 
 | Peer | Declared range | Why this floor | Why this ceiling |
 | --- | --- | --- | --- |
-| `drizzle-orm` | `>=0.44.1 <0.46.0` | 0.44.0 and older fail `tsc` and the build (below) | 0.46 and the 1.0 release candidates are untested |
-| `cubrid-client` | `>=1.4.0 <2.0.0` | the only version tested against a real CUBRID server; `createPool()` needs 1.4.0 and `isolationLevel` needs 1.3.0 | a 2.x driver may change its API |
+| `drizzle-orm` | `>=0.44.1 <0.46.0` | 0.44.0 and older fail to type-check (below) | 0.46 and the 1.0 release candidates are untested |
+| `cubrid-client` | `>=1.4.0 <2.0.0` | the only version verified against a real CUBRID server (#185); `isolationLevel` also needs 1.3.0 or later | a 2.x driver may change its API |
 
 A version outside these ranges is **unsupported**, even if it happens to install.
 A version inside them is **verified** only where the tables below say so.
@@ -61,8 +61,8 @@ Measured the same way with `npm install --no-save cubrid-client@<version>`
 
 | Version | Type check | Unit tests | Real CUBRID 11.4 | Status |
 | --- | --- | --- | --- | --- |
-| 1.0.0 – 1.2.0 | pass | 94 / 72 passed | not run | unsupported: `transaction()` takes no options, no pool |
-| 1.3.0 | pass | 94 passed | not run | unsupported: no `createPool()` |
+| 1.0.0 – 1.2.0 | pass | 94 / 72 passed | not run | unsupported: `transaction()` takes no options; not verified against a server |
+| 1.3.0 | pass | 94 passed | not run | unsupported: not verified against a server |
 | 1.4.0 | pass | 94 passed | transaction isolation checks from #185 | verified |
 
 Passing unit tests and a clean install are not database compatibility. Real

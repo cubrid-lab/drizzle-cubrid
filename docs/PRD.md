@@ -153,8 +153,9 @@ const products = cubridTable('products', {
 ## Dependencies
 
 ### Runtime
-- `drizzle-orm` >= 0.38.0 (peer dependency)
-- `cubrid-client` >= 0.1.0 (peer dependency)
+- `drizzle-orm` `>=0.44.1 <0.46.0` (peer dependency)
+- `cubrid-client` `>=1.4.0 <2.0.0` (peer dependency)
+- See [peer dependency compatibility](COMPATIBILITY.md) for the measured versions.
 
 ### Development
 - `typescript` ^5.7

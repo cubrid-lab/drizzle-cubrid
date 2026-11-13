@@ -10,8 +10,9 @@ Solutions for common issues when using `drizzle-cubrid`.
 npm warn peer drizzle-orm@">=0.44.1 <0.46.0" from drizzle-cubrid
 ```
 
-Install all required peer dependencies within the supported ranges (see
-[peer dependency compatibility](COMPATIBILITY.md)):
+Installing a version outside the supported ranges directly fails with
+`npm error code ERESOLVE` instead. Install all required peer dependencies within
+the supported ranges (see [peer dependency compatibility](COMPATIBILITY.md)):
 
 ```bash
 npm install drizzle-cubrid drizzle-orm cubrid-client
