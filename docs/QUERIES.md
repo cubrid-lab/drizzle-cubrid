@@ -80,7 +80,7 @@ const result2 = await db
 | Function | SQL | Example |
 |----------|-----|---------|
 | `eq(col, val)` | `=` | `eq(users.name, "Alice")` |
-| `ne(col, val)` | `<>` | `ne(users.status, "inactive")` |
+| `ne(col, val)` | `<>` | `ne(users.name, "Bob")` |
 | `gt(col, val)` | `>` | `gt(users.age, 18)` |
 | `gte(col, val)` | `>=` | `gte(users.age, 18)` |
 | `lt(col, val)` | `<` | `lt(users.age, 65)` |
@@ -88,6 +88,11 @@ const result2 = await db
 | `and(...conds)` | `AND` | `and(eq(...), gt(...))` |
 | `or(...conds)` | `OR` | `or(eq(...), eq(...))` |
 | `not(cond)` | `NOT` | `not(eq(users.name, "Alice"))` |
+
+`drizzle-cubrid` re-exports only these operators plus `asc`, `desc`, `count`,
+`sum`, `avg`, `min`, `max`, `sql` and `placeholder`. Import any other Drizzle
+helper, such as `like`, `inArray`, `isNull`, `between` or `relations`, from
+`drizzle-orm`.
 
 ### ORDER BY
 
@@ -398,7 +403,7 @@ try {
     // Auto-rolled back
   });
 } catch (error) {
-  console.error("Transaction failed:", error.message);
+  console.error("Transaction failed:", (error as Error).message);
 }
 ```
 
@@ -540,7 +545,7 @@ const [inserted] = await db
 
 ### No Streaming
 
-CUBRID does not support server-side cursors for streaming. Calling `.iterator()` on prepared queries throws an error. Use `LIMIT`/`OFFSET` for pagination instead.
+drizzle-cubrid does not implement streaming: calling `.iterator()` on a prepared query throws `Streaming is not supported by the CUBRID driver`. Use `LIMIT`/`OFFSET` for pagination instead. Streaming support is tracked in [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165).
 
 ### Identifier Case
 

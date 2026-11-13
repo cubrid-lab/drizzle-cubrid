@@ -38,6 +38,7 @@ CUBRID는 한국 공공기관 및 기업 환경에서 널리 사용되는 고성
 ## 요구 사항
 
 - Node.js 18+
+- CUBRID 11.4 (CI에서 테스트하는 버전이며, 다른 서버 버전은 검증되지 않았습니다)
 - `drizzle-orm` `>=0.44.1 <0.46.0`
 - [cubrid-client](https://github.com/cubrid-lab/cubrid-client) `>=1.4.0 <2.0.0`
 - 검증 범위는 [peer dependency compatibility](COMPATIBILITY.md)를 참고하세요.
@@ -75,6 +76,8 @@ const client = createClient({
   port: 33000,
   database: 'demodb',
   user: 'dba',
+  // 날짜·시간 컬럼을 읽으려면 필요합니다 (영문 README의 "Date and time columns" 참고).
+  timezone: 'utc',
 });
 
 const db = drizzle(client);
@@ -119,6 +122,15 @@ await db.transaction(async (tx) => {
   await tx.insert(users).values({ name: 'Bob', email: 'bob@example.com' });
 });
 ```
+
+## 제한 사항
+
+- `eq`, `and`, `or`, `asc`, `desc`, `sql` 등 일부 연산자만 `drizzle-cubrid`에서 다시 내보냅니다. `relations`, `like`, `inArray` 등 그 밖의 헬퍼는 `drizzle-orm`에서 가져오세요.
+- `with`로 관계를 불러오는 관계형 쿼리는 지원하지 않으며 오류를 던집니다 ([#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200)).
+- 스트리밍(`.iterator()`)은 구현되지 않았습니다 ([#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)).
+- 스키마 마이그레이션과 DDL 생성은 제공하지 않습니다 ([#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)).
+- JSON, BLOB, CLOB 컬럼 빌더는 제공하지 않습니다.
+- 자세한 내용은 영문 [README](../README.md#cubrid-limitations)를 참고하세요.
 
 ## 에코시스템
 

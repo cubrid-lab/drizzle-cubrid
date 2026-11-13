@@ -16,7 +16,7 @@ export const users = cubridTable("users", {
 });
 ```
 
-`cubridTable` is an alias for `mysqlTable` from `drizzle-orm/mysql-core`. CUBRID's SQL dialect is MySQL-compatible, so all `mysql-core` column builders work with CUBRID.
+`cubridTable` is an alias for `mysqlTable` from `drizzle-orm/mysql-core`, and most column builders are drizzle-orm's MySQL builders re-exported unchanged. CUBRID is not fully MySQL-compatible: only the behavior described here and covered by the live CUBRID 11.4 tests is verified, and some builders have known problems (see the notes below).
 
 ## Column Types
 
@@ -67,6 +67,7 @@ export const metrics = cubridTable("metrics", {
 ```ts
 import {
   cubridTable,
+  int,
   varchar,
   char,
   text,
@@ -174,7 +175,7 @@ export const files = cubridTable("files", {
 
 ## CUBRID-Specific Types
 
-CUBRID has unique collection types and a monetary type not found in MySQL. `drizzle-cubrid` provides custom column builders for these:
+CUBRID has unique collection types and a monetary type not found in MySQL. `drizzle-cubrid` provides custom column builders for these. The "column SQL type" below is what the builder reports to Drizzle; drizzle-cubrid generates no DDL, so create the columns yourself:
 
 ### SET
 
@@ -189,7 +190,7 @@ export const articles = cubridTable("articles", {
 });
 ```
 
-Generates: `tags SET(VARCHAR(50))`
+Column SQL type: `SET(VARCHAR(50))`
 
 **Reading and writing SET values:**
 
@@ -218,7 +219,7 @@ export const logs = cubridTable("logs", {
 });
 ```
 
-Generates: `error_codes MULTISET(INTEGER)`
+Column SQL type: `MULTISET(INTEGER)`
 
 ### SEQUENCE (LIST)
 
@@ -233,7 +234,7 @@ export const rankings = cubridTable("rankings", {
 });
 ```
 
-Generates: `scores SEQUENCE(DECIMAL(5,2))`. NUMERIC elements are returned as
+Column SQL type: `SEQUENCE(DECIMAL(5,2))`. NUMERIC elements are returned as
 decimal strings, as cubrid-client returns NUMERIC columns.
 
 ### MONETARY
@@ -249,7 +250,7 @@ export const products = cubridTable("products", {
 });
 ```
 
-Generates: `price MONETARY`
+Column SQL type: `MONETARY`
 
 > **Note**: values are strings. CUBRID stores MONETARY as a double, so a value reads back as its shortest decimal form (`'12.30'` reads as `'12.3'`; very large or small values use exponent notation such as `'1e+21'`), with double precision; use `decimal()` for exact amounts ([#217](https://github.com/cubrid-lab/drizzle-cubrid/issues/217)).
 

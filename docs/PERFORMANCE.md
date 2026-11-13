@@ -43,14 +43,19 @@ Note: Drizzle adds query builder and mapping overhead on top of the driver basel
 
 ## Performance Characteristics
 
-- Drizzle is designed for good performance with typed SQL generation and lean runtime behavior.
-- Query builder composition still adds overhead compared to direct driver calls.
-- Most overhead appears in SQL generation and result mapping, not in network transport.
-- For hot paths, generated SQL shape stability improves plan/cache behavior.
+The overhead of `drizzle-cubrid` on top of `cubrid-client` has not been
+measured; the numbers above are for the driver alone.
+
+- Query builder composition adds work compared to direct driver calls.
+- With the default typed binding, each statement prepares and releases a
+  server statement, so it takes more round trips than `binding: "literal"`
+  ([how values reach the server](QUERIES.md#how-values-reach-the-server)).
+- `.prepare()` reuses the built SQL on the Drizzle side only; it does not keep
+  a server-side prepared statement.
 
 ## Optimization Tips
 
-- Keep high-volume paths in prepared, reusable query functions.
+- Build high-volume queries once with `.prepare()` to skip repeated query building.
 - Use batched inserts/updates for write-heavy workloads.
 - Avoid unnecessary joins/select columns in latency-sensitive endpoints.
 - Profile generated SQL and verify index usage in CUBRID plans.

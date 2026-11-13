@@ -116,7 +116,9 @@ These are custom types — they won't be available from `drizzle-orm`.
 
 ### Collection type format errors
 
-Collection types use `{val1,val2}` format internally:
+Pass collection values as arrays. drizzle-cubrid writes them as typed
+collection literals with one parameter per element (such as `SET{?, ?}`); a
+string is refused:
 
 ```ts
 // ✅ Correct — pass array, drizzle handles serialization
@@ -128,18 +130,24 @@ await db.insert(table).values({ tags: "{a,b,c}" as any });
 
 ## Query Issues
 
-### DDL/DML returns empty result
+### INSERT/UPDATE/DELETE returns an empty array
 
-This is expected. INSERT, UPDATE, DELETE, CREATE, DROP, etc. return `[]`:
+This is expected. `insert`, `update` and `delete` return an empty array that
+carries `affectedRows` and, for an INSERT that generated an AUTO_INCREMENT
+value, `lastInsertId`
+([details](QUERIES.md#affected-rows-and-generated-keys)):
 
 ```ts
 const result = await db.insert(users).values({ name: "Alice", email: "a@example.com" });
-// result is [] — this is correct for CUBRID
+result.length; // 0
+result.affectedRows; // 1
 ```
 
 ### `Streaming is not supported by the CUBRID driver`
 
-CUBRID doesn't support server-side cursors. Use `LIMIT`/`OFFSET` for pagination:
+drizzle-cubrid does not implement streaming
+([#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)). Use
+`LIMIT`/`OFFSET` for pagination:
 
 ```ts
 // ❌ Won't work
@@ -354,7 +362,7 @@ const user = await getUserById.execute({ id: req.params.id });
 
 ```ts
 // ❌ Fetches all columns
-const users = await db.select().from(users);
+const allUsers = await db.select().from(users);
 
 // ✅ Fetches only what you need
 const names = await db.select({ name: users.name }).from(users);

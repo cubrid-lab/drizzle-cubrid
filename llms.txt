@@ -1,28 +1,30 @@
 # drizzle-cubrid
 
-> Drizzle ORM dialect for the CUBRID database. TypeScript-first, type-safe ORM with full Drizzle query builder support. Node.js 18+.
+> Drizzle ORM dialect for the CUBRID database. Independently maintained community adapter, not an official Drizzle dialect. TypeScript-first, built on Drizzle's MySQL query builders. Node.js 18+.
 
 drizzle-cubrid brings Drizzle ORM's type-safe query builder to CUBRID, built on top of cubrid-client. It supports CUBRID-specific types (SET, MULTISET, SEQUENCE, MONETARY), MySQL-compatible SQL generation, and transactions with savepoints.
 
 Key facts:
 - Install: `npm install drizzle-cubrid drizzle-orm cubrid-client`
 - Define schema: `cubridTable('users', { id: int('id').primaryKey().autoincrement(), name: varchar('name', { length: 100 }) })`
-- Connect: `const db = drizzle(createClient({ host: "localhost", port: 33000, database: "demodb", user: "dba" }))`
+- Connect: `const db = drizzle(createClient({ host: "localhost", port: 33000, database: "demodb", user: "dba", timezone: "utc" }))` (`timezone: "utc"` is required to read date and time columns)
 - Query: `await db.select().from(users).where(eq(users.name, 'Alice'))`
-- CUBRID-specific column types: `set()`, `multiset()`, `sequence()`, `monetary()`
+- Imports: `drizzle`, `cubridTable`, column builders, `eq`/`and`/`or`/`asc`/`desc`/`sql` and similar come from `drizzle-cubrid`; `relations`, `like`, `inArray` and other helpers come from `drizzle-orm`; `createClient`/`createPool` from `cubrid-client`
+- CUBRID-specific column types: `set()`, `multiset()`, `sequence()` (also exported as `cubridSet()`, `cubridMultiset()`, `cubridSequence()`), `monetary()`
+- Not supported: relational queries with `with`, streaming (`.iterator()`), schema migrations/DDL generation, JSON/BLOB/CLOB column builders; only CUBRID 11.4 is tested
 - Offline unit tests with a 95% coverage gate, plus a live CUBRID 11.4 suite in CI
 - TypeScript-first with full type inference from schema definitions
 
 ## Docs
 
 - [README](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md): Full documentation with schema definition, queries, custom types, transactions
-- [Product Requirements](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/docs/PRD.md): Product requirements document with Example-first Design Philosophy
+- [Product Requirements](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/docs/PRD.md): Current shipped behavior versus the planned CUBRID-native design
 
 ## Examples
 
-- [Define Schema](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#define-schema): Table and column definition with cubridTable
-- [Query Examples](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#query): Insert, select, where, update, delete operations
-- [CUBRID-Specific Types](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#cubrid-specific-types): SET, MULTISET, SEQUENCE, MONETARY column types
+- [Define Schema](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#1-define-your-schema): Table and column definition with cubridTable
+- [Query Examples](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#2-connect-and-query): Insert, select, where, update, delete operations
+- [CUBRID-Specific Types](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#cubrid-specific-column-types): SET, MULTISET, SEQUENCE, MONETARY column types
 - [Transactions](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#transactions): Transaction support with automatic commit/rollback
 
 ## API Reference

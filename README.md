@@ -290,7 +290,7 @@ export const postsRelations = relations(posts, ({ one }) => ({
 ```
 
 ```ts
-import { eq } from "drizzle-cubrid";
+import { drizzle, eq } from "drizzle-cubrid";
 import * as schema from "./schema";
 import { posts, users } from "./schema";
 
@@ -331,11 +331,14 @@ try {
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| `INSERT ... RETURNING` | ❌ Not supported | Use separate SELECT after INSERT |
-| Streaming / iterators | ❌ Not supported | Use LIMIT/OFFSET for pagination |
-| JSON columns | ❌ Not supported | Use VARCHAR with manual serialization |
+| `INSERT ... RETURNING` | ❌ Not supported | Use `$returningId()` for a one-row INSERT, `lastInsertId`, or a separate SELECT ([details](docs/QUERIES.md#affected-rows-and-generated-keys)) |
+| Streaming / `.iterator()` | ❌ Not implemented (throws) | Use LIMIT/OFFSET for pagination; design tracked in [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165) |
+| Relational queries with `with` | ❌ Refused | See [Relations](#relations) ([#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200)) |
+| Schema migrations / DDL generation | ❌ Not provided | See [schema migration status](examples/migration/README.md) ([#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)) |
+| JSON, BLOB and CLOB columns | ⚠️ No builder exported | Not exposed or tested by this adapter; a `customType` is unverified |
 | Native BOOLEAN | ❌ Not supported | Declare `boolean()` columns as SMALLINT (0/1) |
-| Sequences | ❌ Not supported | Use AUTO_INCREMENT |
+| Sequence objects (`CREATE SERIAL`) | ❌ No builder | Use `.autoincrement()`; `sequence()` here is the SEQUENCE collection type |
+| CUBRID versions other than 11.4 | ⚠️ Unverified | Only 11.4 runs in CI ([#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164)) |
 
 ## Documentation
 
