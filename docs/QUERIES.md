@@ -258,8 +258,9 @@ const [{ id }] = await db.insert(users).values({ name: "Alice", email: "a@exampl
   value is no row's key, so `$returningId()` leaves it out.
 - `INSERT ... SELECT` cannot report AUTO_INCREMENT keys and is refused.
 - The key is returned in the column's JavaScript type: `bigint` for
-  `bigint({ mode: "bigint" })`. A key a `number` column cannot hold exactly is
-  refused.
+  `bigint({ mode: "bigint" })`. When a `number` column cannot hold the key
+  exactly, the row is still inserted and `$returningId()` then throws; declare
+  the column with `{ mode: "bigint" }`.
 - Keys from `$defaultFn()` are returned for every row.
 
 `db.execute(sql\`...\`)` returns rows and reports no counts; use the query
