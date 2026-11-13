@@ -1,6 +1,6 @@
 # Native dialect feasibility (#156)
 
-> **Result:** feasible, with caveats. A CUBRID dialect can be built on Drizzle ORM's database-neutral modules without any MySQL or other foreign-database code, and keep Drizzle's type inference. The decision that follows from this is [ADR 0007](adr/0007-drizzle-extension-boundary.md). Evidence date: 2026-11-13.
+> **Result:** feasible for the core of a dialect, with caveats. Tables, column builders, SELECT with joins, INSERT, UPDATE and DELETE can be built on Drizzle ORM's database-neutral modules, with no MySQL or other foreign-database code in drizzle-cubrid's own sources, and keep Drizzle's type inference. Drizzle's own neutral modules still call a `pg-core` helper internally (see ADR 0007, decision 8). Subqueries, aliases, table extra config and relational queries were not prototyped. The decision that follows from this is [ADR 0007](adr/0007-drizzle-extension-boundary.md). Evidence date: 2026-11-13.
 
 ## What was tested
 
@@ -11,7 +11,7 @@ A throwaway prototype, about 700 lines kept outside this repository per the temp
 - `select()` with `where`, `innerJoin`, `leftJoin` and `limit`
 - `insert().values()`, `update().set().where()` and `delete().where()`
 
-Its only Drizzle imports were `drizzle-orm` and the subpaths `casing`, `column`, `column-builder`, `entity`, `operations`, `query-builders/select.types`, `query-promise`, `sql/sql`, `table` and `utils`. A grep guard over its sources and build output found no `*-core` import or identifier, and a canary `import 'drizzle-orm/mysql-core'` made the guard fail.
+Its only Drizzle imports were `drizzle-orm` and the subpaths `casing`, `column`, `column-builder`, `entity`, `operations`, `query-builders/select.types`, `query-promise`, `sql/sql`, `table` and `utils`. A grep guard found no `*-core` import in its sources or build output, and no foreign-dialect identifier in its sources. A canary `import 'drizzle-orm/mysql-core'` made the guard fail.
 
 | Check | drizzle-orm 0.45.4 | drizzle-orm 0.44.1 (peer floor) | 1.0.0-rc.5 |
 |---|---|---|---|
@@ -58,23 +58,24 @@ Not verified: Node 18 (the prototype ran on Node 24), subqueries, aliases, table
   - `SelectedFields` and `SelectedFieldsOrdered`
   - `SelectResult`, `AppendToResult`, `BuildSubquerySelection` and `AppendToNullabilityMap` from `query-builders/select.types`
   - `relations`, `extractTablesRelationalConfig`, `Logger` and `CasingCache`
-- **Internal but needed:**
+- **Internal, used by the prototype:**
   - `Table.Symbol` keys, created with `Symbol.for('drizzle:…')`, to register columns
   - `ColumnBuilder.build()`, which each dialect declares itself
+  - `SQL#decoder`
+- **Internal, anticipated:**
   - `setName`, for key-as-name columns
   - `Column.shouldDisableInsert`
-  - `SQL#decoder`
-  - `mapResultRow` and `orderSelectedFields`, which exist in the JavaScript but not in the declarations
+  - `mapResultRow` and `orderSelectedFields`, which exist in the JavaScript but not in the declarations; the prototype does its own row mapping instead
 
   ADR 0007 confines these to one shim.
 - **Stability:**
-  - **0.44.1 → 0.45.4:** the neutral declarations used (column, column-builder, table, entity, query-promise, sql, conditions, casing, relations) are byte-identical. Only `select.types` and `operations` gained `Subquery` handling.
+  - **0.44.1 → 0.45.4:** the neutral declarations used (column, column-builder, table, entity, query-promise, sql, conditions, casing, relations) are byte-identical. `select.types` and `operations` gained `Subquery` handling, and `utils.d.ts` added helper types (`Not`, `IsUnion`, `SingleKeyObject`, `textDecoder`).
   - **1.0.0-rc.5:** rewrites the column generics, for example `ColumnBaseConfig<TDataType>` with `dataType` strings like `'number int32'`.
 - **Neutral is not dialect-free inside Drizzle.**
   - **Declarations:** `column-builder.d.ts` imports every dialect folder's declarations, so `skipLibCheck: false` reports errors inside drizzle-orm (upstream issue 5187).
   - **Runtime:** `sql/sql.js` and `relations.js` load `pg-core` helpers.
 
-  These belong to Drizzle; #192 checks drizzle-cubrid's own sources and published files.
+  These belong to Drizzle (ADR 0007, decision 8); the #192 guard will check drizzle-cubrid's own sources and published files.
 
 ## Relational queries
 
@@ -101,6 +102,8 @@ A native version needs its own query builder and a CUBRID strategy for loading r
 | `mysql-core/db`, `/dialect`, `/session` | driver, dialect, session | **foreign** |
 | `mysql-core/query-builders/select.types` | session | **foreign**; the neutral equivalent is `drizzle-orm/operations` |
 | `mysql-core/columns/*` (19 re-exports, temporal subclasses) | columns, columns/temporal | **foreign**, and part of the public 0.x API |
+
+Export paths for these current imports were not yet confirmed from a clean consumer; that check is an ADR 0007 acceptance item.
 
 ## Licensing
 
@@ -133,7 +136,7 @@ A native version needs its own query builder and a CUBRID strategy for loading r
 
 ## Implementation sequence
 
-1. **#192:** import guard over `src` and the packed ESM/CJS/`.d.ts`, allow-listing today's 0.x debt. Add a type-test job against the peer floor and latest 0.45.x, plus a non-required Drizzle 1.0 canary. *Risk:* a regex guard can miss things, so pair it with an exports scan.
+1. **#192:** the guard from ADR 0007 (banned imports over `src` and the packed ESM/CJS/`.d.ts`, and internal-access patterns outside the shim), allow-listing today's 0.x debt. Add type tests against the peer floor and latest 0.45.x, a Node 18 packed run, and a non-required canary for the next minor and 1.0. *Risk:* a regex guard can miss things, so pair it with an exports scan.
 2. **#157 + #162:** native column builders, `cubridTable` and codecs (bigint, numeric, collections, UTC temporal), under a separate entry point beside the 0.x API. *Risk:* the 0.x builder API changes, so migration notes are needed.
 3. **#158:** the select builder on `select.types`. *Risk:* subquery `.as()`, aliases and set operations are the largest part.
 4. **#160:** session and row mapping on array rows; drop the cache import.
