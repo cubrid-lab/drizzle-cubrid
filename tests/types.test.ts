@@ -58,6 +58,16 @@ describe('collection and monetary types', () => {
 		expect(table.price.getSQLType()).toBe('MONETARY');
 	});
 
+	it('monetary reads the driver number as the declared string (#217)', () => {
+		const price = cubridTable('money_read', { price: monetary('price') }).price;
+
+		expect(price.mapFromDriverValue(12.34)).toBe('12.34');
+		expect(price.mapFromDriverValue(-0.5)).toBe('-0.5');
+		expect(price.mapFromDriverValue(1e21)).toBe('1e+21');
+		expect(price.mapFromDriverValue('7.25')).toBe('7.25');
+		expect(price.mapToDriverValue('12.34')).toBe('12.34');
+	});
+
 	it('collection works in a normal table definition', () => {
 		const table = cubridTable('mixed_types', {
 			id: int('id').primaryKey().autoincrement(),
