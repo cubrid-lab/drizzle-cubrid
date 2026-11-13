@@ -12,7 +12,7 @@ ADR 0003 requires a CUBRID-native dialect with no foreign-database implementatio
 
 - **Drizzle has no third-party dialect API.** Dialects ship inside drizzle-orm. Its `Dialect` type is a closed union (`'pg' | 'mysql' | 'sqlite' | 'singlestore' | 'common' | 'gel'`). No upstream issue, discussion or roadmap item offers an extension API.
 - **The database-neutral modules are enough for the core of a dialect.** A throwaway prototype built a CUBRID table, column builders, SELECT with inner and left joins, INSERT, UPDATE and DELETE. Its own code imports nothing from any `*-core` dialect folder. Subqueries, aliases, table extra config, relational queries and Node 18 were **not** prototyped. It type-checks under `tsc --strict` on drizzle-orm 0.44.1 and 0.45.4, with inference assertions that a negative control confirms are live. The SQL it generates ran on a real CUBRID 11.4 server.
-- **Two runtime protocols are `@internal`.** Registering columns on a table uses the `Symbol.for('drizzle:…')` keys behind `Table.Symbol`. Decoding a `sql` expression uses `SQL#decoder`. Both are identical across 0.44.1–0.45.4.
+- **Two Drizzle runtime protocols are `@internal`.** (`ColumnBuilder.build()` is also needed, but each dialect declares it itself.) Registering columns on a table uses the `Symbol.for('drizzle:…')` keys behind `Table.Symbol`. Decoding a `sql` expression uses `SQL#decoder`. Both are identical across 0.44.1–0.45.4.
 - **Drizzle v1 (1.0.0-rc.5) rewrites the neutral column generics.** The prototype fails there with 121 type errors.
 
 ## Decision
@@ -22,7 +22,7 @@ ADR 0003 requires a CUBRID-native dialect with no foreign-database implementatio
    - **Used by the prototype:** the `Table.Symbol` keys (`Symbol.for('drizzle:…')`), `SQL#decoder`, and a dialect-declared `ColumnBuilder.build()`.
    - **Anticipated, not yet needed:** `setName` (key-as-name columns), `Column.shouldDisableInsert`, and the JS-only `mapResultRow` / `orderSelectedFields`. Native code should prefer its own row mapping and ordering.
 
-   All access to them goes through typed accessor functions exported by a single `src/native/internal.ts`. Each accessor carries a comment naming the Drizzle file and the versions it was checked against. Outside that file, native code may not touch them in any form: no import, no `Symbol.for('drizzle:…')`, no `.decoder` or `.shouldDisableInsert` access, and no `as unknown as` cast of a Drizzle type to reach a member. Adding an internal to the list needs an amendment to this ADR.
+   All access to them goes through typed accessor functions exported by a single `src/native/internal.ts`. Each accessor carries a comment naming the Drizzle file and the versions it was checked against. Outside that file, native code may not touch them in any form: no import, no `Symbol.for('drizzle:…')`, no `.decoder` access on a Drizzle `SQL` object, no `.shouldDisableInsert` access, and no `as unknown as` cast at all. Adding an internal to the list needs an amendment to this ADR.
 3. **Reuse types, own runtime.** Reuse Drizzle's neutral types and functions as imported dependencies, never as copied code:
    - result inference: `select.types`, `InferSelectModel`/`InferInsertModel`
    - SQL rendering: `SQL`, `sql`, `Param`, `Placeholder`
@@ -57,7 +57,7 @@ ADR 0003 requires a CUBRID-native dialect with no foreign-database implementatio
 
 - [x] Compile-time proof: an independent CUBRID table and SELECT/JOIN/DML preserve inference without `mysql-core`, on drizzle-orm 0.44.1 and 0.45.4 (feasibility report, prototype evidence).
 - [x] The prototype's generated SQL executes on a real CUBRID 11.4 server (feasibility report).
-- [ ] #192 adds the guard: banned import specifiers over `src` and the packed ESM/CJS/`.d.ts`, plus a search outside `src/native/internal.ts` for `Symbol.for('drizzle:`, `.decoder`, `.shouldDisableInsert` and `as unknown as` casts of Drizzle types. Each rule has a canary that must fail it.
+- [ ] #192 adds the guard: banned import specifiers over `src` and the packed ESM/CJS/`.d.ts`, plus a search outside `src/native/internal.ts` for `Symbol.for('drizzle:`, `.shouldDisableInsert`, any `as unknown as`, and `.decoder` on Drizzle `SQL` values (matched so that drizzle-cubrid's own codec members do not trip it). Each rule has a canary that must fail it.
 - [ ] CI type-checks the native dialect against the drizzle-orm peer floor and latest 0.45.x, runs the packed package on Node 18, and has a non-required canary for the next minor and 1.0.
 - [ ] The current `src/` export paths (including `cache/core/*` and the `mysql-core/*` re-exports) are confirmed from a clean consumer before the 0.x paths are removed.
 - [ ] The upstream request (decision 6) is filed and linked here.
