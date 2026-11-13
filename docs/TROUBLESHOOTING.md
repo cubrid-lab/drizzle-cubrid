@@ -231,8 +231,9 @@ const firstUsers = await db.query.users.findMany({ limit: 10 });
 Loading relations with `with` is not supported on CUBRID yet and throws:
 Drizzle's MySQL SQL for it uses `LEFT JOIN LATERAL` (`mode: "default"`), which
 CUBRID lacks, or JSON aggregation (`mode: "planetscale"`), which CUBRID rejects
-for DATE/DATETIME values and which rounds BIGINT values beyond 2^53 and
-garbles non-ASCII text in an ISO-8859-1 database
+for DATE/DATETIME values and which garbles non-ASCII text in an ISO-8859-1
+database; Drizzle also reads that JSON with `JSON.parse`, which rounds BIGINT
+values beyond 2^53
 ([#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200)). Query the
 related table separately or use a join; native support is tracked in
 [#158](https://github.com/cubrid-lab/drizzle-cubrid/issues/158).

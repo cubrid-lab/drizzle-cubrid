@@ -7,8 +7,9 @@ type RelationalQueryArgs = Parameters<MySqlDialect['buildRelationalQuery']>[0];
  * Relational queries that load relations (`with`) are refused on CUBRID.
  * Drizzle's MySQL dialect builds them from `LEFT JOIN LATERAL`, which CUBRID
  * does not support, or (`mode: 'planetscale'`) from `JSON_ARRAYAGG`, which
- * CUBRID rejects for DATE and DATETIME values, rounds BIGINT values beyond
- * 2^53 and re-encodes non-ASCII text in an ISO-8859-1 database.
+ * CUBRID rejects for DATE and DATETIME values and which garbles non-ASCII text
+ * in an ISO-8859-1 database; Drizzle reads that JSON with JSON.parse, which
+ * rounds BIGINT values beyond 2^53.
  */
 function assertNoRelations(config: RelationalQueryArgs['queryConfig']): void {
 	if (config === true || config.with === undefined) {
