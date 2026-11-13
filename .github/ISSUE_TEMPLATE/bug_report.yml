@@ -59,7 +59,7 @@ body:
       description: Provide details about your environment
       placeholder: |
         - Node.js version: 22
-        - drizzle-orm version: 0.38.0
+        - drizzle-orm version: 0.45.4
         - CUBRID version: 11.2
         - drizzle-cubrid version: 0.2.0
         - Operating System: Linux/macOS/Windows

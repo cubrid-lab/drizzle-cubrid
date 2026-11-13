@@ -60,7 +60,7 @@ npm install drizzle-cubrid drizzle-orm cubrid-client
 | `drizzle-orm` | Drizzle ORM core |
 | `cubrid-client` | TypeScript CUBRID driver |
 
-**Requirements**: Node.js 18+, CUBRID 10.2+
+**Requirements**: Node.js 18+, CUBRID 10.2+, `drizzle-orm` `>=0.44.1 <0.46.0`, `cubrid-client` `>=1.4.0 <2.0.0` (see [peer dependency compatibility](docs/COMPATIBILITY.md))
 
 ## Quick Start
 

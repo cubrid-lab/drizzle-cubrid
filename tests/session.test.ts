@@ -9,7 +9,7 @@ import type {
 } from 'drizzle-orm/mysql-core/session';
 import type { SelectedFieldsOrdered } from 'drizzle-orm/mysql-core/query-builders/select.types';
 import { sql } from 'drizzle-orm/sql/sql';
-import { TransactionRollbackError } from 'drizzle-orm/errors';
+import { TransactionRollbackError } from 'drizzle-orm';
 
 const hoistedMocks = vi.hoisted(() => {
 	const mapResultRowMock = vi.fn(
