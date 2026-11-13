@@ -24,6 +24,7 @@ import { type Assume } from 'drizzle-orm/utils';
 import * as drizzleUtils from 'drizzle-orm/utils';
 
 import { isCubridTemporalColumn, TEMPORAL_COLUMN_TYPES } from './columns/temporal.js';
+import { fieldsOfRelationalQuery } from './dialect.js';
 import { assertUtcDecoding } from './timezone.js';
 
 type QueryRow = Record<string, unknown>;
@@ -314,6 +315,8 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 		 * its time zone setting decides whether date and time columns can be read.
 		 */
 		private zoneClient?: CubridQueryable,
+		/** The fields a relational query selects; it has no `fields`. */
+		private relationalFields?: unknown[],
 	) {
 		super(cache, statementMetadata, cacheConfig);
 	}
@@ -336,18 +339,19 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 			return (await this.client.query(this.queryString, params)) as T['execute'];
 		}
 
-		const zoneClient = this.zoneClient ?? this.client;
-		if (this.fields?.some((selected) => readsTemporal(selected.field))) {
-			await assertUtcDecoding(zoneClient);
+		const selected = this.fields?.map((field) => field.field) ?? this.relationalFields ?? [];
+		if (selected.some(readsTemporal)) {
+			await assertUtcDecoding(this.zoneClient ?? this.client);
 		}
 
 		const rows = await this.client.query(this.queryString, params, ARRAY_ROWS);
 		const rowArrays = rows.map(assertArrayRow);
 
 		if (this.customResultMapper) {
-			// Relational queries carry no fields to check before sending.
-			if (rowArrays.some((row) => row.some((cell) => cell instanceof Date))) {
-				await assertUtcDecoding(zoneClient);
+			// A relational query whose fields the dialect did not record: refuse
+			// Date cells rather than let a local-zone client's Dates through.
+			if (!this.fields && !this.relationalFields && rowArrays.some((row) => row.some((cell) => cell instanceof Date))) {
+				await assertUtcDecoding(this.zoneClient ?? this.client);
 			}
 			return this.customResultMapper(rowArrays);
 		}
@@ -461,6 +465,7 @@ export class CubridSession<
 			generatedIds,
 			returningIds,
 			this.zoneClient,
+			fieldsOfRelationalQuery(query),
 		) as PreparedQueryKind<CubridPreparedQueryHKT, T>;
 	}
 

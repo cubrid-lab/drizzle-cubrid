@@ -128,11 +128,11 @@ client with `timezone: 'utc'` (cubrid-client 1.4), or run the process with
 const client = createClient({ host, port, database, user, timezone: "utc" });
 ```
 
-With any other client, a select of one of these columns (including
-`sql`...`.mapWith(column)`) or of a SET/MULTISET/SEQUENCE of them is refused
-before it is sent, and a relational query (`db.query`) whose rows contain a
-`Date` is refused after it is read. Raw `sql<Date>` fields, `db.execute()` and
-`db.all()` return the driver's values unchanged.
+With any other client, a `select()` or relational query (`db.query`) of one of
+these columns (including `sql`...`.mapWith(column)`) or of a
+SET/MULTISET/SEQUENCE of them is refused before it is sent. Raw `sql<Date>`
+fields and `extras`, custom types, `db.execute()` and `db.all()` return the
+driver's values unchanged.
 
 drizzle-cubrid finds the client's setting in its `timezone` option, a
 `utcDates` field, or, for other clients, with one `SELECT DATETIME'...'` query

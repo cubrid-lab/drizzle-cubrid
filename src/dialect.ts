@@ -1,5 +1,7 @@
 import { entityKind } from 'drizzle-orm/entity';
 import { MySqlDialect } from 'drizzle-orm/mysql-core/dialect';
+import type { BuildRelationalQueryResult } from 'drizzle-orm/relations';
+import type { Query, SQL } from 'drizzle-orm/sql/sql';
 
 type RelationalQueryArgs = Parameters<MySqlDialect['buildRelationalQuery']>[0];
 
@@ -26,19 +28,48 @@ function assertNoRelations(config: RelationalQueryArgs['queryConfig']): void {
 	}
 }
 
+type RelationalFields = BuildRelationalQueryResult['selection'][number]['field'][];
+
+/** The selected fields of each relational query, from its SQL to the built Query. */
+const relationalSqlFields = new WeakMap<object, RelationalFields>();
+const relationalQueryFields = new WeakMap<Query, RelationalFields>();
+
+/**
+ * The fields a relational query (`db.query.x.findMany()`) selects, or
+ * undefined for any other query. Drizzle hands the session only the built
+ * query and a row mapper, so the dialect records them while building it.
+ */
+export function fieldsOfRelationalQuery(query: Query): RelationalFields | undefined {
+	return relationalQueryFields.get(query);
+}
+
+function recordFields<T extends BuildRelationalQueryResult>(result: T): T {
+	relationalSqlFields.set(result.sql, result.selection.map((selected) => selected.field));
+	return result;
+}
+
 /** Drizzle's MySQL dialect with the relational-query limits of CUBRID enforced. */
 export class CubridDialect extends MySqlDialect {
 	static override readonly [entityKind]: string = 'CubridDialect';
 
 	override buildRelationalQuery(args: RelationalQueryArgs): ReturnType<MySqlDialect['buildRelationalQuery']> {
 		assertNoRelations(args.queryConfig);
-		return super.buildRelationalQuery(args);
+		return recordFields(super.buildRelationalQuery(args));
 	}
 
 	override buildRelationalQueryWithoutLateralSubqueries(
 		args: Parameters<MySqlDialect['buildRelationalQueryWithoutLateralSubqueries']>[0],
 	): ReturnType<MySqlDialect['buildRelationalQueryWithoutLateralSubqueries']> {
 		assertNoRelations(args.queryConfig);
-		return super.buildRelationalQueryWithoutLateralSubqueries(args);
+		return recordFields(super.buildRelationalQueryWithoutLateralSubqueries(args));
+	}
+
+	override sqlToQuery(sql: SQL, invokeSource?: 'indexes'): ReturnType<MySqlDialect['sqlToQuery']> {
+		const query = super.sqlToQuery(sql, invokeSource);
+		const fields = relationalSqlFields.get(sql);
+		if (fields) {
+			relationalQueryFields.set(query, fields);
+		}
+		return query;
 	}
 }
