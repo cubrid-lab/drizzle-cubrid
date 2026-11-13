@@ -75,6 +75,14 @@ describe('native-import rule', () => {
 		expect(native("const s = await import('../driver.js');")).toEqual(['native-import:../driver.js']);
 	});
 
+	it('catches native code reaching 0.x modules through the ~/ alias or the package name', () => {
+		expect(native("import { CubridSession } from '~/session.js';")).toEqual(['native-import:~/session.js']);
+		expect(native("import { cubridTable } from 'drizzle-cubrid';")).toEqual(['native-import:drizzle-cubrid']);
+		expect(native("export * from 'drizzle-cubrid/columns';")).toEqual(['native-import:drizzle-cubrid/columns']);
+		expect(native("const m = await import('drizzle-cubrid');")).toEqual(['native-import:drizzle-cubrid']);
+		expect(native("import { x } from '~/native/internal.js';")).toEqual([]);
+	});
+
 	it('allows relative imports that stay inside src/native', () => {
 		expect(native("import { x } from './internal.js';")).toEqual([]);
 		expect(found('src/native/deep/x.ts', "import { y } from '../columns.js';")).toEqual([]);
@@ -146,6 +154,10 @@ describe('internal rule (native code only)', () => {
 		'const u = <Record<symbol, unknown>>(<unknown>table);',
 		'const decode = field.decoder;',
 		"const decode2 = field['decoder'];",
+		'const { decoder } = field;',
+		"const d3 = Reflect.get(field, 'decoder');",
+		'const v = table as any as T;',
+		'const w = <T>(<never>table);',
 	].join('\n');
 
 	it('catches every form of Drizzle internal access in src/native outside the shim', () => {
@@ -158,6 +170,10 @@ describe('internal rule (native code only)', () => {
 			'internal:cast through unknown',
 			'internal:.decoder',
 			'internal:.decoder',
+			'internal:.decoder',
+			'internal:.decoder',
+			'internal:cast through any',
+			'internal:cast through never',
 		]);
 	});
 

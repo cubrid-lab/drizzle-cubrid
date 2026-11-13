@@ -127,9 +127,10 @@ reports:
   comments are ignored
 - in native code (`src/native/**`), any Drizzle internal access outside
   `src/native/internal.ts` (`Symbol.for('drizzle:…')`, `.shouldDisableInsert`,
-  `.decoder` other than `this.decoder`, and any cast through `unknown`), and any
-  relative import that leaves `src/native`, since the 0.x modules are built on
-  Drizzle's MySQL classes
+  `.decoder` other than `this.decoder`, and any cast through `unknown`, `any` or
+  `never`), and any import that leaves `src/native` through a relative path, the
+  `~/` alias or the `drizzle-cubrid` package name, since the 0.x modules are
+  built on Drizzle's MySQL classes
 
 Native code may have no findings at all. The 0.x code's existing findings are
 pinned by file, rule and count in `scripts/dialect-boundary-baseline.json`: a
@@ -143,7 +144,7 @@ the baseline with
 
 Two limits are deliberate:
 - **Counts are per file.** The baseline counts findings per file, not per line, so replacing one 0.x use with another in the same file passes. Findings still cannot move between files or grow.
-- **Static strings only.** Module names built at run time (`'drizzle-orm/' + name`) are not recognised; reviewers watch for them.
+- **Static strings only.** Module names and member names built or aliased at run time (`'drizzle-orm/' + name`, `const S = Symbol; S.for(…)`) are not recognised; reviewers watch for them.
 
 ## Temporary scripts, probes and workflows
 

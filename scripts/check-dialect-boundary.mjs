@@ -21,9 +21,11 @@
 //   - mode:       a foreign backend mode or `dialect` setting
 //   - internal:   in native code (src/native/**) outside src/native/internal.ts,
 //                 Drizzle internal access: Symbol.for('drizzle:…'),
-//                 .shouldDisableInsert, .decoder on anything but `this`, and
-//                 any cast through `unknown`
-//   - native-import: in native code, a relative import that leaves src/native,
+//                 .shouldDisableInsert, .decoder on anything but `this`
+//                 (also destructured or via Reflect.get), and any cast
+//                 through `unknown`, `any` or `never`
+//   - native-import: in native code, an import that leaves src/native through
+//                 a relative path, the `~/` alias or the package's own name,
 //                 since the 0.x modules are built on Drizzle's MySQL classes
 //
 // The 0.x code still depends on Drizzle's MySQL classes. Each of those
@@ -102,9 +104,15 @@ export function scanText(file, text, scope = 'src') {
 	const checkSpecifier = (spec, pos) => {
 		const banned = bannedSpecifier(spec);
 		if (banned) add('import', banned, pos);
-		if (inNative && spec.startsWith('.')) {
-			const target = posix.normalize(posix.join(posix.dirname(file), spec));
-			if (!target.startsWith(NATIVE_DIR)) add('native-import', spec, pos);
+		if (inNative) {
+			// Native code may import only within src/native: not through a relative
+			// path, the `~/` alias for src/, or the package's own name, all of
+			// which reach the MySQL-based 0.x modules.
+			let target;
+			if (spec.startsWith('.')) target = posix.normalize(posix.join(posix.dirname(file), spec));
+			else if (spec.startsWith('~/')) target = posix.normalize(`src/${spec.slice(2)}`);
+			if (spec === 'drizzle-cubrid' || spec.startsWith('drizzle-cubrid/')) add('native-import', spec, pos);
+			else if (target !== undefined && !target.startsWith(NATIVE_DIR)) add('native-import', spec, pos);
 		}
 	};
 
@@ -129,7 +137,8 @@ export function scanText(file, text, scope = 'src') {
 			const callee = node.expression;
 			const loader =
 				callee.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(callee) || ts.isCallExpression(callee);
-			if (spec !== undefined && loader && (bannedSpecifier(spec) || (inNative && spec.startsWith('.')))) {
+			const nativeLocal = inNative && /^(?:\.|~\/|drizzle-cubrid(?:\/|$))/.test(spec ?? '');
+			if (spec !== undefined && loader && (bannedSpecifier(spec) || nativeLocal)) {
 				checkSpecifier(spec, node.arguments[0].getStart(source));
 			}
 		}
@@ -175,11 +184,24 @@ export function scanText(file, text, scope = 'src') {
 				if (isSymbolFor && (symbolKey === undefined || symbolKey.startsWith('drizzle:'))) {
 					add('internal', "Symbol.for('drizzle:", node.getStart(source));
 				}
-			} else if (
-				(ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) &&
-				node.type.kind === ts.SyntaxKind.UnknownKeyword
+			} else if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) {
+				// `as unknown`, `as any` and `as never` all let a cast reach any member.
+				const kind = node.type.kind;
+				if (kind === ts.SyntaxKind.UnknownKeyword) add('internal', 'cast through unknown', node.getStart(source));
+				else if (kind === ts.SyntaxKind.AnyKeyword) add('internal', 'cast through any', node.getStart(source));
+				else if (kind === ts.SyntaxKind.NeverKeyword) add('internal', 'cast through never', node.getStart(source));
+			} else if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
+				// const { decoder } = sql
+				const property = node.propertyName ?? node.name;
+				const name = ts.isIdentifier(property) || ts.isStringLiteral(property) ? property.text : undefined;
+				if (name === 'decoder' || name === 'shouldDisableInsert') add('internal', `.${name}`, node.getStart(source));
+			}
+			if (
+				ts.isCallExpression(node) &&
+				node.expression.getText(source) === 'Reflect.get' &&
+				['decoder', 'shouldDisableInsert'].includes(stringValue(node.arguments[1]) ?? '')
 			) {
-				add('internal', 'cast through unknown', node.getStart(source));
+				add('internal', `.${stringValue(node.arguments[1])}`, node.getStart(source));
 			}
 		}
 
