@@ -309,7 +309,8 @@ describe('collection columns round-trip (#184)', () => {
 	);
 
 	// SET and MULTISET define no order, so their elements are compared sorted.
-	const sorted = <T>(values: T[] | null) => (values === null ? null : [...values].sort());
+	const sorted = <T>(values: T[] | null) =>
+		values === null ? null : [...values].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
 	it('writes, updates and reads SET, MULTISET and SEQUENCE values, empty and NULL included', async () => {
 		const db = drizzle(client);
