@@ -109,6 +109,7 @@ npm run build         # Build ESM + CJS via tsup
 npm run lint          # Biome lint + format check, no changes (CI)
 npm run format        # Biome: rewrite formatting and safe fixes
 npm run typecheck     # tsc --noEmit
+npm run check:boundary # foreign-dialect guard on src and the packed tarball (#192)
 npm run integration   # Live CUBRID tests; needs CUBRID_TEST_HOST (see below)
 ```
 

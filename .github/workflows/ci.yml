@@ -105,6 +105,10 @@ jobs:
       # differences and unsorted imports (see biome.json).
       - name: Biome
         run: npm run lint
+      # Foreign-dialect boundary (#192, ADR 0003, ADR 0007): no new MySQL or
+      # other dialect dependency in src, and none at all in src/native.
+      - name: Foreign-dialect boundary (src)
+        run: node scripts/check-dialect-boundary.mjs src
       - name: Biome rejects a misformatted file
         shell: bash
         run: |
@@ -234,6 +238,13 @@ jobs:
           }
           NODE
           test "$(find packed -maxdepth 1 -name '*.tgz' | wc -l)" -eq 1
+      - name: Foreign-dialect boundary (packed ESM, CJS and .d.ts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/unpacked"
+          tar -xzf packed/*.tgz -C "$RUNNER_TEMP/unpacked"
+          node scripts/check-dialect-boundary.mjs package "$RUNNER_TEMP/unpacked/package"
       - uses: actions/upload-artifact@v7
         with:
           name: npm-package-for-node18
