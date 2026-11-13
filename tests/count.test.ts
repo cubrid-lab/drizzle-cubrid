@@ -68,6 +68,16 @@ describe('db.$count()', () => {
 		await expect(drizzle(new CountClient([])).$count(users)).rejects.toThrow('$count() returned no row');
 	});
 
+	it('reports a placeholder in the filter instead of sending it', async () => {
+		const client = new CountClient([[1n]]);
+		const { sql } = await import('drizzle-orm');
+
+		await expect(drizzle(client).$count(users, gt(users.id, sql.placeholder('id')))).rejects.toThrow(
+			'No value for placeholder "id" was provided',
+		);
+		expect(client.calls).toEqual([]);
+	});
+
 	it('refuses count SQL it does not recognise', async () => {
 		const db = drizzle(new CountClient([[1n]]));
 		const session = (db as unknown as { session: { count(sql: unknown): Promise<number> } }).session;

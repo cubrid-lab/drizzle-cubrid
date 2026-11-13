@@ -430,8 +430,12 @@ export class CubridSession<
 			);
 		}
 		const countQuery = `select count(*) from ${query.sql.slice(DRIZZLE_COUNT_PREFIX.length)}`;
-		this.logger.logQuery(countQuery, query.params);
-		const rows = await this.client.query(countQuery, query.params, ARRAY_ROWS);
+		// $count() is never prepared with placeholder values; this reports a
+		// sql.placeholder() in the filter as Drizzle does for other statements.
+		const params = fillPlaceholders(query.params, {});
+		assertNoSqlParams(params);
+		this.logger.logQuery(countQuery, params);
+		const rows = await this.client.query(countQuery, params, ARRAY_ROWS);
 		const [row] = rows.map(assertArrayRow);
 		if (row === undefined) {
 			throw new Error('$count() returned no row');
