@@ -39,6 +39,13 @@
 			"scope": "package",
 			"file": "dist/index.cjs",
 			"rule": "identifier",
+			"match": "mysqlCore",
+			"count": 4
+		},
+		{
+			"scope": "package",
+			"file": "dist/index.cjs",
+			"rule": "identifier",
 			"match": "MySqlCustomColumn",
 			"count": 1
 		},
