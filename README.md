@@ -312,7 +312,7 @@ try {
 | `INSERT ... RETURNING` | ❌ Not supported | Use separate SELECT after INSERT |
 | Streaming / iterators | ❌ Not supported | Use LIMIT/OFFSET for pagination |
 | JSON columns | ❌ Not supported | Use VARCHAR with manual serialization |
-| Native BOOLEAN | ❌ Not supported | Mapped to SMALLINT (0/1) |
+| Native BOOLEAN | ❌ Not supported | Declare `boolean()` columns as SMALLINT (0/1) |
 | Sequences | ❌ Not supported | Use AUTO_INCREMENT |
 
 ## Documentation

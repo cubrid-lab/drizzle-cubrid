@@ -10,7 +10,7 @@ Key facts:
 - Connect: `const db = drizzle(createClient({ host: "localhost", port: 33000, database: "demodb", user: "dba" }))`
 - Query: `await db.select().from(users).where(eq(users.name, 'Alice'))`
 - CUBRID-specific column types: `set()`, `multiset()`, `sequence()`, `monetary()`
-- 49 offline tests with 99%+ code coverage
+- Offline unit tests with a 95% coverage gate, plus a live CUBRID 11.4 suite in CI
 - TypeScript-first with full type inference from schema definitions
 
 ## Docs
