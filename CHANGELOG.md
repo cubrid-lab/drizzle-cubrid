@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Statement values are sent as typed binds through cubrid-client's `queryPrepared()`/`executePrepared()` instead of being written into the SQL text, despite the prepared-query naming (#191).
-- Collection values are written as `CAST(SET{?, ?} AS SET(<element type>))`: with typed binds CUBRID refused `UPDATE ... SET q = SEQUENCE{?, ?}` (-494, cannot coerce host var). String elements, and collections without `element`, cast to `STRING`; element types with no known SQL type are not cast.
+- Collection values are written as `CAST(SET{?, ?} AS SET(<element type>))`: with typed binds CUBRID refused `UPDATE ... SET q = SEQUENCE{?, ?}` (-494, cannot coerce host var). String elements, and collections without `element`, cast to `STRING`, except CHAR elements, which cast to their `CHAR(n)` so `eq()` on a CHAR collection still matches; element types with no known SQL type are not cast.
 - Collection DDL now maps `bigint`, `double`, `float`, `boolean`, `datetime`, `timestamp`, `date` and `time` elements to their CUBRID types instead of `NUMBER`, `DATE` or the Drizzle JavaScript category.
 - `insert`, `update` and `delete` report `affectedRows` and `lastInsertId` from cubrid-client's `execute()`; they returned `[]` with no counts. `$returningId()` returned `[]` and now returns the key of a one-row INSERT, keeping a `bigint` key exact (#182).
 - SET, MULTISET and SEQUENCE columns: values are written as typed collection literals with one parameter per element (`SET{?, ?}`) and read as the arrays cubrid-client returns. Writing failed (`item.replaceAll is not a function`, or a SQL error) and reading parsed arrays as text (#184).

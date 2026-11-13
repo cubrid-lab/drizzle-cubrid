@@ -10,7 +10,20 @@ import { type CubridClient, type CubridPool, createClient, createPool } from 'cu
 import { eq, gt, sql, TransactionRollbackError } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { bigint, boolean, cubridMultiset, cubridSequence, cubridSet, datetime, double, int, varchar } from '../src/columns';
+import {
+	bigint,
+	boolean,
+	char,
+	cubridMultiset,
+	cubridSequence,
+	cubridSet,
+	datetime,
+	decimal,
+	double,
+	int,
+	mysqlEnum,
+	varchar,
+} from '../src/columns';
 import { drizzle } from '../src/driver';
 import { cubridTable } from '../src/table';
 
@@ -419,6 +432,49 @@ describe('collection element types round-trip under both bindings (#191, #184)',
 			expect(row?.flag).toEqual([1]);
 			expect(row?.big).toEqual([9007199254740993n]);
 			expect(row?.wide).toEqual([long]);
+		});
+	}
+});
+
+enum Shade {
+	Light = 'light',
+	Dark = 'dark',
+}
+
+describe('CHAR, decimal and enum elements under both bindings (#191)', () => {
+	const table = name('cchar');
+	const t = cubridTable(table, {
+		id: int('id').primaryKey(),
+		ch: cubridSet('ch', { element: char('e', { length: 3 }) }),
+		dn: cubridSequence<number>('dn', { element: decimal('e', { precision: 8, scale: 1, mode: 'number' }) }),
+		db: cubridSequence<string>('db', { element: decimal('e', { precision: 20, mode: 'bigint' }) }),
+		en: cubridSet('en', { element: mysqlEnum('e', Shade) }),
+	});
+
+	beforeAll(() =>
+		createTable(
+			table,
+			'id INT PRIMARY KEY, ch SET(CHAR(3)), dn SEQUENCE(DECIMAL(8,1)), db SEQUENCE(DECIMAL(20)), en SET(VARCHAR(10))',
+		),
+	);
+
+	for (const [id, binding] of [
+		[1, 'prepared'],
+		[2, 'literal'],
+	] as const) {
+		it(`writes, updates and filters these elements (${binding})`, async () => {
+			const db = drizzle(client, { binding });
+			const chars = binding === 'prepared' ? ['ab'] : ['cd'];
+
+			await db.insert(t).values({ id, ch: chars, dn: [1.5], db: ['12345678901234567890'], en: [Shade.Dark] });
+			await db.update(t).set({ dn: [2.5], db: ['1'], en: [Shade.Light] }).where(eq(t.id, id));
+			const matched = await db.select({ id: t.id }).from(t).where(eq(t.ch, chars));
+			const [row] = await db.select().from(t).where(eq(t.id, id));
+
+			expect(matched).toEqual([{ id }]);
+			expect(row?.dn).toEqual(['2.5']);
+			expect(row?.db).toEqual(['1']);
+			expect(row?.en).toEqual([Shade.Light]);
 		});
 	}
 });

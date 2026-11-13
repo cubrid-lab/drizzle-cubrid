@@ -181,6 +181,11 @@ describe('collection values', () => {
 	});
 });
 
+enum Color {
+	Red = 'red',
+	Blue = 'blue',
+}
+
 describe('collection element types', () => {
 	const dialect = new MySqlDialect();
 	const db = drizzle({ async query() { return []; } }, { binding: 'literal' });
@@ -200,6 +205,9 @@ describe('collection element types', () => {
 		[boolean('e'), 'SMALLINT'],
 		[bigint('e', { mode: 'bigint' }), 'BIGINT'],
 		[decimal('e', { precision: 10, scale: 2 }), 'DECIMAL(10,2)'],
+		[decimal('e', { precision: 8, scale: 1, mode: 'number' }), 'DECIMAL(8,1)'],
+		[decimal('e', { precision: 20, mode: 'bigint' }), 'DECIMAL(20)'],
+		[char('e', { length: 3 }), 'CHAR(3)'],
 		[monetary('e'), 'MONETARY'],
 	])('uses the CUBRID type of %# in DDL and in the write cast', (element, expected) => {
 		expect(sqlTypeOf(element)).toBe(`SET(${expected})`);
@@ -209,9 +217,9 @@ describe('collection element types', () => {
 	it.each([
 		[undefined, 'VARCHAR(100)'],
 		[varchar('e', { length: 20 }), 'VARCHAR(20)'],
-		[char('e'), 'CHAR'],
 		[text('e'), 'STRING'],
 		[mysqlEnum('e', ['a', 'b']), 'STRING'],
+		[mysqlEnum('e', Color), 'STRING'],
 	])('keeps the declared string type %# in DDL but casts writes to STRING', (element, ddl) => {
 		expect(sqlTypeOf(element)).toBe(`SET(${ddl})`);
 		expect(castOf(element)).toContain('AS SEQUENCE(STRING))');

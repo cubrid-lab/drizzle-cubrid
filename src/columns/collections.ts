@@ -32,7 +32,11 @@ const ELEMENT_SQL_TYPES: Record<string, string> = {
 	MySqlTime: 'TIME',
 };
 
-const STRING_ELEMENT_TYPES = new Set(['MySqlVarChar', 'MySqlChar', 'MySqlText', 'MySqlEnumColumn']);
+// Cast to STRING on write. CHAR is not here: a CHAR set compares equal only to
+// a CHAR set, so its writes and filters cast to the declared CHAR(n).
+const STRING_ELEMENT_TYPES = new Set(['MySqlVarChar', 'MySqlText', 'MySqlEnumColumn', 'MySqlEnumObjectColumn']);
+
+const DECIMAL_ELEMENT_TYPES = new Set(['MySqlDecimal', 'MySqlDecimalNumber', 'MySqlDecimalBigInt']);
 
 type ElementConfig = Record<string, unknown>;
 
@@ -55,7 +59,7 @@ function customElementType(config: ElementConfig): string | undefined {
 }
 
 function decimalElementType(config: ElementConfig): string | undefined {
-	if (config.columnType !== 'MySqlDecimal') {
+	if (typeof config.columnType !== 'string' || !DECIMAL_ELEMENT_TYPES.has(config.columnType)) {
 		return undefined;
 	}
 	const precision = typeof config.precision === 'number' ? config.precision : undefined;
@@ -86,7 +90,11 @@ function resolveElementSqlType(element?: ColumnBuilderBase): string {
 	if (config.columnType === 'MySqlChar') {
 		return length ? `CHAR(${length})` : 'CHAR';
 	}
-	if (config.columnType === 'MySqlText' || config.columnType === 'MySqlEnumColumn') {
+	if (
+		config.columnType === 'MySqlText' ||
+		config.columnType === 'MySqlEnumColumn' ||
+		config.columnType === 'MySqlEnumObjectColumn'
+	) {
 		return 'STRING';
 	}
 	if (typeof config.dataType === 'string') {
@@ -106,6 +114,9 @@ function resolveElementCastType(element?: ColumnBuilderBase): string | undefined
 	const config = elementConfig(element);
 	if (!config || (typeof config.columnType === 'string' && STRING_ELEMENT_TYPES.has(config.columnType))) {
 		return 'STRING';
+	}
+	if (config.columnType === 'MySqlChar') {
+		return resolveElementSqlType(element);
 	}
 	return (
 		customElementType(config) ??
