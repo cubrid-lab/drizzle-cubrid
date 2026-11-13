@@ -64,12 +64,17 @@ describe('SQL CUBRID rejects is refused before sending (#189)', () => {
 			.select()
 			.from(users)
 			.where(sql`${users.name} like ${sql.raw("'ilike'")}`);
-		expect(client.sent).toHaveLength(4);
+		await db.execute(sql.raw('select 1 from users -- no ilike here'));
+		await db.execute(sql.raw('select /* ilike */ 1 from users // ilike'));
+		await db.execute(sql.raw("select 'C:\\', 'ilike', 'it''s ilike' from users"));
+		expect(client.sent).toHaveLength(7);
+		await expect(async () => db.$count(users, ilike(users.name, 'a'))).rejects.toThrow(ISSUE);
+		expect(client.sent).toHaveLength(7);
 	});
 
 	it('offset without limit, in selects, set operations and db.query', async () => {
 		const { client, db } = setup();
-		const message = /offset\(\) without limit\(\) is not supported on CUBRID; add a limit\(\)/;
+		const message = /offset\(\) without a non-negative limit\(\) is not supported on CUBRID; add a limit\(\)/;
 		await expect(db.select().from(users).orderBy(users.id).offset(5)).rejects.toThrow(message);
 		await expect(db.select().from(users).union(db.select().from(users)).orderBy(users.id).offset(5)).rejects.toThrow(
 			message,
@@ -82,6 +87,7 @@ describe('SQL CUBRID rejects is refused before sending (#189)', () => {
 		await db.select().from(users).limit(sql.placeholder('l')).offset(5).prepare().execute({ l: 1 });
 		await db.select().from(users).limit(0).offset(5);
 		await db.select().from(users).offset(0);
+		await expect(db.select().from(users).limit(-1).offset(5)).rejects.toThrow(message);
 		await db.query.users.findMany({ limit: 10, offset: 5 });
 		await db.select().from(users).union(db.select().from(users)).limit(2).offset(1);
 		expect(client.sent).toHaveLength(6);

@@ -21,11 +21,14 @@ function unsupported(feature: string, instead: string): Error {
 }
 
 function assertOffsetHasLimit(limit: unknown, offset: unknown): void {
-	// Mirrors when Drizzle writes LIMIT and OFFSET: LIMIT for a placeholder or
-	// a number >= 0, OFFSET for any truthy value.
-	const writesLimit = (typeof limit === 'object' && limit !== null) || (typeof limit === 'number' && limit >= 0);
+	// Mirrors when Drizzle writes LIMIT and OFFSET (buildLimit): LIMIT for any
+	// object (a placeholder) or a number >= 0, OFFSET for any truthy value.
+	const writesLimit = typeof limit === 'object' || (typeof limit === 'number' && limit >= 0);
 	if (offset && !writesLimit) {
-		throw unsupported('offset() without limit()', 'add a limit(), since CUBRID accepts OFFSET only after LIMIT');
+		throw unsupported(
+			'offset() without a non-negative limit()',
+			'add a limit(), since CUBRID accepts OFFSET only after LIMIT',
+		);
 	}
 }
 
@@ -49,9 +52,13 @@ function assertSelectSupported(config: SelectConfig): void {
 	}
 }
 
-/** Text of the SQL outside quoted identifiers and string literals. */
+/**
+ * Text of the SQL outside quoted identifiers, string literals and comments.
+ * CUBRID does not treat a backslash as an escape by default
+ * (no_backslash_escapes=yes); a quote inside a literal is doubled.
+ */
 function sqlKeywordsText(text: string): string {
-	return text.replace(/`(?:[^`]|``)*`|'(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*"/g, ' ');
+	return text.replace(/`[^`]*`|'(?:[^']|'')*'|"(?:[^"]|"")*"|--[^\n]*|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, ' ');
 }
 
 /**

@@ -125,7 +125,12 @@ CUBRID accepts `OFFSET` only after `LIMIT`, so `.offset()` without `.limit()`
 Drizzle's MySQL builders can produce some SQL that CUBRID 11.4 always rejects
 with a generic syntax error (-493). drizzle-cubrid refuses these before
 anything is sent, with an error that says what to use instead
-([#189](https://github.com/cubrid-lab/drizzle-cubrid/issues/189)):
+([#189](https://github.com/cubrid-lab/drizzle-cubrid/issues/189)). The error is
+thrown while the query is built: `await` turns it into a rejection, but calling
+`.then()`, `.catch()`, `.execute()`, `.prepare()` or `db.execute()` on such a
+query throws synchronously, because Drizzle builds the SQL there. The ILIKE
+check also applies to raw SQL passed to `db.execute()`, outside quoted names,
+string literals and comments.
 
 | Refused | Use instead |
 |---|---|

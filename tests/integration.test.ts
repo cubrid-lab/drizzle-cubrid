@@ -737,7 +737,6 @@ describe('the forms suggested in place of refused SQL run on CUBRID (#189)', () 
 					tx.select({ id: t.id }).from(t).where(eq(t.id, 1)).for('update'),
 				),
 			).resolves.toEqual([{ id: 1 }]);
-			expect(() => db.select().from(t).offset(1).toSQL()).toThrow('issues/189');
 		});
 	}
 
