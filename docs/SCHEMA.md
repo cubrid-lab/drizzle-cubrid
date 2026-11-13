@@ -55,6 +55,11 @@ export const metrics = cubridTable("metrics", {
 > - Declare a `boolean()` column as `SMALLINT`. `true`/`false` are stored as 1/0 and read back as `true`/`false`.
 > - Declare a `serial()` column as `BIGINT AUTO_INCREMENT`.
 >
+> Values that differ from what the same builders return on MySQL (verified on CUBRID 11.4, [#189](https://github.com/cubrid-lab/drizzle-cubrid/issues/189)):
+> - `bigint({ mode: "number" })` rounds values beyond 2^53 without an error (9007199254740993 reads back as 9007199254740992), as Drizzle does on MySQL. Use `mode: "bigint"` for exact values.
+> - `float()` on a CUBRID `FLOAT` column is 32-bit: `1.1` reads back as `1.100000023841858`. Use `double()` on a `DOUBLE` column.
+> - `sum()` and `avg()` return strings, as Drizzle does on MySQL; wrap them with `.mapWith(Number)` if needed.
+>
 > Schema migrations are tracked in [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163).
 
 ### String Types
@@ -80,6 +85,8 @@ export const documents = cubridTable("documents", {
   full_content: longtext("full_content"),
 });
 ```
+
+> **Note**: `char(n)` values come back padded with spaces to `n` characters (`'ab'` in `CHAR(5)` reads as `'ab   '`); MySQL strips the padding. Trim in your code or use `varchar` ([#189](https://github.com/cubrid-lab/drizzle-cubrid/issues/189)).
 
 ### Date/Time Types
 
@@ -163,6 +170,8 @@ export const files = cubridTable("files", {
 });
 ```
 
+> **Warning**: these builders do not round-trip on CUBRID's `BIT` / `BIT VARYING` columns: string values are written as hex digits or rejected (-494), and reads come back garbled. Do not use them until [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216) is fixed.
+
 ## CUBRID-Specific Types
 
 CUBRID has unique collection types and a monetary type not found in MySQL. `drizzle-cubrid` provides custom column builders for these:
@@ -242,6 +251,8 @@ export const products = cubridTable("products", {
 
 Generates: `price MONETARY`
 
+> **Note**: values are read back as numbers although the column is typed as `string` ([#217](https://github.com/cubrid-lab/drizzle-cubrid/issues/217)).
+
 ### Collection Type Configuration
 
 All collection types (`set`, `multiset`, `sequence`, also exported as
@@ -298,6 +309,12 @@ const table = cubridTable("example", {
   created_at: timestamp("created_at").defaultNow(),
 });
 ```
+
+`.default()` and `.defaultNow()` make Drizzle send the `DEFAULT` keyword for a
+missing value; the stored value comes from the `DEFAULT` clause in your
+hand-written table DDL. A `.default("active")` with no matching `DEFAULT
+'active'` in the table stores `NULL`. Use `$defaultFn()` to have Drizzle supply
+the value itself.
 
 ### Unique
 
