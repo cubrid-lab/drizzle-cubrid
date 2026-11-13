@@ -35,6 +35,17 @@ export interface CubridTransactionOptions {
 export interface CubridQueryable {
 	query<T extends QueryRow = QueryRow>(sql: string, params?: readonly unknown[]): Promise<T[]>;
 	/**
+	 * With `{ rowMode: 'array' }`, each row is an array of its values in
+	 * select-list order (cubrid-client 1.4.0 and later). Drizzle maps selected
+	 * fields by position, so this keeps columns whose labels repeat, such as
+	 * `users.id` and `posts.id` in a join.
+	 */
+	query<T extends readonly unknown[] = unknown[]>(
+		sql: string,
+		params: readonly unknown[],
+		options: { rowMode: 'array' },
+	): Promise<T[]>;
+	/**
 	 * Runs `callback` on a connection the driver owns for the whole transaction,
 	 * then commits, or rolls back if the callback throws. `CubridClient` and
 	 * `CubridPool` from `cubrid-client` provide it. When present, Drizzle
@@ -110,16 +121,20 @@ const mapResultRow = (drizzleUtils as unknown as {
 	) => unknown;
 }).mapResultRow;
 
-function toRowArray(row: unknown): unknown[] {
+const ARRAY_ROWS = { rowMode: 'array' } as const;
+
+/**
+ * Object rows cannot be mapped by position: a repeated column label keeps only
+ * one value and the key order is not the select-list order. Refuse them rather
+ * than mapping values to the wrong fields.
+ */
+function assertArrayRow(row: unknown): unknown[] {
 	if (Array.isArray(row)) {
 		return row;
 	}
-
-	if (row && typeof row === 'object') {
-		return Object.values(row as QueryRow);
-	}
-
-	return [row];
+	throw new Error(
+		"The CUBRID client returned an object row for { rowMode: 'array' }; drizzle-cubrid needs cubrid-client 1.4.0 or later, or a client whose query() supports rowMode 'array'",
+	);
 }
 
 function toNumber(value: unknown): number | undefined {
@@ -200,8 +215,8 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 			return result as T['execute'];
 		}
 
-		const rows = await this.client.query(this.queryString, params);
-		const rowArrays = rows.map(toRowArray);
+		const rows = await this.client.query(this.queryString, params, ARRAY_ROWS);
+		const rowArrays = rows.map(assertArrayRow);
 
 		if (this.customResultMapper) {
 			return this.customResultMapper(rowArrays);

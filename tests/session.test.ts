@@ -62,16 +62,39 @@ import { CubridPreparedQuery, CubridSession, CubridTransaction, type CubridQuery
 import { cubridTable } from '../src/table';
 
 class MockClient implements CubridQueryable {
-	queries: { sql: string; params?: readonly unknown[] }[] = [];
+	queries: { sql: string; params?: readonly unknown[]; options?: unknown }[] = [];
 	results: unknown[][] = [];
 
-	async query<T extends Record<string, unknown>>(
-		sqlText: string,
-		params?: readonly unknown[],
-	): Promise<T[]> {
-		this.queries.push({ sql: sqlText, params });
+	async query<T>(sqlText: string, params?: readonly unknown[], options?: unknown): Promise<T[]> {
+		this.queries.push(options === undefined ? { sql: sqlText, params } : { sql: sqlText, params, options });
 		return (this.results.shift() ?? []) as T[];
 	}
+}
+
+// Behaves like cubrid-client's query(): object rows keyed by column label (a
+// repeated label keeps only its last value), or arrays in select-list order
+// with { rowMode: 'array' }.
+class LabelledRowsClient implements CubridQueryable {
+	options: unknown[] = [];
+
+	constructor(
+		private labels: string[],
+		private rows: unknown[][],
+	) {}
+
+	async query<T>(_sql: string, _params?: readonly unknown[], options?: unknown): Promise<T[]> {
+		this.options.push(options);
+		if ((options as { rowMode?: string } | undefined)?.rowMode === 'array') {
+			return this.rows.map((row) => [...row]) as T[];
+		}
+		return this.rows.map((row) =>
+			Object.fromEntries(this.labels.map((label, i) => [label, row[i]])),
+		) as T[];
+	}
+}
+
+class NoopLoggerForTests implements Logger {
+	logQuery(): void {}
 }
 
 const users = cubridTable('users', {
@@ -111,8 +134,8 @@ describe('CubridPreparedQuery', () => {
 	it('execute() maps row results when fields are provided', async () => {
 		const client = new MockClient();
 		client.results.push([
-			{ id: 1, token: 'a' },
-			{ id: 2, token: 'b' },
+			[1, 'a'],
+			[2, 'b'],
 		]);
 		const logger: Logger = { logQuery: vi.fn() };
 		const fields = [{ path: ['id'], field: users.id }] as unknown as SelectedFieldsOrdered;
@@ -140,8 +163,8 @@ describe('CubridPreparedQuery', () => {
 	it('execute() uses customResultMapper with row arrays', async () => {
 		const client = new MockClient();
 		client.results.push([
-			{ id: 3, token: 'x' },
-			{ id: 4, token: 'y' },
+			[3, 'x'],
+			[4, 'y'],
 		]);
 		const logger: Logger = { logQuery: vi.fn() };
 		const customMapper = vi.fn((rows: unknown[][]) => rows.map((row) => row.join(':')));
@@ -167,33 +190,71 @@ describe('CubridPreparedQuery', () => {
 		expect(result).toEqual(['3:x', '4:y']);
 	});
 
-	it('execute() converts non-object and array rows for custom mapping', async () => {
+	it('execute() requests array rows when mapping selected fields', async () => {
 		const client = new MockClient();
-		client.results.push([
-			['left', 'right'] as unknown as Record<string, unknown>,
-			123 as unknown as Record<string, unknown>,
-		]);
-		const logger: Logger = { logQuery: vi.fn() };
+		client.results.push([[1, 'a']]);
+		const fields = [{ path: ['id'], field: users.id }] as unknown as SelectedFieldsOrdered;
+
+		await new CubridPreparedQuery<MySqlPreparedQueryConfig>(
+			client,
+			'select id, token from users',
+			[],
+			new NoopLoggerForTests(),
+			undefined,
+			undefined,
+			undefined,
+			fields,
+		).execute();
+
+		expect(client.queries[0]?.options).toEqual({ rowMode: 'array' });
+	});
+
+	it('execute() keeps both values of a repeated column label (#183)', async () => {
+		// SELECT users.id, users.name, posts.id, posts.name: labels repeat.
+		const client = new LabelledRowsClient(
+			['id', 'name', 'id', 'name'],
+			[
+				[1, 'alice', 10, 'first post'],
+				[2, 'bob', null, null],
+			],
+		);
 		const customMapper = vi.fn((rows: unknown[][]) => rows);
 
-		const query = new CubridPreparedQuery<MySqlPreparedQueryConfig>(
+		const result = await new CubridPreparedQuery<MySqlPreparedQueryConfig>(
 			client,
-			'select weird from users',
+			'select users.id, users.name, posts.id, posts.name from users left join posts on ...',
 			[],
-			logger,
+			new NoopLoggerForTests(),
 			undefined,
 			undefined,
 			undefined,
 			undefined,
 			customMapper,
-		);
-
-		const result = await query.execute();
+		).execute();
 
 		expect(result).toEqual([
-			['left', 'right'],
-			[123],
+			[1, 'alice', 10, 'first post'],
+			[2, 'bob', null, null],
 		]);
+	});
+
+	it('execute() refuses object rows instead of guessing their column order', async () => {
+		const client = new MockClient();
+		client.results.push([{ id: 1, token: 'a' }]);
+		const fields = [{ path: ['id'], field: users.id }] as unknown as SelectedFieldsOrdered;
+
+		await expect(
+			new CubridPreparedQuery<MySqlPreparedQueryConfig>(
+				client,
+				'select id, token from users',
+				[],
+				new NoopLoggerForTests(),
+				undefined,
+				undefined,
+				undefined,
+				fields,
+			).execute(),
+		).rejects.toThrow(/rowMode/);
 	});
 
 	it('execute() returns AUTO_INCREMENT ids when returningIds is configured', async () => {
