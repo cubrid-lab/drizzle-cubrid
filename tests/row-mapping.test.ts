@@ -20,6 +20,10 @@ class CubridLikeClient implements CubridQueryable {
 		const labels = [...sql.matchAll(/`(\w+)`\.`(\w+)`/g)].map((m) => m[2]);
 		return this.rows.map((row) => Object.fromEntries(labels.map((label, i) => [label, row[i]]))) as T[];
 	}
+
+	async queryPrepared<T>(sql: string, params?: readonly unknown[], options?: unknown): Promise<T[]> {
+		return this.query<T>(sql, params, options);
+	}
 }
 
 const users = cubridTable('users', {
@@ -65,6 +69,9 @@ describe('row mapping with repeated column labels', () => {
 	it('refuses a client that ignores rowMode and returns object rows', async () => {
 		const objectRows: CubridQueryable = {
 			async query<T>(): Promise<T[]> {
+				return [{ id: 1, name: 'x' }] as T[];
+			},
+			async queryPrepared<T>(): Promise<T[]> {
 				return [{ id: 1, name: 'x' }] as T[];
 			},
 		};

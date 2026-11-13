@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Live CUBRID tests (`tests/integration.test.ts`, `npm run integration`) for transactions, joins, write metadata and collections, run in CI against CUBRID 11.4 (#181, #164).
 
 ### Fixed
+- Statement values are sent as typed binds through cubrid-client's `queryPrepared()`/`executePrepared()` instead of being written into the SQL text, despite the prepared-query naming (#191).
+- Collection values are written as `CAST(SET{?, ?} AS SET(<element type>))`: with typed binds CUBRID refused `UPDATE ... SET q = SEQUENCE{?, ?}` (-494, cannot coerce host var).
 - `insert`, `update` and `delete` report `affectedRows` and `lastInsertId` from cubrid-client's `execute()`; they returned `[]` with no counts. `$returningId()` returned `[]` and now returns the key of a one-row INSERT, keeping a `bigint` key exact (#182).
 - SET, MULTISET and SEQUENCE columns: values are written as typed collection literals with one parameter per element (`SET{?, ?}`) and read as the arrays cubrid-client returns. Writing failed (`item.replaceAll is not a function`, or a SQL error) and reading parsed arrays as text (#184).
 - Selected fields are now read from `query(sql, params, { rowMode: 'array' })` in select-list order instead of `Object.values()` of object rows. Joins whose tables share column names (`id`, `name`) returned one table's values under the other's fields; a partial select could return the wrong column under a field name (#183).
@@ -18,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A failed `ROLLBACK TO SAVEPOINT` no longer replaces the nested callback's error; it is attached as `rollbackError`.
 
 ### Changed
+- New `binding` option for `drizzle()`: `'prepared'` (default) or `'literal'`. A custom client without `queryPrepared()` is refused under the default instead of falling back to SQL literals.
 - `$returningId()` with an AUTO_INCREMENT key refuses a multi-row INSERT before sending it, since CUBRID does not report or promise consecutive keys. The result of `insert`, `update` and `delete` is typed `CubridRawQueryResult` with optional `affectedRows` and `lastInsertId`.
 - Collection builders take a type parameter for the element type (`cubridSet<number>(...)`, `string` by default) and refuse non-array values and unsupported elements; the old brace-string parser and writer are removed.
 - A custom client passed to `drizzle()` must return array rows from `query(sql, params, { rowMode: 'array' })`; object rows are refused for selects that map fields.

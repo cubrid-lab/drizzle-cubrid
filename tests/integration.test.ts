@@ -338,3 +338,42 @@ describe('collection columns round-trip (#184)', () => {
 		expect(rows).toEqual([{ id: 10 }]);
 	});
 });
+
+describe('typed binding and literal binding store the same values (#191)', () => {
+	const table = name('bind');
+	const t = cubridTable(table, {
+		id: int('id').primaryKey(),
+		bal: int('bal'),
+		big: bigint('big', { mode: 'bigint' }),
+		note: varchar('note', { length: 60 }),
+	});
+
+	beforeAll(() => createTable(table, 'id INT PRIMARY KEY, bal INT, big BIGINT, note VARCHAR(60)'));
+
+	for (const binding of ['prepared', 'literal'] as const) {
+		it(`keeps WHERE predicates and values intact with binding '${binding}'`, async () => {
+			const db = drizzle(client, { binding });
+			await client.query(`DELETE FROM ${table}`);
+			await db.insert(t).values([
+				{ id: 1, bal: 10, big: 1n, note: 'n1' },
+				{ id: 2, bal: 10, big: 2n, note: 'n2' },
+				{ id: 3, bal: 10, big: 3n, note: 'n3' },
+			]);
+
+			// bal - ? with a negative number, a quote/comment payload and a big integer.
+			const updated = await db
+				.update(t)
+				.set({ bal: sql`${t.bal} - ${-1}`, note: "it's \\ -- x 한글", big: 9007199254740993n })
+				.where(eq(t.id, 2));
+			const unmatched = await db.update(t).set({ bal: 0 }).where(eq(t.note, "x' OR 1=1 --"));
+
+			expect(updated.affectedRows).toBe(1);
+			expect(unmatched.affectedRows).toBe(0);
+			expect(await db.select().from(t).orderBy(t.id)).toEqual([
+				{ id: 1, bal: 10, big: 1n, note: 'n1' },
+				{ id: 2, bal: 11, big: 9007199254740993n, note: "it's \\ -- x 한글" },
+				{ id: 3, bal: 10, big: 3n, note: 'n3' },
+			]);
+		});
+	}
+});

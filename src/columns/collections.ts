@@ -133,7 +133,7 @@ function toDriverElement(element: unknown): unknown {
  * writes each element like any other parameter, so quotes and backslashes need
  * no escaping here.
  */
-function toCollectionSql(kind: CollectionKind, value: unknown): SQL {
+function toCollectionSql(kind: CollectionKind, columnType: string, value: unknown): SQL {
 	if (!Array.isArray(value)) {
 		throw new TypeError(`${kind} column value must be an array, got ${describeValue(value)}`);
 	}
@@ -142,7 +142,11 @@ function toCollectionSql(kind: CollectionKind, value: unknown): SQL {
 		value.map((element) => sql`${toDriverElement(element)}`),
 		sql`, `,
 	);
-	return sql`${sql.raw(kind)}{${elements}}`;
+	// The cast to the column's own type lets the server type the parameters:
+	// with typed binds, `SET q = SEQUENCE{?, ?}` in an UPDATE fails with -494
+	// "Cannot coerce host var to type sequence", and the cast form works on
+	// both binding paths. columnType comes from the schema, not from values.
+	return sql`CAST(${sql.raw(kind)}{${elements}} AS ${sql.raw(columnType)})`;
 }
 
 /** cubrid-client 1.x decodes collection columns into arrays. */
@@ -155,7 +159,8 @@ function fromCollectionDriverValue(kind: CollectionKind, value: unknown): unknow
 	return value;
 }
 
-function createCollectionType<TElement>(kind: CollectionKind) {
+function createCollectionType<TElement>(kind: CollectionKind, config: CubridCollectionConfig | undefined) {
+	const columnType = `${kind}(${resolveElementSqlType(config?.element)})`;
 	return customType<{
 		data: (TElement | null)[];
 		driverData: unknown[];
@@ -168,7 +173,7 @@ function createCollectionType<TElement>(kind: CollectionKind) {
 			return fromCollectionDriverValue(kind, value) as (TElement | null)[];
 		},
 		toDriver(value) {
-			return toCollectionSql(kind, value);
+			return toCollectionSql(kind, columnType, value);
 		},
 	});
 }
@@ -182,7 +187,7 @@ export function cubridSet<TElement extends CubridCollectionElement = string>(
 	name: string,
 	config?: CubridCollectionConfig,
 ) {
-	return createCollectionType<TElement>('SET')(name, config);
+	return createCollectionType<TElement>('SET', config)(name, config);
 }
 export type CubridSetColumnBuilder<TElement extends CubridCollectionElement = string> = ReturnType<
 	typeof cubridSet<TElement>
@@ -193,7 +198,7 @@ export function cubridMultiset<TElement extends CubridCollectionElement = string
 	name: string,
 	config?: CubridCollectionConfig,
 ) {
-	return createCollectionType<TElement>('MULTISET')(name, config);
+	return createCollectionType<TElement>('MULTISET', config)(name, config);
 }
 export type CubridMultisetColumnBuilder<TElement extends CubridCollectionElement = string> =
 	ReturnType<typeof cubridMultiset<TElement>>;
@@ -203,7 +208,7 @@ export function cubridSequence<TElement extends CubridCollectionElement = string
 	name: string,
 	config?: CubridCollectionConfig,
 ) {
-	return createCollectionType<TElement>('SEQUENCE')(name, config);
+	return createCollectionType<TElement>('SEQUENCE', config)(name, config);
 }
 export type CubridSequenceColumnBuilder<TElement extends CubridCollectionElement = string> =
 	ReturnType<typeof cubridSequence<TElement>>;

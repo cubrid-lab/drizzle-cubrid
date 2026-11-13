@@ -39,6 +39,16 @@ export interface CubridExecuteResult {
  */
 export type CubridRawQueryResult = QueryRow[] & Partial<CubridExecuteResult>;
 
+/**
+ * How statement values reach the server.
+ *
+ * - `'prepared'` (default): typed binds through cubrid-client's
+ *   `queryPrepared()`/`executePrepared()`, so no value ever becomes SQL text.
+ * - `'literal'`: the driver writes each value into the SQL text as an escaped
+ *   literal (`query()`/`execute()`). One round trip fewer per statement.
+ */
+export type CubridBinding = 'prepared' | 'literal';
+
 /** Transaction settings `cubrid-client` accepts in `transaction(callback, options)`. */
 export interface CubridTransactionOptions {
 	isolationLevel?: 'read committed' | 'repeatable read' | 'serializable';
@@ -57,6 +67,15 @@ export interface CubridQueryable {
 		params: readonly unknown[],
 		options: { rowMode: 'array' },
 	): Promise<T[]>;
+	/** `query()` with the values sent as typed binds (cubrid-client 1.3.0 and later). */
+	queryPrepared?<T extends QueryRow = QueryRow>(sql: string, params?: readonly unknown[]): Promise<T[]>;
+	queryPrepared?<T extends readonly unknown[] = unknown[]>(
+		sql: string,
+		params: readonly unknown[],
+		options: { rowMode: 'array' },
+	): Promise<T[]>;
+	/** `execute()` with the values sent as typed binds (cubrid-client 1.3.0 and later). */
+	executePrepared?(sql: string, params?: readonly unknown[]): Promise<CubridExecuteResult>;
 	/**
 	 * Runs `callback` on a connection the driver owns for the whole transaction,
 	 * then commits, or rolls back if the callback throws. `CubridClient` and
@@ -130,6 +149,54 @@ function attachDiagnostic(primary: unknown, key: 'rollbackError' | 'transactionE
 interface CubridSessionOptions {
 	logger?: Logger;
 	mode: Mode;
+	/** Defaults to `'prepared'`. */
+	binding?: CubridBinding;
+}
+
+/**
+ * The client as the session uses it: with `'prepared'` binding, `query()` and
+ * `execute()` go to the driver's typed-binding methods, so the statement code
+ * and the transaction client need no separate path. A client without typed
+ * binding is refused rather than silently falling back to SQL literals.
+ */
+function withBinding(client: CubridQueryable, binding: CubridBinding | undefined): CubridQueryable {
+	const mode = binding ?? 'prepared';
+	if (mode === 'literal') {
+		return client;
+	}
+	if (mode !== 'prepared') {
+		throw new Error(`Unknown binding '${String(binding)}'; use 'prepared' or 'literal'`);
+	}
+	if (typeof client.queryPrepared !== 'function') {
+		throw new Error(
+			"The CUBRID client has no queryPrepared() for typed binding (cubrid-client 1.3.0 or later); pass { binding: 'literal' } to drizzle() to send values as SQL literals",
+		);
+	}
+	const queryPrepared = client.queryPrepared.bind(client) as (
+		sql: string,
+		params: readonly unknown[],
+		options?: { rowMode: 'array' },
+	) => Promise<unknown[]>;
+	const bound: CubridQueryable = {
+		query: ((sql: string, params?: readonly unknown[], options?: { rowMode: 'array' }) =>
+			options === undefined ? queryPrepared(sql, params ?? []) : queryPrepared(sql, params ?? [], options)) as CubridQueryable['query'],
+	};
+	if (typeof client.executePrepared === 'function') {
+		bound.execute = client.executePrepared.bind(client);
+	}
+	if (typeof client.transaction === 'function') {
+		bound.transaction = client.transaction.bind(client);
+	}
+	if (typeof client.beginTransaction === 'function') {
+		bound.beginTransaction = client.beginTransaction.bind(client);
+	}
+	if (typeof client.commit === 'function') {
+		bound.commit = client.commit.bind(client);
+	}
+	if (typeof client.rollback === 'function') {
+		bound.rollback = client.rollback.bind(client);
+	}
+	return bound;
 }
 
 const mapResultRow = (drizzleUtils as unknown as {
@@ -309,9 +376,10 @@ export class CubridSession<
 
 	private logger: Logger;
 	private mode: Mode;
+	private client: CubridQueryable;
 
 	constructor(
-		private client: CubridQueryable,
+		client: CubridQueryable,
 		dialect: MySqlDialect,
 		private schema: RelationalSchemaConfig<TSchema> | undefined,
 		private options: CubridSessionOptions,
@@ -319,6 +387,7 @@ export class CubridSession<
 		super(dialect);
 		this.logger = options.logger ?? new NoopLogger();
 		this.mode = options.mode;
+		this.client = withBinding(client, options.binding);
 	}
 
 	prepareQuery<T extends MySqlPreparedQueryConfig>(

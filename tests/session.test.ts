@@ -75,6 +75,11 @@ class MockClient implements CubridQueryable {
 		this.queries.push(options === undefined ? { sql: sqlText, params } : { sql: sqlText, params, options });
 		return (this.results.shift() ?? []) as T[];
 	}
+
+	// Sessions use typed binding by default; record it through the same list.
+	async queryPrepared<T>(sqlText: string, params?: readonly unknown[], options?: unknown): Promise<T[]> {
+		return this.query<T>(sqlText, params, options);
+	}
 }
 
 // Behaves like cubrid-client's query(): object rows keyed by column label (a
@@ -109,6 +114,10 @@ class ExecutingClient extends MockClient {
 	async execute(sqlText: string, params?: readonly unknown[]) {
 		this.executed.push({ sql: sqlText, params });
 		return this.executeResult;
+	}
+
+	async executePrepared(sqlText: string, params?: readonly unknown[]) {
+		return this.execute(sqlText, params);
 	}
 }
 
@@ -628,6 +637,10 @@ describe('CubridSession with transactional client', () => {
 		async query<T extends Record<string, unknown>>(sqlText: string, params?: readonly unknown[]): Promise<T[]> {
 			this.queries.push({ sql: sqlText, params });
 			return (this.results.shift() ?? []) as T[];
+		}
+
+		async queryPrepared<T extends Record<string, unknown>>(sqlText: string, params?: readonly unknown[]): Promise<T[]> {
+			return this.query<T>(sqlText, params);
 		}
 
 		async beginTransaction(): Promise<void> {

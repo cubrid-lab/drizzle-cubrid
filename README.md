@@ -125,6 +125,14 @@ await db.delete(users).where(eq(users.id, 1));
 await client.close();
 ```
 
+## Parameters
+
+Values are sent as typed binds by default (cubrid-client's `queryPrepared()` /
+`executePrepared()`), so no value becomes part of the SQL text. Pass
+`drizzle(client, { binding: "literal" })` to send them as escaped SQL literals,
+one round trip fewer per statement. See
+[how values reach the server](docs/QUERIES.md#how-values-reach-the-server).
+
 ## CUBRID-Specific Column Types
 
 Beyond standard SQL types, CUBRID has collection types and a monetary type:

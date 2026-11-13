@@ -98,7 +98,7 @@ describe('collection values', () => {
 		counts: cubridMultiset<number>('counts', { element: int('n') }),
 		steps: cubridSequence('steps'),
 	});
-	const db = drizzle({ async query() { return []; } });
+	const db = drizzle({ async query() { return []; } }, { binding: 'literal' });
 
 	it('returns the array cubrid-client decoded, element types included', () => {
 		expect(docs.tags.mapFromDriverValue(['a', 'b'])).toEqual(['a', 'b']);
@@ -117,16 +117,16 @@ describe('collection values', () => {
 			.values({ id: 1, tags: ["it's", 'a\\b', '한글'], counts: [3, 3], steps: ['x', null] })
 			.toSQL();
 
-		expect(query.sql).toContain('SET{?, ?, ?}');
-		expect(query.sql).toContain('MULTISET{?, ?}');
-		expect(query.sql).toContain('SEQUENCE{?, ?}');
+		expect(query.sql).toContain('CAST(SET{?, ?, ?} AS SET(VARCHAR(100)))');
+		expect(query.sql).toContain('CAST(MULTISET{?, ?} AS MULTISET(INTEGER))');
+		expect(query.sql).toContain('CAST(SEQUENCE{?, ?} AS SEQUENCE(VARCHAR(100)))');
 		expect(query.params).toEqual([1, "it's", 'a\\b', '한글', 3, 3, 'x', null]);
 	});
 
 	it('writes an empty collection as an empty typed literal', () => {
 		const query = db.update(docs).set({ tags: [] }).toSQL();
 
-		expect(query.sql).toContain('SET{}');
+		expect(query.sql).toContain('CAST(SET{} AS SET(VARCHAR(100)))');
 		expect(query.params).toEqual([]);
 	});
 
@@ -156,7 +156,7 @@ describe('collection values', () => {
 
 	it('refuses a placeholder for the whole collection value when the query runs', async () => {
 		const client = { queries: 0, async query() { this.queries++; return []; } };
-		const prepared = drizzle(client)
+		const prepared = drizzle(client, { binding: 'literal' })
 			.update(docs)
 			.set({ tags: sql.placeholder('tags') as never })
 			.prepare();
