@@ -251,7 +251,7 @@ export const products = cubridTable("products", {
 
 Generates: `price MONETARY`
 
-> **Note**: values are strings. CUBRID stores MONETARY as a double, so a value reads back as its shortest decimal form (`'12.30'` reads as `'12.3'`), with double precision; use `decimal()` for exact amounts ([#217](https://github.com/cubrid-lab/drizzle-cubrid/issues/217)).
+> **Note**: values are strings. CUBRID stores MONETARY as a double, so a value reads back as its shortest decimal form (`'12.30'` reads as `'12.3'`; very large or small values use exponent notation such as `'1e+21'`), with double precision; use `decimal()` for exact amounts ([#217](https://github.com/cubrid-lab/drizzle-cubrid/issues/217)).
 
 ### Collection Type Configuration
 

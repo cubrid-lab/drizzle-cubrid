@@ -63,6 +63,8 @@ describe('collection and monetary types', () => {
 
 		expect(price.mapFromDriverValue(12.34)).toBe('12.34');
 		expect(price.mapFromDriverValue(-0.5)).toBe('-0.5');
+		expect(price.mapFromDriverValue(0)).toBe('0');
+		expect(price.mapFromDriverValue(0.1 + 0.2)).toBe('0.30000000000000004');
 		expect(price.mapFromDriverValue(1e21)).toBe('1e+21');
 		expect(price.mapFromDriverValue('7.25')).toBe('7.25');
 		expect(price.mapToDriverValue('12.34')).toBe('12.34');
