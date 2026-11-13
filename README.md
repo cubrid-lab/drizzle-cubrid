@@ -92,6 +92,8 @@ const client = createClient({
   port: 33000,
   database: "demodb",
   user: "dba",
+  // Required to read date and time columns; see "Date and time columns".
+  timezone: "utc",
 });
 
 const db = drizzle(client);
@@ -132,6 +134,26 @@ Values are sent as typed binds by default (cubrid-client's `queryPrepared()` /
 `drizzle(client, { binding: "literal" })` to send them as escaped SQL literals,
 one round trip fewer per statement. See
 [how values reach the server](docs/QUERIES.md#how-values-reach-the-server).
+
+## Date and time columns
+
+`datetime`, `timestamp`, `date` and `time` keep Drizzle's MySQL builders,
+options and TypeScript types. They follow Drizzle's MySQL convention: **the
+stored wall clock is UTC**. A `Date` is written as its UTC fields and read back
+as the same instant.
+
+Reading these columns needs a client that decodes in UTC. Create it with
+`timezone: "utc"`, or run the process with `TZ=UTC`:
+
+```ts
+const client = createClient({ host, port, database, user, timezone: "utc" });
+```
+
+Otherwise any select of a date or time column, or of a collection of them, is
+refused before it is sent. See [Date and time columns](docs/SCHEMA.md#date-and-time-columns)
+for each mode's values. Server-side defaults such as `NOW()` or
+`SYS_DATETIME` store the server's wall clock, which is UTC only when the
+server's time zone is.
 
 ## CUBRID-Specific Column Types
 

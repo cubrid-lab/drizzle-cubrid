@@ -25,6 +25,8 @@ const client = createClient({
   port: 33000,
   database: "demodb",
   user: "dba",
+  // Required to read date and time columns; see "Date and time columns".
+  timezone: "utc",
 });
 
 const db = drizzle(client);

@@ -150,6 +150,25 @@ const page1 = await db.select().from(users).limit(10).offset(0);
 const page2 = await db.select().from(users).limit(10).offset(10);
 ```
 
+### `drizzle-cubrid reads DATETIME, TIMESTAMP, DATE and TIME columns as a UTC wall clock, but this client decodes them in the process's local time zone`
+
+The query selects a `datetime`, `timestamp`, `date` or `time` column (or a
+collection of them), and the client decodes those values in a time zone other
+than UTC. drizzle-cubrid stores the wall clock as UTC, so the values would be
+shifted by the zone's offset. Create the client with `timezone: "utc"`:
+
+```ts
+const client = createClient({ host, port, database, user, timezone: "utc" });
+```
+
+or run the process with `TZ=UTC`. See
+[Date and time columns](SCHEMA.md#date-and-time-columns).
+
+### A `timestamp()` or `time()` value lost its milliseconds
+
+CUBRID's TIMESTAMP and TIME hold whole seconds and drop fractions without an
+error. Use a `datetime()` column when milliseconds matter.
+
 ### Column names are lowercase
 
 CUBRID folds unquoted identifiers to lowercase. Your result objects will have lowercase keys regardless of how you wrote the SQL:

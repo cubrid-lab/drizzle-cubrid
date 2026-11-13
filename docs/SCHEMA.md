@@ -104,6 +104,51 @@ export const events = cubridTable("events", {
 });
 ```
 
+### Date and time columns
+
+`datetime`, `timestamp`, `date` and `time` are Drizzle's MySQL builders, with the
+same options and TypeScript types, adapted to the `Date` values cubrid-client
+returns. They follow Drizzle's MySQL convention: the stored wall clock is UTC.
+
+| Builder | Written | Read |
+|---------|---------|------|
+| `datetime()` (`mode: 'date'`) | UTC fields of the `Date`, with milliseconds | the same instant |
+| `datetime({ mode: 'string' })` | the string | `YYYY-MM-DD HH:MM:SS.mmm` (CUBRID DATETIME always keeps milliseconds) |
+| `timestamp()` | UTC fields of the `Date` | the same instant, in whole seconds |
+| `timestamp({ mode: 'string' })` | the string | `YYYY-MM-DD HH:MM:SS` |
+| `date()` | the UTC date of the `Date` | midnight UTC of that date |
+| `date({ mode: 'string' })` | the string | `YYYY-MM-DD` |
+| `time()` | the string | `HH:MM:SS` |
+
+Reads are exact only when the client decodes these values in UTC. Create the
+client with `timezone: 'utc'` (cubrid-client 1.4), or run the process with
+`TZ=UTC`:
+
+```ts
+const client = createClient({ host, port, database, user, timezone: "utc" });
+```
+
+With any other client, a select of one of these columns (including
+`sql`...`.mapWith(column)`) or of a SET/MULTISET/SEQUENCE of them is refused
+before it is sent, and a relational query (`db.query`) whose rows contain a
+`Date` is refused after it is read. Raw `sql<Date>` fields, `db.execute()` and
+`db.all()` return the driver's values unchanged.
+
+drizzle-cubrid finds the client's setting in its `timezone` option, a
+`utcDates` field, or, for other clients, with one `SELECT DATETIME'...'` query
+per client.
+
+Server-side defaults such as `NOW()`, `SYS_DATETIME` or `defaultNow()` store the
+server's wall clock, which reads back as UTC only when the server's time zone is
+UTC. CUBRID's TIMESTAMP is converted between the session time zone and UTC on
+the server; a wall clock that does not exist in the session zone (a DST gap) is
+rejected by the server.
+
+Fractional seconds: CUBRID's TIMESTAMP and TIME hold whole seconds and drop
+fractions without an error, in every mode (`.678` in a `Date` or
+`'01:02:03.456'` in a string is stored as `.000` / `01:02:03`). Use
+`datetime()` when milliseconds matter.
+
 ### Binary Types
 
 ```ts

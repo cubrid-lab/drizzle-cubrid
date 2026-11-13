@@ -23,6 +23,9 @@ import type { Query } from 'drizzle-orm/sql/sql';
 import { type Assume } from 'drizzle-orm/utils';
 import * as drizzleUtils from 'drizzle-orm/utils';
 
+import { isCubridTemporalColumn, TEMPORAL_COLUMN_TYPES } from './columns/temporal.js';
+import { assertUtcDecoding } from './timezone.js';
+
 type QueryRow = Record<string, unknown>;
 
 /** What cubrid-client's `execute()` reports for INSERT, UPDATE and DELETE. */
@@ -263,6 +266,32 @@ function assertArrayRow(row: unknown): unknown[] {
 	);
 }
 
+/** The column a selected field is decoded with: the column itself, or `sql.mapWith(column)`. */
+function decoderOf(field: unknown): unknown {
+	if (is(field, Column)) {
+		return field;
+	}
+	if (is(field, SQL)) {
+		return (field as unknown as { decoder?: unknown }).decoder;
+	}
+	if (is(field, SQL.Aliased)) {
+		return (field.sql as unknown as { decoder?: unknown }).decoder;
+	}
+	return undefined;
+}
+
+/** A date or time column, or a collection column whose element is one. */
+function readsTemporal(field: unknown): boolean {
+	const decoder = decoderOf(field);
+	if (isCubridTemporalColumn(decoder)) {
+		return true;
+	}
+	const elementType = (
+		decoder as { config?: { fieldConfig?: { element?: { config?: { columnType?: unknown } } } } } | undefined
+	)?.config?.fieldConfig?.element?.config?.columnType;
+	return is(decoder, Column) && typeof elementType === 'string' && TEMPORAL_COLUMN_TYPES.has(elementType);
+}
+
 export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MySqlPreparedQuery<T> {
 	static override readonly [entityKind] = 'CubridPreparedQuery';
 
@@ -280,6 +309,11 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 		private customResultMapper?: (rows: unknown[][]) => T['execute'],
 		private generatedIds?: Record<string, unknown>[],
 		private returningIds?: SelectedFieldsOrdered,
+		/**
+		 * The client as the application created it, before `binding` wrapped it:
+		 * its time zone setting decides whether date and time columns can be read.
+		 */
+		private zoneClient?: CubridQueryable,
 	) {
 		super(cache, statementMetadata, cacheConfig);
 	}
@@ -302,10 +336,19 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 			return (await this.client.query(this.queryString, params)) as T['execute'];
 		}
 
+		const zoneClient = this.zoneClient ?? this.client;
+		if (this.fields?.some((selected) => readsTemporal(selected.field))) {
+			await assertUtcDecoding(zoneClient);
+		}
+
 		const rows = await this.client.query(this.queryString, params, ARRAY_ROWS);
 		const rowArrays = rows.map(assertArrayRow);
 
 		if (this.customResultMapper) {
+			// Relational queries carry no fields to check before sending.
+			if (rowArrays.some((row) => row.some((cell) => cell instanceof Date))) {
+				await assertUtcDecoding(zoneClient);
+			}
 			return this.customResultMapper(rowArrays);
 		}
 
@@ -380,6 +423,8 @@ export class CubridSession<
 	private logger: Logger;
 	private mode: Mode;
 	private client: CubridQueryable;
+	/** The client before `withBinding()`; see `CubridPreparedQuery`. */
+	private zoneClient: CubridQueryable;
 
 	constructor(
 		client: CubridQueryable,
@@ -391,6 +436,7 @@ export class CubridSession<
 		this.logger = options.logger ?? new NoopLogger();
 		this.mode = options.mode;
 		this.client = withBinding(client, options.binding);
+		this.zoneClient = client;
 	}
 
 	prepareQuery<T extends MySqlPreparedQueryConfig>(
@@ -414,6 +460,7 @@ export class CubridSession<
 			customResultMapper,
 			generatedIds,
 			returningIds,
+			this.zoneClient,
 		) as PreparedQueryKind<CubridPreparedQueryHKT, T>;
 	}
 
