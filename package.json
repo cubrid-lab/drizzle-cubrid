@@ -24,7 +24,7 @@
     "test": "vitest run --reporter=verbose",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage --reporter=verbose",
-    "integration": "vitest run tests/integration.test.ts --reporter=verbose",
+    "integration": "vitest run --config vitest.integration.config.ts --reporter=verbose",
     "lint": "eslint src/ tests/",
     "format": "eslint src/ tests/ --fix",
     "typecheck": "tsc --noEmit",

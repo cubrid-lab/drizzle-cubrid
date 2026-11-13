@@ -27,9 +27,22 @@ The repository also declares `npm run test:cov` (95% thresholds in `vitest.confi
 
 Design CI in two parts: (1) on Node 22, build/typecheck/Vitest/coverage/lint using current tooling; (2) on **Node 18**, install a **clean packed `drizzle-cubrid` artifact** with explicitly compatible peer versions and run nonzero ESM/CJS import and representative runtime tests. An incompatible Vitest 4 startup on Node 18 is a developer-tooling failure, not evidence the built library cannot run on Node 18. Do not skip the Node 18 consumer check, lower coverage, or change `engines.node` to bypass [#100](https://github.com/cubrid-lab/drizzle-cubrid/issues/100).
 
-## Real CUBRID integration — not implemented in this checkout
+## Real CUBRID integration
 
-The `integration` npm script currently points to `tests/integration.test.ts`, **which is absent on the inspected main branch**, and there is **no committed Docker Compose file** here. Do not tell contributors that `docker compose up` followed by `npm run integration` proves a live database integration. The actual integration harness needs to be designed and built in [#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164).
+Run the live CUBRID tests against a disposable database:
+
+```bash
+docker run -d --name cubrid-test -e CUBRID_DB=testdb -p 33000:33000 cubrid/cubrid:11.4
+CUBRID_TEST_HOST=127.0.0.1 node scripts/wait-for-cubrid.mjs 300
+CUBRID_TEST_HOST=127.0.0.1 npm run integration
+```
+
+`tests/integration.test.ts` reads `CUBRID_TEST_HOST` (required), `CUBRID_TEST_PORT`,
+`CUBRID_TEST_DATABASE`, `CUBRID_TEST_USER` and `CUBRID_TEST_PASSWORD`. Without a host
+it fails instead of skipping. It creates uniquely named tables and drops them at
+the end. CI runs it on every code change in the **Live CUBRID 11.4** job, which
+also fails if any test was skipped. Mock-only unit tests are not database
+evidence; cover database behavior here.
 
 The harness must use a disposable real CUBRID instance, the **actual** `cubrid-client` API, tagged supported database versions, and nonzero assertions of SQL/type/transaction/DDL behavior. Verify driver and Drizzle versions separately; neither passing SQL snapshots nor `cubrid-client`'s own integration CI certifies this adapter.
 
@@ -47,5 +60,5 @@ Review emitted ESM/CJS and `.d.ts` with an external TypeScript consumer (require
 - [ ] Node 22 dev checks are reproduced from `npm ci` on a clean checkout, with observed CI/local outcomes.
 - [ ] Node 18 consumer support is **retained for all 1.x releases**, with external packed ESM/CJS smoke tests. A runtime-floor increase may be proposed no earlier than a separately reviewed **2.0 MAJOR**.
 - [ ] ESLint configuration and compatible coverage/runtime toolchain are verified; failures are not silenced.
-- [ ] Real CUBRID integration suite exists and actually runs before database support is claimed.
+- [x] Real CUBRID integration suite exists and runs in CI on CUBRID 11.4 (other server versions are not covered).
 - [ ] `docs/DESIGN_SIGNOFF.md` in [architecture draft PR #166](https://github.com/cubrid-lab/drizzle-cubrid/pull/166) covers the native-dialect feasibility and TDD plan; release policy PR must be approved first.

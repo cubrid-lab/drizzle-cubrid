@@ -44,7 +44,7 @@ Resolve existing #100 Node 18 Vitest incompatibility without silently raising su
 - [ ] A read-only check can identify baseline tools, missing files and unsupported operations without modifying tracked source.
 - [ ] The setup guide has no phantom scripts, Docker Compose file or declared test coverage.
 - [ ] Language-specific compiler/runtime and package/module path requirements are coherent with existing consumers; divergent development vs consumer versions are explicit.
-- [ ] Real CUBRID integration is separately executable and cannot be marked passed when missing/zero/skipped.
+- [x] Real CUBRID integration is separately executable and cannot be marked passed when missing/zero/skipped (`npm run integration`, CI job Live CUBRID 11.4).
 - [ ] Final release candidate CI and external consumer/registry verification remain mandatory according to ADR 0001.
 - [ ] Maintainer approves the decision and its outstanding blockers. Documentation alone does not mean setup validation passed.
 

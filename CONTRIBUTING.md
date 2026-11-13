@@ -69,9 +69,25 @@ npm run test:cov
 npm run test:watch
 ```
 
-### Real CUBRID integration (not set up yet)
+### Real CUBRID integration
 
-**Do not execute the old Docker instructions as proof of a test**: this repository has no checked-in root Docker Compose file, and `npm run integration` references `tests/integration.test.ts`, which is not present on the inspected main branch. Building a real-CUBRID harness with nonzero SQL assertions is tracked in [#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164). The actual driver and Drizzle ORM version matrix must be tested separately. See [Development setup](docs/DEVELOPMENT_SETUP.md).
+Run the live CUBRID tests against a disposable database:
+
+```bash
+docker run -d --name cubrid-test -e CUBRID_DB=testdb -p 33000:33000 cubrid/cubrid:11.4
+CUBRID_TEST_HOST=127.0.0.1 node scripts/wait-for-cubrid.mjs 300
+CUBRID_TEST_HOST=127.0.0.1 npm run integration
+```
+
+`tests/integration.test.ts` reads `CUBRID_TEST_HOST` (required), `CUBRID_TEST_PORT`,
+`CUBRID_TEST_DATABASE`, `CUBRID_TEST_USER` and `CUBRID_TEST_PASSWORD`. Without a host
+it fails instead of skipping. It creates uniquely named tables and drops them at
+the end. CI runs it on every code change in the **Live CUBRID 11.4** job, which
+also fails if any test was skipped. Mock-only unit tests are not database
+evidence; cover database behavior here.
+
+Add a live test for any change to SQL generation, row mapping, transactions or
+type codecs. See [Development setup](docs/DEVELOPMENT_SETUP.md).
 
 ### Type Checking
 

@@ -78,7 +78,7 @@ Release automation may prepare a candidate PR, but **must not skip the review, r
 
 **Scope:** This is a policy requirement. Existing green CI runs are not reclassified as complete integration evidence. Implementation of new CI jobs, server provisioning and tests must be separately reviewed. No automatic 1.0 release is authorized by this document.
 
-**Drizzle-specific blocker:** `.github/workflows/ci.yml` currently runs Node typecheck/build/Vitest only; `package.json` references an `integration` script and an integration test file that are not checked in. Release preflight must add nonempty real-CUBRID integration tests for independently generated SQL, Drizzle type mapping, generated keys, relational queries, transactions and any advertised migration behavior. The available `cubrid-client@1.x` driver test matrix does **not** certify `drizzle-cubrid`.
+**Drizzle-specific blocker:** `.github/workflows/ci.yml` runs the live suite (`tests/integration.test.ts`) against CUBRID 11.4 only. Release preflight must extend it to every server version claimed as supported and to independently generated SQL, Drizzle type mapping, relational queries and any advertised migration behavior; today it covers transactions, joins, write metadata, collections and value binding. The available `cubrid-client@1.x` driver test matrix does **not** certify `drizzle-cubrid`.
 
 Implementation tracker: [#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163).
 

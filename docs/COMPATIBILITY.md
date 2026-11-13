@@ -65,8 +65,10 @@ Measured the same way with `npm install --no-save cubrid-client@<version>`
 | 1.3.0 | pass | 94 passed | not run | unsupported: not verified against a server |
 | 1.4.0 | pass | 94 passed | transaction isolation checks from #185 | verified |
 
-Passing unit tests and a clean install are not database compatibility. Real
-CUBRID coverage for Drizzle-generated SQL is tracked in #164 and #181.
+Passing unit tests and a clean install are not database compatibility. The
+live suite (`npm run integration`, CI job Live CUBRID 11.4) runs with the
+lockfile versions; other server versions and peer combinations are tracked in
+#164.
 
 ## Node.js
 
