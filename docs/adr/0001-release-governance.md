@@ -1,9 +1,10 @@
 # ADR 0001: Release governance and compatibility contract
 
-- **Status:** Proposed
-- **Date:** 2026-11-07
+- **Status:** Accepted
+- **Date:** 2026-11-07 (proposed)
+- **Accepted:** 2026-11-13 by maintainer yeongseon, recorded in PR #ACCEPT_PR
 - **Decision scope:** drizzle-cubrid release and supported-consumer contract
-- **Owner:** Repository maintainers (approval not yet recorded)
+- **Owner:** Repository maintainers
 
 ## Context
 
@@ -33,7 +34,7 @@ Maintainers must explicitly review the supported matrix and any runtime/API remo
 
 ## Verification / acceptance criteria
 
-- [ ] Maintainer reviews and accepts this ADR, links the approval and records acceptance date.
+- [x] Maintainer reviews and accepts this ADR, links the approval and records acceptance date (2026-11-13, PR #ACCEPT_PR).
 - [ ] Published README/release guide and dependency version declarations agree with the reviewed compatibility contract.
 - [ ] A candidate-specific CI check identifies supported CUBRID server versions, tests run/passed/failed/skipped, runtime and driver/ORM versions, and actual artifact.
 - [ ] Required release checks reject failed, missing, zero-case or skipped live tests, with scoped exceptions documented as unsupported/unverified—not counted as passes.
@@ -44,4 +45,4 @@ Maintainers must explicitly review the supported matrix and any runtime/API remo
 
 [release policy](../RELEASE_POLICY.md), [compatibility issue #151](https://github.com/cubrid-lab/drizzle-cubrid/issues/151), [architecture design #155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155)
 
-**This ADR does not update version numbers, create a release, authorize publishing, or claim any database test has passed.** Its status remains **Proposed** until explicit maintainer approval.
+**This ADR does not update version numbers, create a release, authorize publishing, or claim any database test has passed.** Accepting it adopts the release contract; the remaining acceptance criteria above are obligations for each release, not claims that they have been met.

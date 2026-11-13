@@ -3,7 +3,7 @@
 - **Status:** Proposed
 - **Date:** 2026-11-07
 - **Scope:** TypeScript/Drizzle developer setup, quality tooling and environment contracts
-- **Prerequisites:** Release governance ADR 0001 and TDD ADR 0004; architecture ADR 0003 remains proposed until reviewed.
+- **Prerequisites:** Release governance ADR 0001 and TDD ADR 0004; architecture ADR 0003 (accepted 2026-11-13).
 
 ## Context
 

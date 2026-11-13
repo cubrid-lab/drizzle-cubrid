@@ -1,8 +1,9 @@
 # ADR 0003: Native CUBRID architecture boundaries
 
-- **Status:** Proposed
-- **Date:** 2026-11-07
-- **Prerequisite:** Release policy ADR 0001 (merged as Proposed in #168); acceptance of ADR 0001 before this ADR is accepted
+- **Status:** Accepted
+- **Date:** 2026-11-07 (proposed)
+- **Accepted:** 2026-11-13 by maintainer yeongseon, after ADR 0001, recorded in PR #ACCEPT_PR
+- **Prerequisite:** Release policy ADR 0001 (accepted 2026-11-13)
 - **Decision scope:** TypeScript Drizzle ORM CUBRID-native dialect and migration ownership
 
 ## Context
@@ -39,13 +40,13 @@ The planned stable 1.x native dialect cannot require Node >18 at runtime. Build 
 
 Compile an independently typed table and representative SELECT/JOIN without importing mysql-core; execute on actual CUBRID; verify DML metadata, duplicate aliases, transaction connection ownership, type codecs and transactional DDL under supported DB versions; resolve unsupported extension gaps before a 1.0 guarantee.
 
-- [ ] Approve release/compatibility policy ADR 0001 **before** accepting this architecture ADR.
+- [x] Approve release/compatibility policy ADR 0001 **before** accepting this architecture ADR (accepted in the same PR, #ACCEPT_PR, in that order).
 - [ ] The feasibility evidence and exact supported versions are recorded; unknown or unsupported behavior is not reported as implemented.
 - [ ] Separate implementation issues, regression tests and release documentation agree with this decision.
-- [ ] A maintainer reviews the decision and records acceptance explicitly; draft status alone never authorizes 1.0.
+- [x] A maintainer reviews the decision and records acceptance explicitly; draft status alone never authorizes 1.0. (2026-11-13, PR #ACCEPT_PR.)
 
 ## References
 
 [architecture plan](../CUBRID_NATIVE_ARCHITECTURE.md), [feasibility #156](https://github.com/cubrid-lab/drizzle-cubrid/issues/156), [release policy ADR 0001](0001-release-governance.md) (#168)
 
-**This ADR is an architecture proposal, not a runtime implementation, migration completion, CI pass or approved release.**
+**Accepting this ADR approves the architecture direction and authorizes native implementation work under the acceptance criteria above (#155–#165, #192). It is not a runtime implementation, migration completion, CI pass or approved release; the unchecked criteria remain open.**

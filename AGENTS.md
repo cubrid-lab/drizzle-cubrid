@@ -180,7 +180,7 @@ Before implementing a CUBRID behavior change, check the approved API/SQL/protoco
 
 ## Architecture decisions and release order
 
-Read the [repository ADR index](docs/adr/README.md) before proposing changes to public behavior, release contracts, this repository's architecture, transaction ownership or public API. ADR 0001 records release governance; ADR 0002 records this repository's correctness-evidence requirements; architecture ADR 0003 remains **Proposed** in its own design PR. Do not treat a Proposed ADR as approved. Adopt the release policy before accepting the architecture ADR; require actual tested evidence before claiming implementation or release readiness. Use the [ADR template](docs/adr/TEMPLATE.md) for material new decisions, not for every trivial change.
+Read the [repository ADR index](docs/adr/README.md) before proposing changes to public behavior, release contracts, this repository's architecture, transaction ownership or public API. ADR 0001 (release governance) and architecture ADR 0003 (native CUBRID boundaries) are **Accepted**; ADR 0002, 0004, 0005 and 0006 remain **Proposed**. Do not treat a Proposed ADR as approved, and do not treat an Accepted ADR as proof that its acceptance criteria are met; require actual tested evidence before claiming implementation or release readiness. Use the [ADR template](docs/adr/TEMPLATE.md) for material new decisions, not for every trivial change.
 
 ## CUBRID correctness lessons and native regression review
 
