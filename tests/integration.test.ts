@@ -10,7 +10,7 @@ import { type CubridClient, type CubridPool, createClient, createPool } from 'cu
 import { eq, gt, sql, TransactionRollbackError } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { bigint, cubridMultiset, cubridSequence, cubridSet, int, varchar } from '../src/columns';
+import { bigint, boolean, cubridMultiset, cubridSequence, cubridSet, datetime, double, int, varchar } from '../src/columns';
 import { drizzle } from '../src/driver';
 import { cubridTable } from '../src/table';
 
@@ -374,6 +374,51 @@ describe('typed binding and literal binding store the same values (#191)', () =>
 				{ id: 2, bal: 11, big: 9007199254740993n, note: "it's \\ -- x 한글" },
 				{ id: 3, bal: 10, big: 3n, note: 'n3' },
 			]);
+		});
+	}
+});
+
+describe('collection element types round-trip under both bindings (#191, #184)', () => {
+	const table = name('celem');
+	const t = cubridTable(table, {
+		id: int('id').primaryKey(),
+		dt: cubridSequence<Date>('dt', { element: datetime('e') }),
+		dbl: cubridSequence<number>('dbl', { element: double('e') }),
+		flag: cubridSequence<boolean | number>('flag', { element: boolean('e') }),
+		big: cubridSequence<bigint>('big', { element: bigint('e', { mode: 'bigint' }) }),
+		// No element in the schema, while the table's elements are wider than the
+		// VARCHAR(100) default the DDL would use.
+		wide: cubridSet('wide'),
+	});
+	const instant = new Date(Date.UTC(2024, 1, 3, 4, 5, 6, 789));
+	const long = 'x'.repeat(150);
+
+	beforeAll(() =>
+		createTable(
+			table,
+			'id INT PRIMARY KEY, dt SEQUENCE(DATETIME), dbl SEQUENCE(DOUBLE), flag SEQUENCE(SMALLINT), big SEQUENCE(BIGINT), wide SET(VARCHAR(500))',
+		),
+	);
+
+	for (const [id, binding] of [
+		[1, 'prepared'],
+		[2, 'literal'],
+	] as const) {
+		it(`stores datetime, double, boolean, bigint and long string elements exactly (${binding})`, async () => {
+			const db = drizzle(client, { binding });
+			// Read back a plain DATETIME column written the same way, to compare
+			// against the driver's own date handling rather than a fixed zone.
+			const [plain] = await client.query<{ v: Date }>(`SELECT CAST(? AS DATETIME) AS v FROM db_root`, [instant]);
+
+			await db.insert(t).values({ id, dt: [instant], dbl: [0.1, -2.5], flag: [true], big: [9007199254740993n], wide: [long] });
+			await db.update(t).set({ dbl: [1.5] }).where(eq(t.id, id));
+			const [row] = await db.select().from(t).where(eq(t.id, id));
+
+			expect(row?.dt?.[0]?.getTime()).toBe(plain?.v.getTime());
+			expect(row?.dbl).toEqual([1.5]);
+			expect(row?.flag).toEqual([1]);
+			expect(row?.big).toEqual([9007199254740993n]);
+			expect(row?.wide).toEqual([long]);
 		});
 	}
 });

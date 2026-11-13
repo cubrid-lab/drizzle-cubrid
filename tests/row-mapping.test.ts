@@ -79,4 +79,17 @@ describe('row mapping with repeated column labels', () => {
 
 		await expect(db.select().from(users)).rejects.toThrow(/rowMode/);
 	});
+
+	it('names a null row in the refusal', async () => {
+		const nullRows: CubridQueryable = {
+			async query<T>(): Promise<T[]> {
+				return [null] as T[];
+			},
+			async queryPrepared<T>(): Promise<T[]> {
+				return [null] as T[];
+			},
+		};
+
+		await expect(drizzle(nullRows).select().from(users)).rejects.toThrow(/non-array row \(null\)/);
+	});
 });

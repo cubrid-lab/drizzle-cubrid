@@ -295,7 +295,11 @@ const client = createClient({
 export const db = drizzle(client);
 ```
 
-### Use prepared statements for repeated queries
+### Reuse a built query
+
+`.prepare()` builds the SQL once on the Drizzle side. With the default typed
+binding, each `execute()` still prepares and releases its own statement on the
+server, so this saves the query building, not a server round trip.
 
 ```ts
 import { placeholder } from "drizzle-cubrid";

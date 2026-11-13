@@ -172,17 +172,17 @@ function withBinding(client: CubridQueryable, binding: CubridBinding | undefined
 			"The CUBRID client has no queryPrepared() for typed binding (cubrid-client 1.3.0 or later); pass { binding: 'literal' } to drizzle() to send values as SQL literals",
 		);
 	}
-	const queryPrepared = client.queryPrepared.bind(client) as (
-		sql: string,
-		params: readonly unknown[],
-		options?: { rowMode: 'array' },
-	) => Promise<unknown[]>;
 	const bound: CubridQueryable = {
-		query: ((sql: string, params?: readonly unknown[], options?: { rowMode: 'array' }) =>
-			options === undefined ? queryPrepared(sql, params ?? []) : queryPrepared(sql, params ?? [], options)) as CubridQueryable['query'],
+		query: client.queryPrepared.bind(client) as CubridQueryable['query'],
 	};
 	if (typeof client.executePrepared === 'function') {
 		bound.execute = client.executePrepared.bind(client);
+	} else if (typeof client.execute === 'function') {
+		// Writes would lose their affected-row counts and keys rather than use the
+		// literal execute(); refuse instead of changing what a write reports.
+		throw new Error(
+			"The CUBRID client has execute() but no executePrepared() for typed binding; pass { binding: 'literal' } to drizzle() or add executePrepared()",
+		);
 	}
 	if (typeof client.transaction === 'function') {
 		bound.transaction = client.transaction.bind(client);

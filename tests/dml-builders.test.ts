@@ -126,6 +126,23 @@ describe('parameter binding (#191)', () => {
 		expect(() => drizzle(literalOnly, { binding: 'literal' })).not.toThrow();
 	});
 
+	it('refuses a client with execute() but no executePrepared() under typed binding', () => {
+		const partial: CubridQueryable = {
+			async query<T>(): Promise<T[]> {
+				return [];
+			},
+			async queryPrepared<T>(): Promise<T[]> {
+				return [];
+			},
+			async execute() {
+				return { affectedRows: 0 };
+			},
+		};
+
+		expect(() => drizzle(partial)).toThrow(/executePrepared/);
+		expect(() => drizzle(partial, { binding: 'literal' })).not.toThrow();
+	});
+
 	it('refuses an unknown binding value', () => {
 		expect(() => drizzle(new RecordingClient(), { binding: 'text' as never })).toThrow(/binding/);
 	});

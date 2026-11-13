@@ -1,10 +1,19 @@
 import { sql } from 'drizzle-orm';
-import { MySqlDialect } from 'drizzle-orm/mysql-core';
+import { MySqlDialect, json } from 'drizzle-orm/mysql-core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
 	bigint,
+	boolean,
 	char,
+	date,
+	datetime,
+	double,
+	float,
+	mysqlEnum,
+	text,
+	time,
+	timestamp,
 	cubridMultiset,
 	cubridSequence,
 	cubridSet,
@@ -16,6 +25,7 @@ import {
 	varchar,
 } from '../src/columns';
 import { drizzle } from '../src/driver';
+import { monetary } from '../src/types';
 import { cubridTable } from '../src/table';
 
 type CustomTypeParams = {
@@ -55,7 +65,7 @@ describe('collection element SQL types', () => {
 		expect(sqlTypeOf(smallint('s'))).toBe('SET(SMALLINT)');
 		expect(sqlTypeOf(tinyint('t'))).toBe('SET(SMALLINT)');
 		expect(sqlTypeOf(mediumint('m'))).toBe('SET(INTEGER)');
-		expect(sqlTypeOf(bigint('b', { mode: 'number' }))).toBe('SET(NUMBER)');
+		expect(sqlTypeOf(bigint('b', { mode: 'number' }))).toBe('SET(BIGINT)');
 	});
 
 	it('maps decimal with and without precision', () => {
@@ -117,16 +127,16 @@ describe('collection values', () => {
 			.values({ id: 1, tags: ["it's", 'a\\b', '한글'], counts: [3, 3], steps: ['x', null] })
 			.toSQL();
 
-		expect(query.sql).toContain('CAST(SET{?, ?, ?} AS SET(VARCHAR(100)))');
+		expect(query.sql).toContain('CAST(SET{?, ?, ?} AS SET(STRING))');
 		expect(query.sql).toContain('CAST(MULTISET{?, ?} AS MULTISET(INTEGER))');
-		expect(query.sql).toContain('CAST(SEQUENCE{?, ?} AS SEQUENCE(VARCHAR(100)))');
+		expect(query.sql).toContain('CAST(SEQUENCE{?, ?} AS SEQUENCE(STRING))');
 		expect(query.params).toEqual([1, "it's", 'a\\b', '한글', 3, 3, 'x', null]);
 	});
 
 	it('writes an empty collection as an empty typed literal', () => {
 		const query = db.update(docs).set({ tags: [] }).toSQL();
 
-		expect(query.sql).toContain('CAST(SET{} AS SET(VARCHAR(100)))');
+		expect(query.sql).toContain('CAST(SET{} AS SET(STRING))');
 		expect(query.params).toEqual([]);
 	});
 
@@ -168,6 +178,50 @@ describe('collection values', () => {
 	it('types elements from the generic parameter', () => {
 		expectTypeOf(docs.counts.$inferInsert).toEqualTypeOf<(number | null)[]>();
 		expectTypeOf(docs.tags.$inferInsert).toEqualTypeOf<(string | null)[]>();
+	});
+});
+
+describe('collection element types', () => {
+	const dialect = new MySqlDialect();
+	const db = drizzle({ async query() { return []; } }, { binding: 'literal' });
+	const castOf = (element?: unknown) => {
+		const t = cubridTable('t', { c: cubridSequence('c', element ? { element: element as never } : undefined) });
+		return dialect.sqlToQuery(db.update(t).set({ c: ['x'] as never }).getSQL()).sql;
+	};
+
+	it.each([
+		[datetime('e'), 'DATETIME'],
+		[datetime('e', { mode: 'string' }), 'DATETIME'],
+		[timestamp('e'), 'TIMESTAMP'],
+		[date('e'), 'DATE'],
+		[time('e'), 'TIME'],
+		[double('e'), 'DOUBLE'],
+		[float('e'), 'FLOAT'],
+		[boolean('e'), 'SMALLINT'],
+		[bigint('e', { mode: 'bigint' }), 'BIGINT'],
+		[decimal('e', { precision: 10, scale: 2 }), 'DECIMAL(10,2)'],
+		[monetary('e'), 'MONETARY'],
+	])('uses the CUBRID type of %# in DDL and in the write cast', (element, expected) => {
+		expect(sqlTypeOf(element)).toBe(`SET(${expected})`);
+		expect(castOf(element)).toContain(`AS SEQUENCE(${expected}))`);
+	});
+
+	it.each([
+		[undefined, 'VARCHAR(100)'],
+		[varchar('e', { length: 20 }), 'VARCHAR(20)'],
+		[char('e'), 'CHAR'],
+		[text('e'), 'STRING'],
+		[mysqlEnum('e', ['a', 'b']), 'STRING'],
+	])('keeps the declared string type %# in DDL but casts writes to STRING', (element, ddl) => {
+		expect(sqlTypeOf(element)).toBe(`SET(${ddl})`);
+		expect(castOf(element)).toContain('AS SEQUENCE(STRING))');
+	});
+
+	it('writes an element type it cannot map without a cast', () => {
+		const sqlText = castOf(json('e'));
+
+		expect(sqlText).toContain('SEQUENCE{?}');
+		expect(sqlText).not.toContain('CAST(');
 	});
 });
 
