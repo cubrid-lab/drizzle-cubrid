@@ -252,13 +252,19 @@ cubrid-client: createClient({ host, port, database, user, password })
 
 | File | Trigger | Purpose |
 |---|---|---|
-| `.github/workflows/ci.yml` | Push to main, PRs | Lint + typecheck + unit tests + integration |
+| `.github/workflows/ci.yml` | Push to main, PRs | Typecheck, build, unit tests with coverage, live CUBRID tests, packed-package checks (no lint step yet, see #167) |
 | `.github/workflows/publish.yml` | GitHub Release | Build and publish to npm |
 
 ### CI Matrix
 
-- **Unit**: Node.js 18, 20, 22
-- **Integration**: Node.js {18, 20} × CUBRID {11.2, 11.4}
+- **Unit** (typecheck, build, Vitest coverage): Node.js 20 and 22
+- **Lowest supported `drizzle-orm`** (typecheck, build, Vitest): Node.js 22
+- **Live CUBRID**: Node.js 22 × CUBRID 11.4 only, with the image pinned by digest
+  and the server version checked against `CUBRID_TEST_EXPECT_VERSION`. Other
+  server versions are not tested.
+- **Packed-package consumer** (CJS and ESM imports of the built tarball): Node.js 18
+
+See `docs/CI_VALIDATION.md` for which jobs run on which changes.
 
 ## Commit Convention
 
