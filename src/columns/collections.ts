@@ -113,6 +113,20 @@ function assertElement(kind: CollectionKind, element: unknown, index: number): v
 	}
 }
 
+// Node's Buffer, declared here because the library builds without Node types.
+declare const Buffer: {
+	isBuffer(value: unknown): boolean;
+	from(buffer: ArrayBufferLike, byteOffset: number, length: number): Uint8Array;
+};
+
+/** cubrid-client accepts bytes only as a Buffer. */
+function toDriverElement(element: unknown): unknown {
+	if (element instanceof Uint8Array && !Buffer.isBuffer(element)) {
+		return Buffer.from(element.buffer, element.byteOffset, element.byteLength);
+	}
+	return element;
+}
+
 /**
  * cubrid-client cannot bind an array, so the value becomes a typed collection
  * literal with one parameter per element, such as `SET{?, ?}`. The driver
@@ -125,7 +139,7 @@ function toCollectionSql(kind: CollectionKind, value: unknown): SQL {
 	}
 	value.forEach((element, index) => assertElement(kind, element, index));
 	const elements = sql.join(
-		value.map((element) => sql`${element}`),
+		value.map((element) => sql`${toDriverElement(element)}`),
 		sql`, `,
 	);
 	return sql`${sql.raw(kind)}{${elements}}`;
@@ -170,7 +184,9 @@ export function cubridSet<TElement extends CubridCollectionElement = string>(
 ) {
 	return createCollectionType<TElement>('SET')(name, config);
 }
-export type CubridSetColumnBuilder = ReturnType<typeof cubridSet>;
+export type CubridSetColumnBuilder<TElement extends CubridCollectionElement = string> = ReturnType<
+	typeof cubridSet<TElement>
+>;
 
 /** A `MULTISET` column: duplicates are kept, order is not defined. */
 export function cubridMultiset<TElement extends CubridCollectionElement = string>(
@@ -179,7 +195,8 @@ export function cubridMultiset<TElement extends CubridCollectionElement = string
 ) {
 	return createCollectionType<TElement>('MULTISET')(name, config);
 }
-export type CubridMultisetColumnBuilder = ReturnType<typeof cubridMultiset>;
+export type CubridMultisetColumnBuilder<TElement extends CubridCollectionElement = string> =
+	ReturnType<typeof cubridMultiset<TElement>>;
 
 /** A `SEQUENCE` (LIST) column: duplicates and stored order are kept. */
 export function cubridSequence<TElement extends CubridCollectionElement = string>(
@@ -188,4 +205,5 @@ export function cubridSequence<TElement extends CubridCollectionElement = string
 ) {
 	return createCollectionType<TElement>('SEQUENCE')(name, config);
 }
-export type CubridSequenceColumnBuilder = ReturnType<typeof cubridSequence>;
+export type CubridSequenceColumnBuilder<TElement extends CubridCollectionElement = string> =
+	ReturnType<typeof cubridSequence<TElement>>;

@@ -270,9 +270,9 @@ For CUBRID-specific types, the inferred TypeScript types are:
 
 | Column | TypeScript Type |
 |--------|----------------|
-| `set(...)` | `string[]` |
-| `multiset(...)` | `string[]` |
-| `sequence(...)` | `string[]` |
+| `set<T>(...)` | `(T \| null)[]`, `T` = `string` by default ([details](SCHEMA.md#collection-type-configuration)) |
+| `multiset<T>(...)` | `(T \| null)[]` |
+| `sequence<T>(...)` | `(T \| null)[]` |
 | `monetary(...)` | `string` |
 
 ## Performance Tips

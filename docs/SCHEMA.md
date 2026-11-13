@@ -208,9 +208,13 @@ set<number>("ids", { element: int("id") }); // SET(INTEGER), number[]
 - **Writing.** The value must be an array. It is written as a typed collection
   literal with one parameter per element, such as `SET{?, ?}`, so quotes and
   backslashes in elements need no escaping. Elements may be strings, finite
-  numbers, bigints, booleans, valid `Date`s, bytes or `null`; nested arrays
-  and other objects are refused before anything is sent. `[]` writes an empty
-  collection.
+  numbers, bigints, booleans, valid `Date`s, bytes (`Buffer` or `Uint8Array`)
+  or `null`; nested arrays and other objects are refused before anything is
+  sent. `[]` writes an empty collection. Bytes written into a string collection
+  are stored as their hex text.
+- **Placeholders.** `sql.placeholder()` cannot stand for a whole collection
+  value in a prepared query; it is refused when the query runs. Pass the array
+  directly.
 
 ## Column Modifiers
 

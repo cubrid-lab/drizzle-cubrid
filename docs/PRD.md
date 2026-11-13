@@ -139,13 +139,13 @@ await client.close();
 ### CUBRID-Specific Types
 
 ```typescript
-import { cubridTable, set, multiset, sequence, monetary } from 'drizzle-cubrid';
+import { cubridTable, decimal, int, set, multiset, sequence, monetary, varchar } from 'drizzle-cubrid';
 
 const products = cubridTable('products', {
   id: int('id').autoincrement().primaryKey(),
-  tags: set('tags', { type: 'varchar', length: 50 }),
-  categories: multiset('categories', { type: 'varchar', length: 100 }),
-  priceHistory: sequence('price_history', { type: 'numeric', precision: 10, scale: 2 }),
+  tags: set('tags', { element: varchar('tag', { length: 50 }) }),
+  categories: multiset('categories', { element: varchar('category', { length: 100 }) }),
+  priceHistory: sequence('price_history', { element: decimal('price', { precision: 10, scale: 2 }) }),
   price: monetary('price'),
 });
 ```

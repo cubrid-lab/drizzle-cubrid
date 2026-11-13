@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { MySqlDialect } from 'drizzle-orm/mysql-core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
@@ -144,6 +145,24 @@ describe('collection values', () => {
 		expect(() =>
 			dialect.sqlToQuery(db.update(docs).set({ tags: [element] as never }).getSQL()),
 		).toThrow(/element/);
+	});
+
+	it('sends Uint8Array elements as a Buffer, as cubrid-client requires', () => {
+		const query = db.update(docs).set({ tags: [new Uint8Array([1, 2]) as never] }).toSQL();
+
+		expect(Buffer.isBuffer(query.params[0])).toBe(true);
+		expect([...(query.params[0] as Buffer)]).toEqual([1, 2]);
+	});
+
+	it('refuses a placeholder for the whole collection value when the query runs', async () => {
+		const client = { queries: 0, async query() { this.queries++; return []; } };
+		const prepared = drizzle(client)
+			.update(docs)
+			.set({ tags: sql.placeholder('tags') as never })
+			.prepare();
+
+		await expect(prepared.execute({ tags: ['a'] })).rejects.toThrow(/placeholder/);
+		expect(client.queries).toBe(0);
 	});
 
 	it('types elements from the generic parameter', () => {
