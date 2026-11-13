@@ -159,6 +159,9 @@ jobs:
       - name: Wait for the CUBRID broker
         run: node scripts/wait-for-cubrid.mjs 300
       - name: Run live CUBRID tests
+        # A non-UTC zone, so date and time handling cannot depend on TZ=UTC (#207).
+        env:
+          TZ: Asia/Seoul
         run: npm run integration -- --reporter=json --outputFile=live-results.json
       - name: Require every live test to run and pass
         if: ${{ !cancelled() }}

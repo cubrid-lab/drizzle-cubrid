@@ -7,7 +7,7 @@
 // of skipping, so a missing database can never look like a pass.
 // CUBRID_TEST_EXPECT_VERSION, when set, must prefix the server version.
 import { type CubridClient, type CubridPool, createClient, createPool } from 'cubrid-client';
-import { eq, gt, relations, sql, TransactionRollbackError } from 'drizzle-orm';
+import { and, eq, gt, gte, lt, relations, sql, TransactionRollbackError } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -17,11 +17,14 @@ import {
 	cubridMultiset,
 	cubridSequence,
 	cubridSet,
+	date,
 	datetime,
 	decimal,
 	double,
 	int,
 	mysqlEnum,
+	time,
+	timestamp,
 	varchar,
 } from '../src/columns';
 import { drizzle } from '../src/driver';
@@ -58,8 +61,10 @@ async function ids(table: string): Promise<number[]> {
 }
 
 beforeAll(async () => {
-	client = createClient(config);
-	pool = createPool({ ...config, max: 4 });
+	// drizzle-cubrid reads date and time columns only from a client that decodes
+	// them in UTC (#207); the CI job runs with a non-UTC TZ.
+	client = createClient({ ...config, timezone: 'utc' });
+	pool = createPool({ ...config, timezone: 'utc', max: 4 });
 	const [row] = await client.query<{ v: string }>('SELECT version() AS v');
 	const version = row?.v ?? '';
 	console.log(`CUBRID server version: ${version}`);
@@ -534,4 +539,143 @@ describe('CHAR, decimal and enum elements under both bindings (#191)', () => {
 			expect(row?.en).toEqual([Shade.Light]);
 		});
 	}
+});
+
+describe('DATETIME, TIMESTAMP, DATE and TIME columns round-trip (#207)', () => {
+	const table = name('temporal');
+	const t = cubridTable(table, {
+		id: int('id').primaryKey(),
+		at: datetime('c_dt'),
+		atText: datetime('c_dt_text', { mode: 'string' }),
+		stamp: timestamp('c_ts'),
+		stampText: timestamp('c_ts_text', { mode: 'string' }),
+		day: date('c_d'),
+		dayText: date('c_d_text', { mode: 'string' }),
+		clock: time('c_tm'),
+		ats: cubridSequence<Date>('c_dts', { element: datetime('e') }),
+	});
+	const columns =
+		'id INT PRIMARY KEY, c_dt DATETIME, c_dt_text DATETIME, c_ts TIMESTAMP, c_ts_text TIMESTAMP, c_d DATE, c_d_text DATE, c_tm TIME, c_dts SEQUENCE(DATETIME)';
+
+	// Milliseconds; a date just before UTC midnight, which a local-zone read
+	// would move to another day east or west of UTC; and the ends of the
+	// DATETIME and DATE range. TIMESTAMP holds 1970-2038 in whole seconds.
+	const cases = [
+		{
+			at: new Date('2024-01-02T03:04:05.678Z'),
+			atText: '2024-01-02 03:04:05.678',
+			stamp: new Date('2024-01-02T03:04:05.000Z'),
+			stampText: '2024-01-02 03:04:05',
+			day: new Date('2024-02-03T00:00:00.000Z'),
+			dayText: '2024-02-03',
+			clock: '23:59:58',
+		},
+		{
+			at: new Date('2024-12-31T23:59:59.999Z'),
+			atText: '2024-12-31 23:59:59.999',
+			stamp: new Date('2038-01-19T03:14:07.000Z'),
+			stampText: '1970-01-02 00:00:00',
+			day: new Date('0001-01-01T00:00:00.000Z'),
+			dayText: '9999-12-31',
+			clock: '00:00:00',
+		},
+		{
+			at: new Date('0001-01-01T00:00:00.000Z'),
+			atText: '9999-12-31 23:59:59.999',
+			stamp: new Date('1970-01-01T00:00:01.000Z'),
+			stampText: '2024-06-30 23:59:59',
+			day: new Date('9999-12-31T00:00:00.000Z'),
+			dayText: '0001-01-01',
+			clock: '12:34:56',
+		},
+	];
+	const nulls = {
+		at: null,
+		atText: null,
+		stamp: null,
+		stampText: null,
+		day: null,
+		dayText: null,
+		clock: null,
+		ats: null,
+	};
+
+	beforeAll(() => createTable(table, columns));
+
+	for (const [base, binding] of [
+		[10, 'prepared'],
+		[20, 'literal'],
+	] as const) {
+		for (const [source, label] of [
+			[() => client, 'client'],
+			[() => pool, 'pool transaction'],
+		] as const) {
+			it(`writes, updates, filters and reads every mode exactly (${binding}, ${label})`, async () => {
+				const offset = label === 'client' ? 0 : 5;
+				const run = async (db: ReturnType<typeof drizzle>) => {
+					for (const [i, values] of cases.entries()) {
+						const id = base + offset + i;
+						await db.insert(t).values({ id, ...values, ats: [values.at] });
+						const [row] = await db.select().from(t).where(eq(t.id, id));
+						expect(row).toEqual({ id, ...values, ats: [values.at] });
+						const matched = await db
+							.select({ id: t.id })
+							.from(t)
+							.where(
+								and(
+									// Only this test's rows; the other tests store the same values.
+									gte(t.id, base + offset),
+									lt(t.id, base + offset + 5),
+									eq(t.at, values.at),
+									eq(t.day, values.day),
+									eq(t.stamp, values.stamp),
+									eq(t.clock, values.clock),
+								),
+							);
+						expect(matched).toEqual([{ id }]);
+					}
+					const id = base + offset;
+					const next = cases[1]!;
+					await db.update(t).set({ ...next, ats: [next.at, next.at] }).where(eq(t.id, id));
+					const [updated] = await db.select().from(t).where(eq(t.id, id));
+					expect(updated).toEqual({ id, ...next, ats: [next.at, next.at] });
+					await db.update(t).set(nulls).where(eq(t.id, id));
+					const [cleared] = await db.select().from(t).where(eq(t.id, id));
+					expect(cleared).toEqual({ id, ...nulls });
+				};
+				if (label === 'client') {
+					await run(drizzle(source(), { binding }));
+				} else {
+					await drizzle(source(), { binding }).transaction(async (tx) => run(tx as never));
+				}
+			});
+		}
+	}
+
+	it('refuses a TIMESTAMP with milliseconds before writing it', async () => {
+		const db = drizzle(client);
+		await expect(db.insert(t).values({ id: 90, stamp: new Date('2024-01-02T03:04:05.678Z') })).rejects.toThrow(
+			/whole seconds/,
+		);
+		expect(await ids(table)).not.toContain(90);
+	});
+
+	it('refuses a local-zone client unless the process zone is UTC', async () => {
+		const local = createClient(config);
+		try {
+			const db = drizzle(local);
+			const read = db.select().from(t);
+			const offsets = [new Date(2024, 0, 1), new Date(2024, 6, 1)].map((d) => d.getTimezoneOffset());
+			if (offsets.every((offset) => offset === 0)) {
+				await expect(read).resolves.toBeDefined();
+			} else {
+				await expect(read).rejects.toThrow(/timezone: 'utc'/);
+				await expect(db.transaction(async (tx) => tx.select({ at: t.at }).from(t))).rejects.toThrow(/TZ=UTC/);
+			}
+			// Statements that read no date column are unaffected.
+			await expect(db.select({ id: t.id }).from(t)).resolves.toBeDefined();
+		} finally {
+			await local.close();
+		}
+	});
 });
