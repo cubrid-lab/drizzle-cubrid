@@ -287,7 +287,11 @@ await db.transaction(async (tx) => {
 }, { isolationLevel: "serializable" });
 ```
 
-A custom client object with a `transaction(callback, options?)` method must
+A custom client object passed to `drizzle()` must return each row as an array
+of its values in select-list order from `query(sql, params, { rowMode: "array" })`,
+as cubrid-client 1.4.0 does; selects that map fields refuse object rows, because
+a column label shared by two tables keeps only one value in an object. A custom
+client with a `transaction(callback, options?)` method must
 run `callback` with a client for the transaction's connection, commit when it
 resolves and roll back when it rejects. One without `transaction()` falls back
 to `BEGIN`/`COMMIT` on its single connection, which is only safe if nothing
