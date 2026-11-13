@@ -23,7 +23,7 @@ and instructions for contributing to the project.
 
 - Node.js 22 recommended for local **developer tooling**. The package still declares Node >=18 for consumers; its CI and dependency compatibility require a separate reviewed decision ([#100](https://github.com/cubrid-lab/drizzle-cubrid/issues/100)).
 - Git and npm
-- A disposable CUBRID server will be needed for future live integration tests, but no root Docker Compose or runnable integration test file is currently checked in.
+- A disposable CUBRID server for the live tests (`tests/integration.test.ts`, `npm run integration`); see [Real CUBRID integration](#real-cubrid-integration) below. No root Docker Compose file is checked in.
 - [Development setup and actual blockers](docs/DEVELOPMENT_SETUP.md)
 
 ### Installation

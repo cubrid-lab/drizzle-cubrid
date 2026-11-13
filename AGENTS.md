@@ -207,7 +207,7 @@ flowchart TD
     A --> E[types.test.ts - SET, MULTISET, SEQUENCE, MONETARY]
     A --> F[query.test.ts - SELECT, INSERT, UPDATE, DELETE]
     A --> G[table.test.ts - cubridTable builder]
-    A --> H[Future real-CUBRID integration tests - not yet checked in]
+    A --> H[integration.test.ts - Live CUBRID 11.4 tests, npm run integration]
 ```
 
 ### Testing Approach

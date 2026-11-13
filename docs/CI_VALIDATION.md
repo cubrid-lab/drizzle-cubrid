@@ -14,13 +14,13 @@ Independent security workflows are not replaced by the docs-only classifier. A d
 
 ## Fixed Node.js support contract
 
-`drizzle-cubrid@1.x` must retain the Node 18 minimum throughout the 1.x generation. We use newer Node 20/22 toolchains for Vitest 4 and development dependencies, and a **separate Node 18 job** for the actual packed npm package. A clean Node 18 consumer uses the precise `drizzle-orm` and `cubrid-client` peer versions resolved in the candidate lockfile and checks both CommonJS `require()` and ESM `import()`, including creation of a representative table/collection column. A green Node 22 build alone is **not** Node 18 compatibility evidence.
+`drizzle-cubrid@1.x` must retain the Node 18 minimum throughout the 1.x generation. We use newer Node 20/22 toolchains for Vitest and development dependencies, and a **separate Node 18 job** for the actual packed npm package. A clean Node 18 consumer uses the precise `drizzle-orm` and `cubrid-client` peer versions resolved in the candidate lockfile and checks both CommonJS `require()` and ESM `import()`, including creation of a representative table/collection column. A green Node 22 build alone is **not** Node 18 compatibility evidence.
 
 ## Coverage and database proof
 
 The current Vitest configuration enforces **95%** for statements, branches, functions and lines. The threshold is not reduced or marked optional just to make CI pass. The Node 18 consumer job is separate from Vitest coverage.
 
-This repository does **not** yet have a complete live-CUBRID integration harness for Drizzle-generated SQL. A green unit/packaging CI run or a successful `CI gate` must never be described as evidence that real CUBRID SELECT/INSERT, transaction recovery, generated keys, catalog reflection or migrations passed. The real-database test work is tracked in [issue #164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164), with its own actual versions, SQL assertions and nonzero test counts. The final release candidate must complete that verification before database behavior is advertised as supported.
+The live suite (`tests/integration.test.ts`) runs against CUBRID 11.4 only and covers the behavior its test names describe (transactions, joins, write metadata, relational queries without `with`, collections, binding modes, date and time columns, replacements for refused SQL). Unit and packaging jobs are not database evidence, and nothing in CI verifies other server versions, catalog reflection or migrations. The real-database test work is tracked in [issue #164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164), with its own actual versions, SQL assertions and nonzero test counts. The final release candidate must complete that verification before database behavior is advertised as supported.
 
 ## Merge discipline
 
