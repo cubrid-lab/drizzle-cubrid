@@ -1,7 +1,7 @@
 import { entityKind } from 'drizzle-orm/entity';
 import { MySqlDialect } from 'drizzle-orm/mysql-core/dialect';
 import type { BuildRelationalQueryResult } from 'drizzle-orm/relations';
-import type { Query, SQL } from 'drizzle-orm/sql/sql';
+import { type Query, type SQL, sql as sqlTag } from 'drizzle-orm/sql/sql';
 
 type RelationalQueryArgs = Parameters<MySqlDialect['buildRelationalQuery']>[0];
 
@@ -28,7 +28,7 @@ function assertNoRelations(config: RelationalQueryArgs['queryConfig']): void {
 	}
 }
 
-type RelationalFields = BuildRelationalQueryResult['selection'][number]['field'][];
+export type RelationalFields = BuildRelationalQueryResult['selection'][number]['field'][];
 
 /** The selected fields of each relational query, from its SQL to the built Query. */
 const relationalSqlFields = new WeakMap<object, RelationalFields>();
@@ -43,8 +43,25 @@ export function fieldsOfRelationalQuery(query: Query): RelationalFields | undefi
 	return relationalQueryFields.get(query);
 }
 
-function recordFields<T extends BuildRelationalQueryResult>(result: T): T {
-	relationalSqlFields.set(result.sql, result.selection.map((selected) => selected.field));
+/**
+ * The `extras` as the application wrote them. Drizzle rebuilds each extra
+ * before selecting it and drops its decoder, so `sql`...`.mapWith(column)`
+ * would no longer show that it reads a date or time column.
+ */
+function userExtras(args: RelationalQueryArgs): RelationalFields {
+	const { queryConfig, tableConfig } = args;
+	if (queryConfig === true || !queryConfig.extras) {
+		return [];
+	}
+	const extras =
+		typeof queryConfig.extras === 'function'
+			? queryConfig.extras(tableConfig.columns as never, { sql: sqlTag })
+			: queryConfig.extras;
+	return Object.values(extras);
+}
+
+function recordFields<T extends BuildRelationalQueryResult>(args: RelationalQueryArgs, result: T): T {
+	relationalSqlFields.set(result.sql, [...result.selection.map((selected) => selected.field), ...userExtras(args)]);
 	return result;
 }
 
@@ -54,14 +71,14 @@ export class CubridDialect extends MySqlDialect {
 
 	override buildRelationalQuery(args: RelationalQueryArgs): ReturnType<MySqlDialect['buildRelationalQuery']> {
 		assertNoRelations(args.queryConfig);
-		return recordFields(super.buildRelationalQuery(args));
+		return recordFields(args, super.buildRelationalQuery(args));
 	}
 
 	override buildRelationalQueryWithoutLateralSubqueries(
 		args: Parameters<MySqlDialect['buildRelationalQueryWithoutLateralSubqueries']>[0],
 	): ReturnType<MySqlDialect['buildRelationalQueryWithoutLateralSubqueries']> {
 		assertNoRelations(args.queryConfig);
-		return recordFields(super.buildRelationalQueryWithoutLateralSubqueries(args));
+		return recordFields(args, super.buildRelationalQueryWithoutLateralSubqueries(args));
 	}
 
 	override sqlToQuery(sql: SQL, invokeSource?: 'indexes'): ReturnType<MySqlDialect['sqlToQuery']> {

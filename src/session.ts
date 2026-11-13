@@ -24,7 +24,7 @@ import { type Assume } from 'drizzle-orm/utils';
 import * as drizzleUtils from 'drizzle-orm/utils';
 
 import { isCubridTemporalColumn, TEMPORAL_COLUMN_TYPES } from './columns/temporal.js';
-import { fieldsOfRelationalQuery } from './dialect.js';
+import { fieldsOfRelationalQuery, type RelationalFields } from './dialect.js';
 import { assertUtcDecoding } from './timezone.js';
 
 type QueryRow = Record<string, unknown>;
@@ -316,7 +316,7 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 		 */
 		private zoneClient?: CubridQueryable,
 		/** The fields a relational query selects; it has no `fields`. */
-		private relationalFields?: unknown[],
+		private relationalFields?: RelationalFields,
 	) {
 		super(cache, statementMetadata, cacheConfig);
 	}
@@ -348,8 +348,9 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 		const rowArrays = rows.map(assertArrayRow);
 
 		if (this.customResultMapper) {
-			// A relational query whose fields the dialect did not record: refuse
-			// Date cells rather than let a local-zone client's Dates through.
+			// A relational query whose fields were not recorded, as when the
+			// session was built with a plain MySqlDialect: refuse Date cells
+			// rather than let a local-zone client's Dates through.
 			if (!this.fields && !this.relationalFields && rowArrays.some((row) => row.some((cell) => cell instanceof Date))) {
 				await assertUtcDecoding(this.zoneClient ?? this.client);
 			}
