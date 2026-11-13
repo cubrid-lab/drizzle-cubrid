@@ -7,10 +7,11 @@ Solutions for common issues when using `drizzle-cubrid`.
 ### Peer dependency warnings
 
 ```
-npm warn peer drizzle-orm@">=0.38" from drizzle-cubrid@0.2.0
+npm warn peer drizzle-orm@">=0.44.1 <0.46.0" from drizzle-cubrid
 ```
 
-Install all required peer dependencies:
+Install all required peer dependencies within the supported ranges (see
+[peer dependency compatibility](COMPATIBILITY.md)):
 
 ```bash
 npm install drizzle-cubrid drizzle-orm cubrid-client

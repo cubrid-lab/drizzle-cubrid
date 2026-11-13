@@ -17,4 +17,4 @@
 
 ## Compatibility
 
-Node.js 18+, Drizzle ORM 0.30+, CUBRID 10.2–11.4
+Node.js 18+, `drizzle-orm` `>=0.44.1 <0.46.0`, `cubrid-client` `>=1.4.0 <2.0.0`. See [peer dependency compatibility](docs/COMPATIBILITY.md) for what is verified. Real CUBRID server coverage is tracked in #164.

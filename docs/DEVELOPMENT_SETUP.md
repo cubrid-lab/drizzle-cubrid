@@ -40,7 +40,7 @@ npm run build
 npm pack --dry-run
 ```
 
-Review emitted ESM/CJS and `.d.ts` with an external TypeScript consumer (required for release; **not yet established as an automated check**). `peerDependencies` currently allow `drizzle-orm >=0.38.0` and `cubrid-client >=0.1.0`; these ranges are **not** demonstrated support and require a tested compatibility matrix before stable 1.x. MySQL-based `examples/migration/drizzle.config.ts` is not a validated CUBRID migrator.
+Review emitted ESM/CJS and `.d.ts` with an external TypeScript consumer (required for release; **not yet established as an automated check**). `peerDependencies` are `drizzle-orm >=0.44.1 <0.46.0` and `cubrid-client >=1.4.0 <2.0.0`, bounded by the measurements in [peer dependency compatibility](COMPATIBILITY.md); CI checks the lockfile version and the `drizzle-orm` floor. MySQL-based `examples/migration/drizzle.config.ts` is not a validated CUBRID migrator.
 
 ## Setup exit criteria
 

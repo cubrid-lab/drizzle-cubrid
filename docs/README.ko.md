@@ -37,8 +37,9 @@ CUBRID는 한국 공공기관 및 기업 환경에서 널리 사용되는 고성
 ## 요구 사항
 
 - Node.js 18+
-- Drizzle ORM 0.38+
-- [cubrid-client](https://github.com/cubrid-labs/cubrid-client) 0.1.0+
+- `drizzle-orm` `>=0.44.1 <0.46.0`
+- [cubrid-client](https://github.com/cubrid-lab/cubrid-client) `>=1.4.0 <2.0.0`
+- 검증 범위는 [peer dependency compatibility](COMPATIBILITY.md)를 참고하세요.
 
 ## 설치
 

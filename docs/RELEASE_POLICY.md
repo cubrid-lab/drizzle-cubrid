@@ -90,7 +90,7 @@ Design PRs may be developed as drafts in parallel, but **must not be treated as 
 
 ## TypeScript / Drizzle policy
 
-- Current declared package version: `0.2.1`. `cubrid-client` has published `1.2.0`, but current adapter peer ranges `drizzle-orm >=0.38.0` and `cubrid-client >=0.1.0` are **not** evidence of tested compatibility.
+- Current declared package version: `0.2.1`. Peer ranges are `drizzle-orm >=0.44.1 <0.46.0` and `cubrid-client >=1.4.0 <2.0.0`; [peer dependency compatibility](COMPATIBILITY.md) records which versions were measured and how.
 - Target `drizzle-cubrid@1.0.0` only after its independent CUBRID SQL dialect, types, execution, transactions, and any advertised migrations are validated. The target driver-generation is verified `cubrid-client@1.x`; do not assume the full 1.x interval works without tests.
 - Drizzle ORM API/SQL compiler compatibility is an **independent** axis from the driver version. Bound peer ranges after checking the oldest and newest versions actually verified.
 - ESM/CJS exports, emitted `.d.ts`, public schema/query inference and Node.js minimum are versioned APIs. Test an installed `npm pack` tarball with real ESM/CJS/TypeScript consumers, not only in-repo imports.
