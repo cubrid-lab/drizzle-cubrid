@@ -186,9 +186,9 @@ function toCollectionSql(kind: CollectionKind, castType: string | undefined, val
 	if (!Array.isArray(value)) {
 		throw new TypeError(`${kind} column value must be an array, got ${describeValue(value)}`);
 	}
-	for (const [index, element] of value.entries()) {
+	value.forEach((element, index) => {
 		assertElement(kind, element, index);
-	}
+	});
 	const elements = sql.join(
 		value.map((element) => sql`${toDriverElement(element)}`),
 		sql`, `,

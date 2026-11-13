@@ -110,10 +110,17 @@ jobs:
         run: |
           set -euo pipefail
           printf 'export const probe = "double quotes and no semicolon"\n' > src/format-probe.ts
-          if npx biome ci src/format-probe.ts; then
+          # Require the formatting error itself: biome ci also exits non-zero
+          # when it checks no file at all.
+          if out=$(npx biome ci src/format-probe.ts 2>&1); then
             echo '::error::biome ci accepted a misformatted file'
             exit 1
           fi
+          grep -q 'File content differs from formatting output' <<<"$out" || {
+            echo "$out"
+            echo '::error::biome ci failed without reporting the formatting difference'
+            exit 1
+          }
           rm src/format-probe.ts
 
   peer-floor:
