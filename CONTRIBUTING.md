@@ -110,6 +110,34 @@ npm run lint
 
 ---
 
+## Temporary scripts, probes and workflows
+
+One-off compatibility probes, debugging helpers, migration code and workaround
+workflows are temporary. Prefer running them ephemerally: keep the script in a
+scratch directory or a local branch, and commit only the evidence and the
+permanent test it justifies. If a temporary file must be committed, its PR
+records:
+
+- **Purpose:** what it checks or works around, with the exact `drizzle-orm`,
+  `cubrid-client`, Node and CUBRID versions it applies to.
+- **Owner and issue:** the person responsible and the local issue tracking it.
+- **Removal event:** the condition that ends it, such as a merged fix, a
+  released version or a closed issue, rather than a date alone.
+- **Evidence to keep:** the issue comment, live test or CHANGELOG entry that
+  must remain after removal. Coverage gates and live CUBRID tests are never
+  removed with it.
+
+When the removal event happens, the owner records a retain or remove decision
+in the cleanup issue (#172) after checking callers in tests, builds, CI,
+published files and docs. No scheduled audit or extra required CI is added for
+this.
+
+**Example:** the #189 compatibility probe ran 93 Drizzle operations against a
+throwaway CUBRID 11.4 container from scratch scripts that were never
+committed. What was kept: the evidence matrix in the #189 issue comments, the
+refusals and their unit tests (#218), and the live test that runs the suggested
+alternatives in the **Live CUBRID 11.4** job.
+
 ## Pull Request Review and Merge Policy
 
 The same contributor process applies to human-written and AI-assisted

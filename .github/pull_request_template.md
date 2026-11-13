@@ -25,6 +25,7 @@ Report commands **actually run**, their results and skips. Mocked SQL and covera
 - [ ] For runtime/packaging changes: install the built npm tarball and verify **Node 18** ESM/CJS consumers with the tested `cubrid-client` and `drizzle-orm` peer versions. Every `drizzle-cubrid@1.x` release retains Node 18 support.
 - [ ] No unsupported MySQL SQL, silently discarded clause, fabricated generated ID or swallowed transaction failure is claimed as CUBRID-native correctness.
 - [ ] Documentation, supported versions, migration guidance and release notes match validated behavior.
+- [ ] Any temporary script, probe or workflow committed here states its purpose, owner/issue, removal event and the evidence to keep (see CONTRIBUTING, "Temporary scripts, probes and workflows"), or N/A.
 
 ## Merge and release coordination
 
