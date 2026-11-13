@@ -24,9 +24,10 @@
 //                 .shouldDisableInsert, .decoder on anything but `this`
 //                 (also destructured or via Reflect.get), and any cast
 //                 through `unknown`, `any` or `never`
-//   - native-import: in native code, an import that leaves src/native through
-//                 a relative path, the `~/` alias or the package's own name,
-//                 since the 0.x modules are built on Drizzle's MySQL classes
+//   - native-import: in native code, any import outside an allowlist (files in
+//                 src/native, drizzle-orm's neutral entry points,
+//                 cubrid-client, node: built-ins), since every other path can
+//                 reach the 0.x modules built on Drizzle's MySQL classes
 //
 // The 0.x code still depends on Drizzle's MySQL classes. Each of those
 // findings is pinned in scripts/dialect-boundary-baseline.json by scope,
@@ -80,6 +81,21 @@ export function bannedSpecifier(spec) {
 	return FOREIGN_DRIVER.test(spec) ? spec : undefined;
 }
 
+/**
+ * Native code may import only: files inside src/native (by relative path or
+ * the `~/native/` alias), drizzle-orm's neutral entry points, cubrid-client and
+ * Node built-ins. Anything else, including a bare `src/...` path through
+ * tsconfig's baseUrl, `~/` outside native, or the package's own name, can
+ * reach the MySQL-based 0.x modules.
+ */
+export function nativeMayImport(file, spec) {
+	if (spec.startsWith('.')) return posix.normalize(posix.join(posix.dirname(file), spec)).startsWith(NATIVE_DIR);
+	if (spec.startsWith('~/')) return posix.normalize(`src/${spec.slice(2)}`).startsWith(NATIVE_DIR);
+	if (spec === 'drizzle-orm' || spec.startsWith('drizzle-orm/')) return bannedSpecifier(spec) === undefined;
+	if (spec === 'cubrid-client') return true;
+	return spec.startsWith('node:');
+}
+
 function scriptKind(file) {
 	return /\.(?:ts|mts|cts)$/.test(file) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
 }
@@ -104,16 +120,7 @@ export function scanText(file, text, scope = 'src') {
 	const checkSpecifier = (spec, pos) => {
 		const banned = bannedSpecifier(spec);
 		if (banned) add('import', banned, pos);
-		if (inNative) {
-			// Native code may import only within src/native: not through a relative
-			// path, the `~/` alias for src/, or the package's own name, all of
-			// which reach the MySQL-based 0.x modules.
-			let target;
-			if (spec.startsWith('.')) target = posix.normalize(posix.join(posix.dirname(file), spec));
-			else if (spec.startsWith('~/')) target = posix.normalize(`src/${spec.slice(2)}`);
-			if (spec === 'drizzle-cubrid' || spec.startsWith('drizzle-cubrid/')) add('native-import', spec, pos);
-			else if (target !== undefined && !target.startsWith(NATIVE_DIR)) add('native-import', spec, pos);
-		}
+		if (inNative && !banned && !nativeMayImport(file, spec)) add('native-import', spec, pos);
 	};
 
 	for (const ref of [...source.typeReferenceDirectives, ...source.referencedFiles]) {
@@ -137,8 +144,7 @@ export function scanText(file, text, scope = 'src') {
 			const callee = node.expression;
 			const loader =
 				callee.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(callee) || ts.isCallExpression(callee);
-			const nativeLocal = inNative && /^(?:\.|~\/|drizzle-cubrid(?:\/|$))/.test(spec ?? '');
-			if (spec !== undefined && loader && (bannedSpecifier(spec) || nativeLocal)) {
+			if (spec !== undefined && loader && (bannedSpecifier(spec) || (inNative && !nativeMayImport(file, spec)))) {
 				checkSpecifier(spec, node.arguments[0].getStart(source));
 			}
 		}

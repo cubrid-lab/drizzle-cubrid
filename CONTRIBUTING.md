@@ -128,9 +128,12 @@ reports:
 - in native code (`src/native/**`), any Drizzle internal access outside
   `src/native/internal.ts` (`Symbol.for('drizzle:…')`, `.shouldDisableInsert`,
   `.decoder` other than `this.decoder`, and any cast through `unknown`, `any` or
-  `never`), and any import that leaves `src/native` through a relative path, the
-  `~/` alias or the `drizzle-cubrid` package name, since the 0.x modules are
-  built on Drizzle's MySQL classes
+  `never`), and any import outside an allowlist: files inside `src/native`
+  (relative or `~/native/`), drizzle-orm's neutral entry points,
+  `cubrid-client` and `node:` built-ins. Every other path (`../session.js`,
+  `~/session.js`, `src/session.js`, `drizzle-cubrid`) can reach the 0.x modules
+  built on Drizzle's MySQL classes. Adding a dependency to native code means
+  adding it to the allowlist in the script, in a reviewed PR
 
 Native code may have no findings at all. The 0.x code's existing findings are
 pinned by file, rule and count in `scripts/dialect-boundary-baseline.json`: a

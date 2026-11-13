@@ -83,6 +83,16 @@ describe('native-import rule', () => {
 		expect(native("import { x } from '~/native/internal.js';")).toEqual([]);
 	});
 
+	it('allows native code only an import allowlist, so new path aliases cannot reach 0.x modules', () => {
+		expect(native("import { CubridSession } from 'src/session.js';")).toEqual(['native-import:src/session.js']);
+		expect(native("import { x } from '@/session.js';")).toEqual(['native-import:@/session.js']);
+		expect(native("import { z } from 'zod';")).toEqual(['native-import:zod']);
+		expect(native("import { createClient } from 'cubrid-client';")).toEqual([]);
+		expect(native("import { readFileSync } from 'node:fs';")).toEqual([]);
+		expect(native("import { eq } from 'drizzle-orm';")).toEqual([]);
+		expect(native("import { x } from 'drizzle-orm/mysql-core';")).toEqual(['import:drizzle-orm/mysql-core']);
+	});
+
 	it('allows relative imports that stay inside src/native', () => {
 		expect(native("import { x } from './internal.js';")).toEqual([]);
 		expect(found('src/native/deep/x.ts', "import { y } from '../columns.js';")).toEqual([]);
