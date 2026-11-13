@@ -117,6 +117,34 @@ const page = await db
 // SELECT ... FROM `users` LIMIT 10 OFFSET 20
 ```
 
+CUBRID accepts `OFFSET` only after `LIMIT`, so `.offset()` without `.limit()`
+(also in `db.query` and set operations) is refused; see below.
+
+### SQL that CUBRID rejects
+
+Drizzle's MySQL builders can produce some SQL that CUBRID 11.4 always rejects
+with a generic syntax error (-493). drizzle-cubrid refuses these before
+anything is sent, with an error that says what to use instead
+([#189](https://github.com/cubrid-lab/drizzle-cubrid/issues/189)). The error is
+thrown while the query is built: `await` turns it into a rejection, but calling
+`.then()`, `.catch()`, `.execute()`, `.prepare()` or `db.execute()` on such a
+query throws synchronously, because Drizzle builds the SQL there. The ILIKE
+check also applies to raw SQL passed to `db.execute()`, outside quoted names,
+string literals and comments.
+
+| Refused | Use instead |
+|---|---|
+| `ilike()`, `notIlike()` | `like()`, whose case sensitivity follows the column's collation, or ``like(sql`lower(${col})`, value.toLowerCase())`` |
+| `.offset()` without `.limit()` | add a `.limit()` |
+| `leftJoinLateral()`, `innerJoinLateral()`, `crossJoinLateral()` | a join on a subquery without `LATERAL`, or a separate query |
+| `.for('share')`, `.for('update', { noWait })`, `.for('update', { skipLocked })` | `.for('update')` |
+| `insert().ignore()` | `onDuplicateKeyUpdate()`, or check for the row first |
+| `delete().orderBy()` | `delete().where(...).limit(n)`, or select the keys in order and delete by key |
+
+Not refused, because it is written as raw `sql`: MySQL's `values(col)` inside
+`onDuplicateKeyUpdate({ set })` is rejected by CUBRID. Repeat the inserted
+value instead: `onDuplicateKeyUpdate({ set: { n: 43 } })`.
+
 ### Aggregations
 
 ```ts

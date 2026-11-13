@@ -257,6 +257,13 @@ values beyond 2^53
 related table separately or use a join; native support is tracked in
 [#158](https://github.com/cubrid-lab/drizzle-cubrid/issues/158).
 
+### `... is not supported on CUBRID; ... See .../issues/189`
+
+The query used a builder feature whose SQL CUBRID always rejects, such as
+`ilike()`, `.offset()` without `.limit()`, a lateral join, `.for('share')`,
+`insert().ignore()` or `delete().orderBy()`. The error names what to use
+instead; [QUERIES.md](QUERIES.md#sql-that-cubrid-rejects) lists them all.
+
 ### Relations not showing up in `db.query`
 
 Make sure you export the `relations()` definitions alongside your tables:

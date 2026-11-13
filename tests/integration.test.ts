@@ -7,7 +7,7 @@
 // of skipping, so a missing database can never look like a pass.
 // CUBRID_TEST_EXPECT_VERSION, when set, must prefix the server version.
 import { type CubridClient, type CubridPool, createClient, createPool } from 'cubrid-client';
-import { and, eq, gt, gte, lt, relations, sql, TransactionRollbackError } from 'drizzle-orm';
+import { and, eq, gt, gte, like, lt, relations, sql, TransactionRollbackError } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -706,5 +706,44 @@ describe('DATETIME, TIMESTAMP, DATE and TIME columns round-trip (#207)', () => {
 		} finally {
 			await local.close();
 		}
+	});
+});
+
+describe('the forms suggested in place of refused SQL run on CUBRID (#189)', () => {
+	const table = name('alt');
+	const t = cubridTable(table, { id: int('id').primaryKey(), v: varchar('v', { length: 20 }) });
+
+	beforeAll(async () => {
+		await createTable(table, 'id INT PRIMARY KEY, v VARCHAR(20)');
+		await client.query(`INSERT INTO ${table} VALUES (1, 'a'), (2, 'B'), (3, 'c'), (4, 'D')`);
+	});
+
+	for (const binding of ['prepared', 'literal'] as const) {
+		it(`limit() with offset(), for('update'), delete limit() and like() on lower() (${binding})`, async () => {
+			const db = drizzle(client, { binding });
+
+			await expect(db.select({ id: t.id }).from(t).orderBy(t.id).limit(2).offset(1)).resolves.toEqual([
+				{ id: 2 },
+				{ id: 3 },
+			]);
+			await expect(
+				db
+					.select({ id: t.id })
+					.from(t)
+					.where(like(sql`lower(${t.v})`, 'b')),
+			).resolves.toEqual([{ id: 2 }]);
+			await expect(
+				drizzle(pool, { binding }).transaction((tx) =>
+					tx.select({ id: t.id }).from(t).where(eq(t.id, 1)).for('update'),
+				),
+			).resolves.toEqual([{ id: 1 }]);
+		});
+	}
+
+	it('deletes with limit() and no orderBy()', async () => {
+		const db = drizzle(client);
+		const result = await db.delete(t).where(gte(t.id, 3)).limit(1);
+		expect(result.affectedRows).toBe(1);
+		expect((await ids(table)).length).toBe(3);
 	});
 });
