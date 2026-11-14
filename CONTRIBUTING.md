@@ -130,7 +130,9 @@ reports:
   `.decoder` other than `this.decoder`, and any cast through `unknown`, `any` or
   `never`), and any import outside an allowlist: files inside `src/native`
   (relative or `~/native/`), drizzle-orm's neutral entry points,
-  `cubrid-client` and `node:` built-ins. Every other path (`../session.js`,
+  `cubrid-client` and `node:` built-ins other than `node:module`. `require`
+  used other than as a direct call (`const r = require`) and any
+  `createRequire` are flagged too, since the allowlist cannot follow them. Every other path (`../session.js`,
   `~/session.js`, `src/session.js`, `drizzle-cubrid`) can reach the 0.x modules
   built on Drizzle's MySQL classes. Adding a dependency to native code means
   adding it to the allowlist in the script, in a reviewed PR

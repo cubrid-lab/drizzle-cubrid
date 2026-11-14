@@ -24,7 +24,8 @@
 //                 .shouldDisableInsert, .decoder on anything but `this`
 //                 (also destructured or via Reflect.get), and any cast
 //                 through `unknown`, `any` or `never`
-//   - native-import: in native code, any import outside an allowlist (files in
+//   - native-import: in native code, `require` other than as a direct callee,
+//                 any `createRequire`, and any import outside an allowlist (files in
 //                 src/native, drizzle-orm's neutral entry points,
 //                 cubrid-client, node: built-ins), since every other path can
 //                 reach the 0.x modules built on Drizzle's MySQL classes
@@ -93,7 +94,8 @@ export function nativeMayImport(file, spec) {
 	if (spec.startsWith('~/')) return posix.normalize(`src/${spec.slice(2)}`).startsWith(NATIVE_DIR);
 	if (spec === 'drizzle-orm' || spec.startsWith('drizzle-orm/')) return bannedSpecifier(spec) === undefined;
 	if (spec === 'cubrid-client') return true;
-	return spec.startsWith('node:');
+	// node:module is excluded: createRequire() would load anything.
+	return spec.startsWith('node:') && spec !== 'node:module';
 }
 
 function scriptKind(file) {
@@ -164,6 +166,18 @@ export function scanText(file, text, scope = 'src') {
 			}
 		}
 
+		if (inNative && ts.isIdentifier(node)) {
+			// Loaders the allowlist cannot follow: `require` used other than as
+			// the direct callee of a call (`const r = require; r('../x.js')`),
+			// and createRequire in any form (`createRequire(url)` assigned to a
+			// variable, `module.createRequire`, an `as` alias on import).
+			if (node.text === 'createRequire') add('native-import', 'createRequire', node.getStart(source));
+			if (node.text === 'require') {
+				const target = ts.isPropertyAccessExpression(node.parent) && node.parent.name === node ? node.parent : node;
+				const called = ts.isCallExpression(target.parent) && target.parent.expression === target;
+				if (!called) add('native-import', 'require alias', node.getStart(source));
+			}
+		}
 		if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) {
 			if (FOREIGN_NAME.test(node.text)) add('identifier', node.text, node.getStart(source));
 		} else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
