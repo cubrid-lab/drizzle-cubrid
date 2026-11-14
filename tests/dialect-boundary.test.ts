@@ -84,6 +84,13 @@ describe('native-import rule', () => {
 		expect(native("import { x } from '~/native/internal.js';")).toEqual([]);
 	});
 
+	it('does not mistake ordinary calls with a string argument for imports', () => {
+		expect(native("const n = toSafeInteger('SMALLINT', value); const s = Symbol('cubrid');")).toEqual([]);
+		expect(native("const m = module.require('../session.js');")).toEqual(['native-import:../session.js']);
+		expect(native("const r = createRequire(import.meta.url)('zod');")).toEqual(['native-import:zod']);
+		expect(native("const w = wrap('drizzle-orm/mysql-core');")).toEqual(['import:drizzle-orm/mysql-core']);
+	});
+
 	it('allows native code only an import allowlist, so new path aliases cannot reach 0.x modules', () => {
 		expect(native("import { CubridSession } from 'src/session.js';")).toEqual(['native-import:src/session.js']);
 		expect(native("import { x } from '@/session.js';")).toEqual(['native-import:@/session.js']);

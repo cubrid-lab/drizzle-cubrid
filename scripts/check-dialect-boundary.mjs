@@ -141,13 +141,25 @@ export function scanText(file, text, scope = 'src') {
 			const spec = stringValue(node.argument.literal);
 			if (spec !== undefined) checkSpecifier(spec, node.argument.getStart(source));
 		} else if (ts.isCallExpression(node)) {
-			// import('x'), require('x'), createRequire(...)('x'), or any other
-			// loader-shaped call whose first argument is a string.
 			const spec = stringValue(node.arguments[0]);
 			const callee = node.expression;
+			// Module loaders: import('x'), require('x'), module.require('x') and
+			// createRequire(...)('x'). Only these count for the native import
+			// allowlist, so an ordinary call such as label('SMALLINT', v) is not
+			// mistaken for an import.
 			const loader =
-				callee.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(callee) || ts.isCallExpression(callee);
-			if (spec !== undefined && loader && (bannedSpecifier(spec) || (inNative && !nativeMayImport(file, spec)))) {
+				callee.kind === ts.SyntaxKind.ImportKeyword ||
+				(ts.isIdentifier(callee) && callee.text === 'require') ||
+				(ts.isPropertyAccessExpression(callee) && callee.name.text === 'require') ||
+				(ts.isCallExpression(callee) &&
+					ts.isIdentifier(callee.expression) &&
+					callee.expression.text === 'createRequire');
+			// A banned module name is flagged as the first argument of any
+			// identifier call too, which covers wrapped loaders.
+			const anyCall = loader || ts.isIdentifier(callee) || ts.isCallExpression(callee);
+			if (spec !== undefined && anyCall && bannedSpecifier(spec)) {
+				checkSpecifier(spec, node.arguments[0].getStart(source));
+			} else if (spec !== undefined && loader && inNative && !nativeMayImport(file, spec)) {
 				checkSpecifier(spec, node.arguments[0].getStart(source));
 			}
 		}
