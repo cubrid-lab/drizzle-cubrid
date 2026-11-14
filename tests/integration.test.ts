@@ -1317,6 +1317,21 @@ describe('drizzle-cubrid/native select and session (#158, #160)', () => {
 		]);
 	});
 
+	it("runs a subquery's own having and order by on an aliased sql field (key different from and equal to the alias)", async () => {
+		const cnt = sql<number>`count(*)`.mapWith(Number).as('cnt');
+		const keyed = db
+			.select({ a: books.authorId, n: cnt })
+			.from(books)
+			.groupBy(books.authorId)
+			.having(gt(cnt, 0))
+			.orderBy(desc(cnt))
+			.as('keyed');
+		expect(await db.select().from(keyed).where(gt(keyed.n, 1))).toEqual([{ a: 1n, n: 2 }]);
+		const n = sql<number>`count(*)`.mapWith(Number).as('n');
+		const same = db.select({ a: books.authorId, n }).from(books).groupBy(books.authorId).having(gt(n, 1)).as('same');
+		expect(await db.select().from(same)).toEqual([{ a: 1n, n: 2 }]);
+	});
+
 	it('quotes identifiers with embedded double quotes', async () => {
 		expect(await db.select().from(weird)).toEqual([{ 'co"l': 7 }]);
 	});

@@ -54,7 +54,13 @@ import { CubridTable } from './table.js';
 /** A native table or a native subquery: what `from()` and the joins accept. */
 export type CubridSource = CubridTable | Subquery;
 
-/** The fields of a subquery made with `.as(alias)`, re-pointed at the alias. */
+/**
+ * The fields of a subquery made with `.as(alias)`, re-pointed at the alias.
+ * `sql` fields keep Drizzle's `SQL.Aliased` type, but at runtime they are
+ * plain `sql` expressions reading `"alias"."name"` (`fieldAlias` is
+ * undefined), because Drizzle renders an `SQL.Aliased` in a condition as its
+ * bare name, which CUBRID can find ambiguous.
+ */
 export type CubridAliasedSelection<TSelection, TAlias extends string> = Simplify<{
 	[K in keyof TSelection]: TSelection[K] extends Column
 		? CubridColumn<
@@ -139,7 +145,7 @@ function aliasFields(fields: Record<string, unknown>, alias: string, prefix: str
 	const aliased: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(fields)) {
 		const path = [...prefix, key];
-		const name = outputName(path);
+		const name = outputName(path, value);
 		if (is(value, SQL.Aliased) || (is(value, SQL) && subqueryFieldSource(value) !== undefined)) {
 			const decoder = getSqlDecoder(is(value, SQL) ? value : value.sql) ?? noopDecoder;
 			aliased[key] = markSubqueryField(sql`${sql.identifier(alias)}.${sql.identifier(name)}`.mapWith(decoder), alias);

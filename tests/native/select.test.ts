@@ -200,6 +200,33 @@ describe('golden SQL', () => {
 		);
 	});
 
+	it("keeps a sql field's own alias as its subquery output name, for the subquery's having and order by", () => {
+		const cnt = sql<number>`count(*)`.mapWith(Number).as('cnt');
+		const keyed = db
+			.select({ v: users.name, n: cnt })
+			.from(users)
+			.groupBy(users.name)
+			.having(gt(cnt, 1))
+			.orderBy(desc(cnt))
+			.as('s');
+		expect(db.select().from(keyed).where(gt(keyed.n, 2)).toSQL()).toEqual({
+			sql: 'select "s"."v", "s"."cnt" from (select "users"."name" as "v", count(*) as "cnt" from "users" group by "users"."name" having "cnt" > ? order by "cnt" desc) "s" where "s"."cnt" > ?',
+			params: [1, 2],
+		});
+		const same = sql<number>`count(*)`.mapWith(Number).as('n');
+		const named = db.select({ n: same }).from(users).having(gt(same, 1)).as('t');
+		expect(db.select().from(named).toSQL().sql).toBe(
+			'select "t"."n" from (select count(*) as "n" from "users" having "n" > ?) "t"',
+		);
+		// A sql alias may not clash with another field's output name, ignoring case.
+		expect(() =>
+			db
+				.select({ id: users.id, x: sql`1`.as('ID') })
+				.from(users)
+				.as('u'),
+		).toThrow(/Subquery fields id and ID have the same name ignoring case/);
+	});
+
 	it('qualifies subquery sql fields in conditions (review item 3)', () => {
 		const sq2 = db
 			.select({ uid: users.id, label: sql<string>`upper(${users.name})`.as('name') })
@@ -213,7 +240,7 @@ describe('golden SQL', () => {
 				.where(eq(sq2.label, 'ALICE'))
 				.toSQL(),
 		).toEqual({
-			sql: 'select "posts"."id", "sq2"."label" from "posts" inner join (select "users"."id" as "uid", upper("users"."name") as "label" from "users") "sq2" on "posts"."author_id" = "sq2"."uid" where "sq2"."label" = ?',
+			sql: 'select "posts"."id", "sq2"."name" from "posts" inner join (select "users"."id" as "uid", upper("users"."name") as "name" from "users") "sq2" on "posts"."author_id" = "sq2"."uid" where "sq2"."name" = ?',
 			params: ['ALICE'],
 		});
 	});
@@ -453,7 +480,7 @@ describe('execution and row mapping', () => {
 			.select()
 			.from(sq);
 		expect(q.toSQL().sql).toBe(
-			'select "nested_sq"."id", "nested_sq"."info.name", "nested_sq"."info.n" from (select "users"."id" as "id", "users"."name" as "info.name", 1 as "info.n" from "users") "nested_sq"',
+			'select "nested_sq"."id", "nested_sq"."info.name", "nested_sq"."n" from (select "users"."id" as "id", "users"."name" as "info.name", 1 as "n" from "users") "nested_sq"',
 		);
 		expect(await q).toEqual([{ id: 1n, info: { name: 'a', n: 1 } }]);
 	});

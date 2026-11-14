@@ -90,11 +90,13 @@ export function subqueryFieldSource(field: unknown): string | undefined {
 }
 
 /**
- * The output name of a selected field inside a subquery: its key path, so
- * joined tables that share column names stay distinct (`users.id`, `pets.id`).
+ * The output name of a selected field inside a subquery: a `sql\`...\`.as(name)`
+ * field keeps its own name, so the subquery's own HAVING and ORDER BY can
+ * refer to it; any other field is named by its key path, so joined tables
+ * that share column names stay distinct (`users.id`, `pets.id`).
  */
-export function outputName(path: readonly string[]): string {
-	return path.join('.');
+export function outputName(path: readonly string[], field: unknown): string {
+	return is(field, SQL.Aliased) ? field.fieldAlias : path.join('.');
 }
 
 /** The name a source is referred to by: a table's (alias) name or a subquery's alias. */
@@ -213,8 +215,8 @@ function refuseCollectionParams(chunks: readonly unknown[]): void {
 }
 
 /**
- * The select list. In a subquery (`outputNames`) every field is named by its
- * key path, so outer queries can refer to each one; names must differ
+ * The select list. In a subquery (`outputNames`) every field gets an output
+ * name (see outputName), so outer queries can refer to each one; names must differ
  * ignoring case, as CUBRID compares identifiers that way.
  */
 function selectionSql(fields: readonly OrderedField[], outputNames: boolean): SQL {
@@ -225,7 +227,7 @@ function selectionSql(fields: readonly OrderedField[], outputNames: boolean): SQ
 			if (!outputNames) {
 				return is(field, SQL.Aliased) ? sql`${expression} as ${sql.identifier(field.fieldAlias)}` : sql`${field}`;
 			}
-			const name = outputName(path);
+			const name = outputName(path, field);
 			const clash = seen.get(name.toLowerCase());
 			if (clash !== undefined) {
 				throw new Error(`Subquery fields ${clash} and ${name} have the same name ignoring case; rename one`);
@@ -253,7 +255,7 @@ export class CubridDialect {
 		return { sql: text, params };
 	}
 
-	/** The SELECT; with `outputNames`, as a subquery whose fields are named by key path. */
+	/** The SELECT; with `outputNames`, as a subquery whose every field has an output name. */
 	buildSelectQuery(config: CubridSelectConfig, outputNames = false): SQL {
 		if (config.offset !== undefined && config.limit === undefined) {
 			throw new Error('CUBRID needs limit() with offset(); add .limit() or remove .offset()');
