@@ -50,7 +50,7 @@ flowchart TD
 
 ### Native dialect preview
 
-`drizzle-cubrid/native` is an **experimental preview** of the CUBRID-native dialect that will replace the MySQL-derived classes ([ADR 0007](docs/adr/0007-drizzle-extension-boundary.md)). Today it has `cubridTable()` and column builders with CUBRID types and codecs (`smallint`, `integer`, `bigint`, `numeric`, `float`, `double`, `char`, `varchar`, `string`, `boolean`, date and time, `monetary`, `set`/`multiset`/`sequence`), but no query builder or session yet, so it is **not for production**. See [docs/NATIVE_API.md](docs/NATIVE_API.md).
+`drizzle-cubrid/native` is an **experimental preview** of the CUBRID-native dialect that will replace the MySQL-derived classes ([ADR 0007](docs/adr/0007-drizzle-extension-boundary.md)). Today it has `cubridTable()` and column builders with CUBRID types and codecs (`smallint`, `integer`, `bigint`, `numeric`, `float`, `double`, `char`, `varchar`, `string`, `boolean`, date and time, `monetary`, `set`/`multiset`/`sequence`) and `drizzle(client)` with `select()` (joins, grouping, subqueries, placeholders), but no writes yet, so it is **not for production**. See [docs/NATIVE_API.md](docs/NATIVE_API.md).
 
 ## Installation
 
@@ -351,7 +351,7 @@ try {
 | [Schema Guide](docs/SCHEMA.md) | Column types, CUBRID types, relations, custom types |
 | [Queries Guide](docs/QUERIES.md) | SELECT, INSERT, UPDATE, DELETE, joins, aggregations, raw SQL |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common errors, TypeScript issues, performance tips |
-| [Native API preview](docs/NATIVE_API.md) | Experimental `drizzle-cubrid/native` tables, column builders and codecs |
+| [Native API preview](docs/NATIVE_API.md) | Experimental `drizzle-cubrid/native` tables, column builders, codecs and SELECT |
 | [Schema migration status](examples/migration/README.md) | Native CUBRID migration is not yet supported; no other database dialect fallback |
 
 ## Development

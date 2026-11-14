@@ -7,7 +7,21 @@
 // of skipping, so a missing database can never look like a pass.
 // CUBRID_TEST_EXPECT_VERSION, when set, must prefix the server version.
 import { type CubridClient, type CubridPool, createClient, createPool } from 'cubrid-client';
-import { and, eq, gt, gte, like, lt, relations, sql, TransactionRollbackError } from 'drizzle-orm';
+import {
+	and,
+	asc,
+	count,
+	desc,
+	eq,
+	gt,
+	gte,
+	like,
+	lt,
+	relations,
+	sql,
+	sum,
+	TransactionRollbackError,
+} from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -1014,5 +1028,241 @@ describe('drizzle-cubrid/native column types round-trip through their codecs (#1
 			client.executePrepared(`INSERT INTO "${pairs}" ("a", "b", "c") VALUES (?, ?, ?)`, [1, 'x', 2]),
 		).rejects.toThrow();
 		expect(await client.getPrimaryKey(pairs)).toMatchObject({ columns: ['a', 'b'] });
+	});
+});
+
+describe('drizzle-cubrid/native select and session (#158, #160)', () => {
+	const big = 9007199254740993n; // 2^53 + 1
+	const authors = native.cubridTable(name('nauthors'), {
+		id: native.bigint({ mode: 'bigint' }).primaryKey(),
+		name: native.varchar({ length: 30 }).notNull(),
+		joined: native.datetime(),
+	});
+	const books = native.cubridTable(name('nbooks'), {
+		id: native.integer().primaryKey(),
+		authorId: native.bigint('author_id', { mode: 'bigint' }),
+		name: native.varchar({ length: 30 }).notNull(),
+		price: native.numeric({ precision: 38, scale: 10 }),
+		day: native.date({ mode: 'string' }),
+	});
+	const weird = native.cubridTable(name('we"ird'), { 'co"l': native.integer().primaryKey() });
+	const joined = new Date(Date.UTC(2024, 1, 29, 23, 59, 58, 123));
+
+	let db: ReturnType<typeof native.drizzle<CubridClient>>;
+
+	beforeAll(async () => {
+		for (const table of [authors, books, weird]) {
+			await client.query(createTableSql(table));
+			created.push(`"${native.getTableConfig(table).name.replaceAll('"', '""')}"`);
+		}
+		const a = native.getTableConfig(authors).name;
+		const b = native.getTableConfig(books).name;
+		await client.executePrepared(`INSERT INTO "${a}" ("id", "name", "joined") VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?)`, [
+			1n,
+			'Ann',
+			'2024-02-29 23:59:58.123',
+			big,
+			'Bob',
+			null,
+			3n,
+			'Cy',
+			null,
+		]);
+		await client.executePrepared(
+			`INSERT INTO "${b}" ("id", "author_id", "name", "price", "day") VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)`,
+			[
+				10,
+				1n,
+				'A1',
+				'1234567890123456789012345678.0123456789',
+				'2024-01-02',
+				11,
+				1n,
+				'A2',
+				'0.5',
+				null,
+				12,
+				big,
+				'B1',
+				'2.25',
+				'9999-12-31',
+				13,
+				null,
+				'Orphan',
+				null,
+				null,
+			],
+		);
+		await client.executePrepared(
+			`INSERT INTO "${native.getTableConfig(weird).name.replaceAll('"', '""')}" ("co""l") VALUES (?)`,
+			[7],
+		);
+		db = native.drizzle(client);
+	});
+
+	it('maps joins whose tables share column names by position, with NULLs for unmatched left joins', async () => {
+		const rows = await db
+			.select()
+			.from(authors)
+			.leftJoin(books, eq(authors.id, books.authorId))
+			.orderBy(asc(authors.id), asc(books.id));
+		expect(rows).toEqual([
+			{
+				[native.getTableConfig(authors).name]: { id: 1n, name: 'Ann', joined },
+				[native.getTableConfig(books).name]: {
+					id: 10,
+					authorId: 1n,
+					name: 'A1',
+					price: '1234567890123456789012345678.0123456789',
+					day: '2024-01-02',
+				},
+			},
+			{
+				[native.getTableConfig(authors).name]: { id: 1n, name: 'Ann', joined },
+				[native.getTableConfig(books).name]: { id: 11, authorId: 1n, name: 'A2', price: '0.5000000000', day: null },
+			},
+			{
+				[native.getTableConfig(authors).name]: { id: 3n, name: 'Cy', joined: null },
+				[native.getTableConfig(books).name]: null,
+			},
+			{
+				[native.getTableConfig(authors).name]: { id: big, name: 'Bob', joined: null },
+				[native.getTableConfig(books).name]: {
+					id: 12,
+					authorId: big,
+					name: 'B1',
+					price: '2.2500000000',
+					day: '9999-12-31',
+				},
+			},
+		]);
+	});
+
+	it('runs inner, right and cross joins, partial and nested selections', async () => {
+		const inner = await db
+			.select({ a: authors.name, b: books.name })
+			.from(authors)
+			.innerJoin(books, eq(authors.id, books.authorId))
+			.where(eq(authors.id, big));
+		expect(inner).toEqual([{ a: 'Bob', b: 'B1' }]);
+		const right = await db
+			.select({ author: { id: authors.id, name: authors.name }, book: books.name })
+			.from(authors)
+			.rightJoin(books, eq(authors.id, books.authorId))
+			.orderBy(books.id);
+		expect(right.map((r) => [r.author?.name ?? null, r.book])).toEqual([
+			['Ann', 'A1'],
+			['Ann', 'A2'],
+			['Bob', 'B1'],
+			[null, 'Orphan'],
+		]);
+		expect(right[3]?.author).toBeNull();
+		const cross = await db.select({ n: count() }).from(authors).crossJoin(books);
+		expect(cross).toEqual([{ n: 12 }]);
+	});
+
+	it('groups, filters groups, counts, orders, limits and offsets', async () => {
+		const rows = await db
+			.select({ authorId: books.authorId, n: count(), total: sum(books.price) })
+			.from(books)
+			.where(gt(books.id, 0))
+			.groupBy(books.authorId)
+			.having(({ n }) => gt(n, 1))
+			.orderBy(desc(books.authorId));
+		expect(rows).toEqual([{ authorId: 1n, n: 2, total: '1234567890123456789012345678.5123456789' }]);
+		const page = await db.select({ id: books.id }).from(books).orderBy(books.id).limit(2).offset(1);
+		expect(page).toEqual([{ id: 11 }, { id: 12 }]);
+		const distinct = await db
+			.selectDistinct({ a: books.authorId })
+			.from(books)
+			.where(gt(books.id, 10))
+			.orderBy(books.authorId);
+		expect(distinct.map((r) => r.a)).toEqual([null, 1n, big]);
+	});
+
+	it('selects from and joins a subquery', async () => {
+		const counts = db
+			.select({ authorId: books.authorId, n: sql<number>`count(*)`.mapWith(Number).as('n') })
+			.from(books)
+			.groupBy(books.authorId)
+			.as('counts');
+		expect(await db.select().from(counts).where(gt(counts.n, 1))).toEqual([{ authorId: 1n, n: 2 }]);
+		const rows = await db
+			.select({ name: authors.name, n: counts.n })
+			.from(authors)
+			.leftJoin(counts, eq(authors.id, counts.authorId))
+			.orderBy(authors.id);
+		expect(rows).toEqual([
+			{ name: 'Ann', n: 2 },
+			{ name: 'Cy', n: null },
+			{ name: 'Bob', n: 1 },
+		]);
+	});
+
+	it('runs prepared queries with placeholders, and literal binding', async () => {
+		const byId = db
+			.select({ name: authors.name })
+			.from(authors)
+			.where(eq(authors.id, sql.placeholder('id')))
+			.limit(sql.placeholder('n'))
+			.prepare();
+		expect(await byId.execute({ id: big, n: 1 })).toEqual([{ name: 'Bob' }]);
+		expect(await byId.execute({ id: 1n, n: 1 })).toEqual([{ name: 'Ann' }]);
+		const literal = native.drizzle(client, { binding: 'literal' });
+		expect(await literal.select({ id: authors.id }).from(authors).where(eq(authors.name, 'Bob'))).toEqual([
+			{ id: big },
+		]);
+		expect(await literal.execute(sql`select ${"it's"} as v from db_root`)).toEqual([{ v: "it's" }]);
+		expect(await literal.select({ n: books.name }).from(books).where(eq(books.price, '0.5'))).toEqual([{ n: 'A2' }]);
+	});
+
+	it('reads date and time columns from a UTC client and refuses a local-zone one', async () => {
+		expect(await db.select({ joined: authors.joined }).from(authors).where(eq(authors.id, 1n))).toEqual([{ joined }]);
+		expect(await db.select({ joined: authors.joined }).from(authors).where(eq(authors.joined, joined))).toEqual([
+			{ joined },
+		]);
+		const local = createClient(config);
+		try {
+			const localDb = native.drizzle(local);
+			await expect(localDb.select({ joined: authors.joined }).from(authors)).rejects.toThrow(/UTC wall clock/);
+			await expect(localDb.select({ day: books.day }).from(books)).rejects.toThrow(/UTC wall clock/);
+			expect(await localDb.select({ id: authors.id }).from(authors).where(eq(authors.id, 3n))).toEqual([{ id: 3n }]);
+		} finally {
+			await local.close();
+		}
+	});
+
+	it('locks rows with for update inside a cubrid-client transaction', async () => {
+		const name = await client.transaction(async (tx) => {
+			const txDb = native.drizzle(tx);
+			const rows = await txDb
+				.select({ id: authors.id, name: authors.name })
+				.from(authors)
+				.where(eq(authors.id, big))
+				.for('update');
+			return rows[0]?.name;
+		});
+		expect(name).toBe('Bob');
+		expect(() => db.select({ n: count() }).from(books).groupBy(books.authorId).for('update').toSQL()).toThrow(/-494/);
+		await expect(
+			client.queryPrepared(
+				`SELECT COUNT(*) FROM "${native.getTableConfig(books).name}" GROUP BY "author_id" FOR UPDATE`,
+			),
+		).rejects.toThrow();
+	});
+
+	it('quotes identifiers with embedded double quotes', async () => {
+		expect(await db.select().from(weird)).toEqual([{ 'co"l': 7 }]);
+	});
+
+	it('runs raw statements with db.execute()', async () => {
+		const rows = await db.execute<{ n: number }>(sql`select count(*) as n from ${authors} where ${authors.id} > ${1n}`);
+		expect(rows).toEqual([{ n: 2n }]);
+	});
+
+	it('passes driver errors through with their code', async () => {
+		const error = await db.execute(sql`select * from ${sql.identifier(name('missing'))}`).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(Error);
+		expect(typeof (error as { code?: unknown }).code).toBe('number');
 	});
 });

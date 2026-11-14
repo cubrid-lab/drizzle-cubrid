@@ -2,7 +2,8 @@
 import { getTableColumns, getTableName, is, sql, Table } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
-import { createTableSql, quoteIdentifier } from '../../src/native/ddl';
+import { createTableSql } from '../../src/native/ddl';
+import { quoteIdentifier } from '../../src/native/dialect';
 import {
 	bigint,
 	boolean,
@@ -165,10 +166,13 @@ describe('createTableSql (test-only DDL)', () => {
 		expect(() => createTableSql(arrayDefault)).toThrow(/DEFAULT for column tags cannot be rendered: object/);
 	});
 
-	it('double-quotes identifiers and refuses ones it cannot quote', () => {
+	it('double-quotes identifiers, doubling embedded quotes', () => {
 		expect(quoteIdentifier('order')).toBe('"order"');
 		expect(quoteIdentifier('한글')).toBe('"한글"');
-		expect(() => quoteIdentifier('a"b')).toThrow(/cannot be double-quoted/);
-		expect(() => quoteIdentifier('')).toThrow(/cannot be double-quoted/);
+		expect(quoteIdentifier('a"b')).toBe('"a""b"');
+		expect(createTableSql(cubridTable('we"ird', { 'co"l': integer() }))).toBe(
+			'CREATE TABLE "we""ird" (\n\t"co""l" INTEGER\n)',
+		);
+		expect(() => quoteIdentifier('')).toThrow(/cannot be empty/);
 	});
 });

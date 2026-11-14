@@ -1,7 +1,7 @@
 // drizzle-cubrid/native: the CUBRID-native dialect (experimental preview).
 //
-// This entry point has table and column declarations with their codecs only;
-// there is no query builder or session yet (#158, #160). See docs/NATIVE_API.md.
+// Tables, column builders with codecs, and drizzle() with select() and
+// execute() (#158, #160); no writes yet (#159). See docs/NATIVE_API.md.
 // It must never import the 0.x modules, which are built on Drizzle's MySQL
 // classes (ADR 0003, ADR 0007); scripts/check-dialect-boundary.mjs enforces it.
 
@@ -71,6 +71,17 @@ export {
 	timestamp,
 	varchar,
 } from './columns/index.js';
+export { CubridDatabase, type CubridDrizzleConfig, type CubridSelectedFields, drizzle } from './db.js';
+export { CubridDialect, quoteIdentifier } from './dialect.js';
+export {
+	type CubridAliasedSelection,
+	CubridPreparedSelect,
+	CubridSelect,
+	CubridSelectBuilder,
+	type CubridSource,
+	type CubridSubquery,
+} from './select.js';
+export { type CubridBinding, type CubridNativeClient, CubridSession } from './session.js';
 export {
 	type BuildCubridColumns,
 	CubridPrimaryKey,

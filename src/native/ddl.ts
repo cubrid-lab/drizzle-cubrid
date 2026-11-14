@@ -2,23 +2,15 @@
 // declared column type is valid CUBRID DDL. It is internal and not exported
 // from `drizzle-cubrid/native`: schema migrations are #163.
 //
-// Identifiers are double-quoted. CUBRID 11.4 also accepts brackets and
-// backticks (ADR 0007, decision 7); the quoting of generated queries is
-// decided in #158. A name containing a double quote is refused rather than
-// escaped.
+// Identifiers are double-quoted with embedded quotes doubled, as in queries
+// (see quoteIdentifier in dialect.ts).
 
 import { is } from 'drizzle-orm/entity';
 import { SQL } from 'drizzle-orm/sql/sql';
 import { getTableName } from 'drizzle-orm/table';
 import type { CubridColumn } from './columns/common.js';
+import { quoteIdentifier } from './dialect.js';
 import { type CubridTable, getTableConfig } from './table.js';
-
-export function quoteIdentifier(name: string): string {
-	if (name === '' || name.includes('"')) {
-		throw new Error(`Identifier ${JSON.stringify(name)} cannot be double-quoted`);
-	}
-	return `"${name}"`;
-}
 
 /** A SQL literal of a default value after the column's codec. */
 function literal(value: unknown, column: CubridColumn): string {
