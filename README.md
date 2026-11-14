@@ -48,6 +48,10 @@ flowchart TD
 
 **Node support policy:** The planned `drizzle-cubrid@1.x` line will support **Node 18 throughout all 1.x releases**, matching `cubrid-client@1.x`'s runtime generation without synchronizing patch/minor versions. Node 22 is used for modern development tools only. Raising the runtime minimum is a possible **2.0 MAJOR** change requiring review, never a 1.x tooling fix. See [ADR 0006](docs/adr/0006-node-18-support-through-1x.md); the packed adapter and its tested peer dependencies require independent Node 18 consumer checks.
 
+### Native dialect preview
+
+`drizzle-cubrid/native` is an **experimental preview** of the CUBRID-native dialect that will replace the MySQL-derived classes ([ADR 0007](docs/adr/0007-drizzle-extension-boundary.md)). Today it has `cubridTable()` and column builders with CUBRID types and codecs (`smallint`, `integer`, `bigint`, `numeric`, `float`, `double`, `char`, `varchar`, `string`, `boolean`, date and time, `monetary`, `set`/`multiset`/`sequence`), but no query builder or session yet, so it is **not for production**. See [docs/NATIVE_API.md](docs/NATIVE_API.md).
+
 ## Installation
 
 ```bash
@@ -347,6 +351,7 @@ try {
 | [Schema Guide](docs/SCHEMA.md) | Column types, CUBRID types, relations, custom types |
 | [Queries Guide](docs/QUERIES.md) | SELECT, INSERT, UPDATE, DELETE, joins, aggregations, raw SQL |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common errors, TypeScript issues, performance tips |
+| [Native API preview](docs/NATIVE_API.md) | Experimental `drizzle-cubrid/native` tables, column builders and codecs |
 | [Schema migration status](examples/migration/README.md) | Native CUBRID migration is not yet supported; no other database dialect fallback |
 
 ## Development

@@ -24,7 +24,8 @@
 //                 .shouldDisableInsert, .decoder on anything but `this`
 //                 (also destructured or via Reflect.get), and any cast
 //                 through `unknown`, `any` or `never`
-//   - native-import: in native code, any import outside an allowlist (files in
+//   - native-import: in native code, `require` other than as a direct callee,
+//                 any `createRequire`, and any import outside an allowlist (files in
 //                 src/native, drizzle-orm's neutral entry points,
 //                 cubrid-client, node: built-ins), since every other path can
 //                 reach the 0.x modules built on Drizzle's MySQL classes
@@ -93,7 +94,8 @@ export function nativeMayImport(file, spec) {
 	if (spec.startsWith('~/')) return posix.normalize(`src/${spec.slice(2)}`).startsWith(NATIVE_DIR);
 	if (spec === 'drizzle-orm' || spec.startsWith('drizzle-orm/')) return bannedSpecifier(spec) === undefined;
 	if (spec === 'cubrid-client') return true;
-	return spec.startsWith('node:');
+	// node:module is excluded: createRequire() would load anything.
+	return spec.startsWith('node:') && spec !== 'node:module';
 }
 
 function scriptKind(file) {
@@ -141,17 +143,41 @@ export function scanText(file, text, scope = 'src') {
 			const spec = stringValue(node.argument.literal);
 			if (spec !== undefined) checkSpecifier(spec, node.argument.getStart(source));
 		} else if (ts.isCallExpression(node)) {
-			// import('x'), require('x'), createRequire(...)('x'), or any other
-			// loader-shaped call whose first argument is a string.
 			const spec = stringValue(node.arguments[0]);
 			const callee = node.expression;
+			// Module loaders: import('x'), require('x'), module.require('x') and
+			// createRequire(...)('x'). Only these count for the native import
+			// allowlist, so an ordinary call such as label('SMALLINT', v) is not
+			// mistaken for an import.
 			const loader =
-				callee.kind === ts.SyntaxKind.ImportKeyword || ts.isIdentifier(callee) || ts.isCallExpression(callee);
-			if (spec !== undefined && loader && (bannedSpecifier(spec) || (inNative && !nativeMayImport(file, spec)))) {
+				callee.kind === ts.SyntaxKind.ImportKeyword ||
+				(ts.isIdentifier(callee) && callee.text === 'require') ||
+				(ts.isPropertyAccessExpression(callee) && callee.name.text === 'require') ||
+				(ts.isCallExpression(callee) &&
+					ts.isIdentifier(callee.expression) &&
+					callee.expression.text === 'createRequire');
+			// A banned module name is flagged as the first argument of any
+			// identifier call too, which covers wrapped loaders.
+			const anyCall = loader || ts.isIdentifier(callee) || ts.isCallExpression(callee);
+			if (spec !== undefined && anyCall && bannedSpecifier(spec)) {
+				checkSpecifier(spec, node.arguments[0].getStart(source));
+			} else if (spec !== undefined && loader && inNative && !nativeMayImport(file, spec)) {
 				checkSpecifier(spec, node.arguments[0].getStart(source));
 			}
 		}
 
+		if (inNative && ts.isIdentifier(node)) {
+			// Loaders the allowlist cannot follow: `require` used other than as
+			// the direct callee of a call (`const r = require; r('../x.js')`),
+			// and createRequire in any form (`createRequire(url)` assigned to a
+			// variable, `module.createRequire`, an `as` alias on import).
+			if (node.text === 'createRequire') add('native-import', 'createRequire', node.getStart(source));
+			if (node.text === 'require') {
+				const target = ts.isPropertyAccessExpression(node.parent) && node.parent.name === node ? node.parent : node;
+				const called = ts.isCallExpression(target.parent) && target.parent.expression === target;
+				if (!called) add('native-import', 'require alias', node.getStart(source));
+			}
+		}
 		if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) {
 			if (FOREIGN_NAME.test(node.text)) add('identifier', node.text, node.getStart(source));
 		} else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {

@@ -6,6 +6,12 @@ export default defineConfig({
 		environment: 'node',
 		include: ['tests/**/*.test.ts'],
 		exclude: ['tests/integration.test.ts'],
+		// Type-level tests of drizzle-cubrid/native, checked with tsc (tests/ is outside the root tsconfig).
+		typecheck: {
+			enabled: true,
+			include: ['tests/native/**/*.test-d.ts'],
+			tsconfig: './tests/native/tsconfig.json',
+		},
 		coverage: {
 			provider: 'v8',
 			include: ['src/**/*.ts'],

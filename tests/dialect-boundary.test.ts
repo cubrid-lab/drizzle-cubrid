@@ -84,6 +84,33 @@ describe('native-import rule', () => {
 		expect(native("import { x } from '~/native/internal.js';")).toEqual([]);
 	});
 
+	it.each([
+		["const r = require; r('../../session.js');", 'native-import:require alias'],
+		["const req = createRequire(import.meta.url); req('../../session.js');", 'native-import:createRequire'],
+		["import { createRequire as cr } from 'node:module'; cr(url)('../../session.js');", 'native-import:node:module'],
+		["import { createRequire as cr } from 'node:module'; cr(url)('../../session.js');", 'native-import:createRequire'],
+		["const req = module.createRequire(url); req('../x.js');", 'native-import:createRequire'],
+		["import m from 'module'; m.createRequire(url)('../x.js');", 'native-import:module'],
+		["const r = module.require; r('../x.js');", 'native-import:require alias'],
+	])('catches the loader bypass %s', (code, finding) => {
+		expect(native(code)).toContain(finding);
+	});
+
+	it('allows direct require() calls of allowed modules and node: built-ins other than node:module', () => {
+		expect(native("const c = require('cubrid-client'); const m = module.require('./x.js');")).toEqual([]);
+		expect(native("import { readFileSync } from 'node:fs';")).toEqual([]);
+	});
+
+	it('does not mistake ordinary calls with a string argument for imports', () => {
+		expect(native("const n = toSafeInteger('SMALLINT', value); const s = Symbol('cubrid');")).toEqual([]);
+		expect(native("const m = module.require('../session.js');")).toEqual(['native-import:../session.js']);
+		expect(native("const r = createRequire(import.meta.url)('zod');")).toEqual([
+			'native-import:zod',
+			'native-import:createRequire',
+		]);
+		expect(native("const w = wrap('drizzle-orm/mysql-core');")).toEqual(['import:drizzle-orm/mysql-core']);
+	});
+
 	it('allows native code only an import allowlist, so new path aliases cannot reach 0.x modules', () => {
 		expect(native("import { CubridSession } from 'src/session.js';")).toEqual(['native-import:src/session.js']);
 		expect(native("import { x } from '@/session.js';")).toEqual(['native-import:@/session.js']);

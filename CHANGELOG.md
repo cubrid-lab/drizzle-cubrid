@@ -8,10 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Experimental `drizzle-cubrid/native` entry point, the first slice of the CUBRID-native dialect (ADR 0007): `cubridTable()` with composite `primaryKey()` and `unique()` constraints, and column builders with CUBRID SQL types and codecs: `smallint`, `integer`/`int`, `bigint` (`mode: 'bigint'` exact; `mode: 'number'` throws beyond 2^53 − 1 instead of rounding), `numeric`/`decimal` (exact strings by default), `float`, `double`, `char`, `varchar`, `string`, `boolean` (SMALLINT 0/1), `datetime`, `timestamp`, `date`, `time` (UTC wall clock), `monetary`, and `set`/`multiset`/`sequence` with per-element codecs. It has no query builder or session yet and is not for production; see [docs/NATIVE_API.md](docs/NATIVE_API.md). The root `drizzle-cubrid` entry is unchanged (#157, #162).
 - Lint and formatting are enforced in CI with Biome, pinned to 2.6.7: `npm run lint` runs `biome ci --error-on-warnings .` and `npm run format` applies fixes. The unused ESLint scripts and dependencies, which had no configuration and could not run, are removed (#167).
 - Live CUBRID tests (`tests/integration.test.ts`, `npm run integration`) for transactions, joins, write metadata and collections, run in CI against CUBRID 11.4 (#181, #164).
 
 ### Fixed
+- `package.json` `exports` give `require` consumers the `.d.cts` declarations (nested `import`/`require` conditions); TypeScript with `moduleResolution: node16` resolved the ESM `.d.ts` for CommonJS before.
 - `monetary()` columns returned the driver's number although typed as `string`; they now return the number's shortest decimal string (`12.34` → `'12.34'`). Code that did arithmetic on the value without converting it now gets a string (#217).
 - `datetime`, `timestamp`, `date` and `time` columns read cubrid-client's `Date` values. `select()` of a `datetime()` or `timestamp()` column threw `value.replace is not a function`, `date()` came back shifted by the process's UTC offset, and `mode: 'string'` columns returned a `Date` (#207).
 - `db.$count(table, where?)` failed with `SqlSyntaxError`: Drizzle aliases the count `as count`, a reserved word in CUBRID, and read a mysql2-shaped result. The alias is dropped and the count read by position; it works in transactions and as a subquery (#199).

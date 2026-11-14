@@ -8,9 +8,24 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./native": {
+      "import": {
+        "types": "./dist/native.d.ts",
+        "default": "./dist/native.js"
+      },
+      "require": {
+        "types": "./dist/native.d.cts",
+        "default": "./dist/native.cjs"
+      }
     }
   },
   "files": [
@@ -27,7 +42,7 @@
     "integration": "vitest run --config vitest.integration.config.ts --reporter=verbose",
     "lint": "biome ci --error-on-warnings .",
     "format": "biome check --write .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tests/native/tsconfig.json",
     "check:boundary": "node scripts/check-dialect-boundary.mjs src && npm run build && node scripts/check-dialect-boundary.mjs package --pack",
     "prepublishOnly": "npm run build"
   },
