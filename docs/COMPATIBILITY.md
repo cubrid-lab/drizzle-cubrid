@@ -52,7 +52,13 @@ release, which is why the ceiling is the next minor version:
 - `drizzle-orm/utils`: `mapResultRow`, which is not in the package's type
   declarations and is read through a cast
 
-Replacing these with a native CUBRID dialect is tracked in #155.
+Replacing these with a native CUBRID dialect is tracked in #155. The
+experimental `drizzle-cubrid/native` entry ([NATIVE_API.md](NATIVE_API.md))
+imports only Drizzle's database-neutral modules (`column`, `column-builder`,
+`entity`, `table`, `utils`) and reaches two internals through
+`src/native/internal.ts`: the `Symbol.for('drizzle:Columns')` and
+`Symbol.for('drizzle:ExtraConfigColumns')` table keys and
+`ColumnBuilder#setName`, both checked on 0.44.1 and 0.45.4 (ADR 0007).
 
 ## cubrid-client
 

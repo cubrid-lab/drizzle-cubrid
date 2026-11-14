@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Experimental `drizzle-cubrid/native` entry point, the first slice of the CUBRID-native dialect (ADR 0007): `cubridTable()` with composite `primaryKey()` and `unique()` constraints, and column builders with CUBRID SQL types and codecs: `smallint`, `integer`/`int`, `bigint` (`mode: 'bigint'` exact; `mode: 'number'` throws beyond 2^53 − 1 instead of rounding), `numeric`/`decimal` (exact strings by default), `float`, `double`, `char`, `varchar`, `string`, `boolean` (SMALLINT 0/1), `datetime`, `timestamp`, `date`, `time` (UTC wall clock), `monetary`, and `set`/`multiset`/`sequence` with per-element codecs. It has no query builder or session yet and is not for production; see [docs/NATIVE_API.md](docs/NATIVE_API.md). The root `drizzle-cubrid` entry is unchanged (#157, #162).
 - Lint and formatting are enforced in CI with Biome, pinned to 2.6.7: `npm run lint` runs `biome ci --error-on-warnings .` and `npm run format` applies fixes. The unused ESLint scripts and dependencies, which had no configuration and could not run, are removed (#167).
 - Live CUBRID tests (`tests/integration.test.ts`, `npm run integration`) for transactions, joins, write metadata and collections, run in CI against CUBRID 11.4 (#181, #164).
 

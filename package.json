@@ -11,6 +11,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./native": {
+      "types": "./dist/native.d.ts",
+      "import": "./dist/native.js",
+      "require": "./dist/native.cjs"
     }
   },
   "files": [
@@ -27,7 +32,7 @@
     "integration": "vitest run --config vitest.integration.config.ts --reporter=verbose",
     "lint": "biome ci --error-on-warnings .",
     "format": "biome check --write .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tests/native/tsconfig.json",
     "check:boundary": "node scripts/check-dialect-boundary.mjs src && npm run build && node scripts/check-dialect-boundary.mjs package --pack",
     "prepublishOnly": "npm run build"
   },

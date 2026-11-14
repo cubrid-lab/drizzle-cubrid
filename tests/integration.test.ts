@@ -28,6 +28,8 @@ import {
 	varchar,
 } from '../src/columns';
 import { drizzle } from '../src/driver';
+import { createTableSql } from '../src/native/ddl';
+import * as native from '../src/native/index';
 import { cubridTable } from '../src/table';
 import { monetary } from '../src/types';
 
@@ -767,4 +769,181 @@ describe('MONETARY columns read back as the declared string (#217)', () => {
 			expect(raw?.price).toBe(12.34);
 		});
 	}
+});
+
+describe('drizzle-cubrid/native column types round-trip through their codecs (#157, #162)', () => {
+	// No native query builder exists yet (#158), so the statements are written
+	// here: each value is encoded with its column's mapToDriverValue, bound with
+	// `?`, read back with rowMode 'array' and decoded with mapFromDriverValue.
+	const table = name('native');
+	const t = native.cubridTable(table, {
+		id: native.integer().primaryKey().autoIncrement(),
+		small: native.smallint(),
+		whole: native.int('whole_col'),
+		big: native.bigint({ mode: 'bigint' }),
+		bigNum: native.bigint({ mode: 'number' }),
+		exact: native.numeric({ precision: 38, scale: 10 }),
+		exactNum: native.decimal({ precision: 10, scale: 2, mode: 'number' }),
+		single: native.float(),
+		dbl: native.double(),
+		code: native.char({ length: 5 }),
+		name: native.varchar({ length: 50 }),
+		note: native.string(),
+		active: native.boolean(),
+		at: native.datetime(),
+		atText: native.datetime({ mode: 'string' }),
+		stamp: native.timestamp(),
+		stampText: native.timestamp({ mode: 'string' }),
+		day: native.date(),
+		dayText: native.date({ mode: 'string' }),
+		clock: native.time(),
+		price: native.monetary(),
+		tags: native.set({ element: native.varchar({ length: 20 }) }),
+		counts: native.multiset({ element: native.bigint({ mode: 'bigint' }) }),
+		flags: native.sequence({ element: native.boolean() }),
+		times: native.sequence({ element: native.datetime() }),
+		amounts: native.set({ element: native.numeric({ precision: 10, scale: 2 }) }),
+	});
+	type Row = Omit<typeof t.$inferSelect, 'id'>;
+	const columns = native.getTableConfig(t).columns.filter((c) => c !== t.id);
+	const keyOf = new Map(
+		Object.entries(t)
+			.filter(([, v]) => v instanceof native.CubridColumn)
+			.map(([k, v]) => [v, k]),
+	);
+
+	const full: Row = {
+		small: -32768,
+		whole: 2147483647,
+		big: 9223372036854775807n,
+		bigNum: Number.MAX_SAFE_INTEGER,
+		exact: '1234567890123456789012345678.0123456789',
+		exactNum: 12.5,
+		single: Math.fround(1.1),
+		dbl: 1.1,
+		code: 'ab   ',
+		name: '한국어 텍스트',
+		note: "it's a \\ backslash",
+		active: true,
+		at: new Date(Date.UTC(2024, 1, 29, 23, 59, 58, 123)),
+		atText: '2024-02-29 23:59:58.123',
+		stamp: new Date(Date.UTC(2038, 0, 19, 3, 14, 7)),
+		stampText: '1970-01-01 00:00:01',
+		day: new Date(Date.UTC(2000, 0, 1)),
+		dayText: '9999-12-31',
+		clock: '23:59:59',
+		price: '12.34',
+		tags: ['b', '가', null],
+		counts: [-9223372036854775808n, 5n, 5n, null],
+		flags: [true, false, null, true],
+		times: [new Date(Date.UTC(2024, 0, 2, 3, 4, 5, 6)), null],
+		amounts: ['12.50', '-0.01'],
+	};
+	// DATE 0001-01-01, CUBRID's first date (Date.UTC maps years 0-99 to 1900-1999).
+	full.day?.setUTCFullYear(1);
+	const empty = Object.fromEntries(columns.map((c) => [keyOf.get(c), null])) as Row;
+
+	function insertStatement(row: Row): { sql: string; params: unknown[] } {
+		const params: unknown[] = [];
+		const values = columns.map((column) => {
+			const value = row[keyOf.get(column) as keyof Row];
+			if (value === null) {
+				params.push(null);
+				return '?';
+			}
+			const encoded = column.mapToDriverValue(value);
+			if (column instanceof native.CubridCollection) {
+				const elements = encoded as unknown[];
+				params.push(...elements);
+				return native.collectionLiteralSql(column, elements.length);
+			}
+			params.push(encoded);
+			return '?';
+		});
+		const names = columns.map((c) => `"${c.name}"`).join(', ');
+		return { sql: `INSERT INTO "${table}" (${names}) VALUES (${values.join(', ')})`, params };
+	}
+
+	async function readRows(): Promise<Row[]> {
+		const names = columns.map((c) => `"${c.name}"`).join(', ');
+		const rows = await client.query<unknown[]>(`SELECT ${names} FROM "${table}" ORDER BY "id"`, [], {
+			rowMode: 'array',
+		});
+		return rows.map(
+			(raw) =>
+				Object.fromEntries(
+					columns.map((column, i) => [keyOf.get(column), raw[i] === null ? null : column.mapFromDriverValue(raw[i])]),
+				) as Row,
+		);
+	}
+
+	const sorted = (values: unknown[] | null) => values && [...values].sort((a, b) => String(a).localeCompare(String(b)));
+
+	beforeAll(async () => {
+		await client.query(createTableSql(t));
+		created.push(`"${table}"`);
+	});
+
+	it('creates the table from the declared CUBRID types', async () => {
+		const described = await client.getColumns(table);
+		// CUBRID stores identifiers in lower case, quoted or not.
+		expect(described.map((c) => c.name)).toEqual(['id', ...columns.map((c) => c.name.toLowerCase())]);
+	});
+
+	it('writes and reads every builder exactly, including NULLs, in a non-UTC process', async () => {
+		expect(new Date(2024, 0, 1).getTimezoneOffset()).not.toBe(0);
+		for (const row of [full, empty]) {
+			const { sql: text, params } = insertStatement(row);
+			await client.executePrepared(text, params as never[]);
+		}
+		const [first, second] = await readRows();
+		expect(second).toEqual(empty);
+		// SET and MULTISET have no defined order; SEQUENCE keeps it.
+		expect({
+			...first,
+			tags: sorted(first?.tags ?? null),
+			counts: sorted(first?.counts ?? null),
+			amounts: sorted(first?.amounts ?? null),
+		}).toEqual({
+			...full,
+			tags: sorted(full.tags),
+			counts: sorted(full.counts),
+			amounts: sorted(full.amounts),
+		});
+		expect(first?.big).toBe(9223372036854775807n);
+		expect(first?.code).toBe('ab   ');
+	});
+
+	it('generates the AUTO_INCREMENT key', async () => {
+		const rows = await client.query<{ id: number }>(`SELECT "id" FROM "${table}" ORDER BY "id"`);
+		expect(rows.map((r) => r.id)).toEqual([1, 2]);
+	});
+
+	it('refuses values the codecs cannot represent exactly', async () => {
+		const [raw] = await client.query<unknown[]>(
+			'SELECT CAST(9007199254740993 AS BIGINT), CAST(2 AS SMALLINT) FROM db_root',
+			[],
+			{ rowMode: 'array' },
+		);
+		expect(raw?.[0]).toBe(9007199254740993n);
+		expect(t.big.mapFromDriverValue(raw?.[0])).toBe(9007199254740993n);
+		expect(() => t.bigNum.mapFromDriverValue(raw?.[0])).toThrow(RangeError);
+		expect(() => t.active.mapFromDriverValue(raw?.[1])).toThrow(/0 or 1/);
+	});
+
+	it('accepts composite primary keys and unique constraints', async () => {
+		const pairs = name('native_pk');
+		const p = native.cubridTable(
+			pairs,
+			{ a: native.integer().notNull(), b: native.varchar({ length: 5 }).notNull(), c: native.integer().unique() },
+			(self) => [native.primaryKey({ columns: [self.a, self.b] }), native.unique().on(self.b, self.c)],
+		);
+		await client.query(createTableSql(p));
+		created.push(`"${pairs}"`);
+		await client.executePrepared(`INSERT INTO "${pairs}" ("a", "b", "c") VALUES (?, ?, ?)`, [1, 'x', 1]);
+		await expect(
+			client.executePrepared(`INSERT INTO "${pairs}" ("a", "b", "c") VALUES (?, ?, ?)`, [1, 'x', 2]),
+		).rejects.toThrow();
+		expect(await client.getPrimaryKey(pairs)).toMatchObject({ columns: ['a', 'b'] });
+	});
 });
