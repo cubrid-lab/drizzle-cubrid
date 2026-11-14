@@ -11,6 +11,7 @@ import {
 	CubridColumnBuilder,
 	describeValue,
 	nameAndConfig,
+	plainDecimal,
 } from './common.js';
 
 // ---------- NUMERIC(p, s) ----------
@@ -25,15 +26,20 @@ function numericSqlType({ precision, scale }: NumericRuntimeConfig): string {
 	return scale === undefined ? `NUMERIC(${precision})` : `NUMERIC(${precision},${scale})`;
 }
 
-/** A number written as its shortest decimal string, so the server parses exactly the digits the caller sees. */
+/**
+ * A number written as its shortest decimal string without an exponent, so
+ * the server parses exactly the digits the caller sees; NaN and ±Infinity
+ * are refused.
+ */
 function numericToDriver(value: unknown): unknown {
-	return typeof value === 'number' ? String(value) : value;
+	return typeof value === 'number' ? plainDecimal(value, 'NUMERIC') : value;
 }
 
 /** A decimal string read from the driver; cubrid-client 1.x returns NUMERIC as a string. */
 function numericString(value: unknown): string {
 	if (typeof value === 'string') return value;
-	if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+	if (typeof value === 'number') return plainDecimal(value, 'NUMERIC');
+	if (typeof value === 'bigint') return String(value);
 	throw new TypeError(`NUMERIC value from the driver must be a string, got ${describeValue(value)}`);
 }
 
@@ -169,6 +175,14 @@ export function numeric(a?: string | CubridNumericConfig, b?: CubridNumericConfi
 	if (scale !== undefined && precision === undefined) {
 		throw new TypeError('numeric(): scale needs precision, as in { precision: 10, scale: 2 }');
 	}
+	if (precision !== undefined && !(Number.isInteger(precision) && precision >= 1 && precision <= 38)) {
+		throw new RangeError(`numeric(): precision must be an integer from 1 to 38, got ${describeValue(precision)}`);
+	}
+	if (scale !== undefined && !(Number.isInteger(scale) && scale >= 0 && scale <= (precision ?? 0))) {
+		throw new RangeError(
+			`numeric(): scale must be an integer from 0 to precision (${precision}), got ${describeValue(scale)}`,
+		);
+	}
 	if (config?.mode === 'number') return new CubridNumericNumberBuilder(name, precision, scale);
 	if (config?.mode === undefined || config.mode === 'string') return new CubridNumericBuilder(name, precision, scale);
 	throw new TypeError(`numeric(): mode must be 'string' or 'number', got ${describeValue(config.mode)}`);
@@ -179,9 +193,12 @@ export const decimal = numeric;
 
 // ---------- FLOAT and DOUBLE ----------
 
+/** Decimal number text, optionally with an exponent; not hex, binary, `Infinity` or blanks. */
+const DECIMAL_TEXT = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
+
 function toNumber(value: unknown, sqlType: string): number {
 	if (typeof value === 'number') return value;
-	if (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value))) return Number(value);
+	if (typeof value === 'string' && DECIMAL_TEXT.test(value)) return Number(value);
 	throw new TypeError(`${sqlType} value from the driver must be a number, got ${describeValue(value)}`);
 }
 
@@ -315,7 +332,7 @@ export class CubridMonetary<T extends ColumnBaseConfig<'string', 'CubridMonetary
 
 	override mapFromDriverValue(value: unknown): string {
 		if (typeof value === 'string') return value;
-		if (typeof value === 'number') return String(value);
+		if (typeof value === 'number') return plainDecimal(value, 'MONETARY');
 		throw new TypeError(`MONETARY value from the driver must be a number, got ${describeValue(value)}`);
 	}
 }

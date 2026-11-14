@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Live CUBRID tests (`tests/integration.test.ts`, `npm run integration`) for transactions, joins, write metadata and collections, run in CI against CUBRID 11.4 (#181, #164).
 
 ### Fixed
+- `package.json` `exports` give `require` consumers the `.d.cts` declarations (nested `import`/`require` conditions); TypeScript with `moduleResolution: node16` resolved the ESM `.d.ts` for CommonJS before.
 - `monetary()` columns returned the driver's number although typed as `string`; they now return the number's shortest decimal string (`12.34` → `'12.34'`). Code that did arithmetic on the value without converting it now gets a string (#217).
 - `datetime`, `timestamp`, `date` and `time` columns read cubrid-client's `Date` values. `select()` of a `datetime()` or `timestamp()` column threw `value.replace is not a function`, `date()` came back shifted by the process's UTC offset, and `mode: 'string'` columns returned a `Date` (#207).
 - `db.$count(table, where?)` failed with `SqlSyntaxError`: Drizzle aliases the count `as count`, a reserved word in CUBRID, and read a mysql2-shaped result. The alias is dropped and the count read by position; it works in transactions and as a subquery (#199).

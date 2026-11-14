@@ -931,6 +931,75 @@ describe('drizzle-cubrid/native column types round-trip through their codecs (#1
 		expect(() => t.active.mapFromDriverValue(raw?.[1])).toThrow(/0 or 1/);
 	});
 
+	it('writes NUMERIC numbers below 1e-6 and from 1e21 as plain decimals that round-trip', async () => {
+		const numbers = name('native_num');
+		const n = native.cubridTable(numbers, {
+			id: native.integer().primaryKey(),
+			exact: native.numeric({ precision: 38, scale: 10 }),
+			approx: native.numeric({ precision: 38, scale: 10, mode: 'number' }),
+		});
+		await client.query(createTableSql(n));
+		created.push(`"${numbers}"`);
+		const insert = `INSERT INTO "${numbers}" ("id", "exact", "approx") VALUES (?, ?, ?)`;
+		await client.executePrepared(insert, [
+			1,
+			n.exact.mapToDriverValue(1e-7),
+			n.approx.mapToDriverValue(1e21),
+		] as never[]);
+		await client.executePrepared(insert, [
+			2,
+			n.exact.mapToDriverValue(1e21),
+			n.approx.mapToDriverValue(1e-7),
+		] as never[]);
+		const rows = await client.query<unknown[]>(`SELECT "exact", "approx" FROM "${numbers}" ORDER BY "id"`, [], {
+			rowMode: 'array',
+		});
+		expect(
+			rows.map(([exact, approx]) => [n.exact.mapFromDriverValue(exact), n.approx.mapFromDriverValue(approx)]),
+		).toEqual([
+			['0.0000001000', 1e21],
+			['1000000000000000000000.0000000000', 1e-7],
+		]);
+	});
+
+	it('refuses a fractional INTEGER and out-of-range dates before anything is sent', async () => {
+		const before = await client.query<{ n: number }>(`SELECT COUNT(*) AS n FROM "${table}"`);
+		const year10000 = new Date(Date.UTC(2000, 0, 1));
+		year10000.setUTCFullYear(10000);
+		for (const bad of [
+			{ ...full, whole: 1.5 },
+			{ ...full, flags: null, small: 40000 },
+			{ ...full, at: year10000 },
+			{ ...full, stamp: new Date(Date.UTC(2038, 0, 19, 3, 14, 8)) },
+		]) {
+			expect(() => insertStatement(bad as Row)).toThrow(/INTEGER|SMALLINT|DATETIME|TIMESTAMP/);
+		}
+		expect(await client.query<{ n: number }>(`SELECT COUNT(*) AS n FROM "${table}"`)).toEqual(before);
+		// The server itself would have rounded the fraction.
+		const [rounded] = await client.queryPrepared<unknown[]>('SELECT CAST(? AS INTEGER) FROM db_root', [1.5], {
+			rowMode: 'array',
+		});
+		expect(rounded).toEqual([2]);
+	});
+
+	it('accepts the TIMESTAMP range limits the codec allows', async () => {
+		const [row] = await client.queryPrepared<unknown[]>(
+			'SELECT CAST(? AS TIMESTAMP), CAST(? AS TIMESTAMP) FROM db_root',
+			[
+				t.stamp.mapToDriverValue(new Date(Date.UTC(1970, 0, 1, 0, 0, 1))),
+				t.stamp.mapToDriverValue(new Date(Date.UTC(2038, 0, 19, 3, 14, 7))),
+			],
+			{ rowMode: 'array' },
+		);
+		expect(row?.map((v) => t.stamp.mapFromDriverValue(v))).toEqual([
+			new Date(Date.UTC(1970, 0, 1, 0, 0, 1)),
+			new Date(Date.UTC(2038, 0, 19, 3, 14, 7)),
+		]);
+		await expect(
+			client.queryPrepared('SELECT CAST(? AS TIMESTAMP) FROM db_root', ['2038-01-19 03:14:08']),
+		).rejects.toThrow();
+	});
+
 	it('accepts composite primary keys and unique constraints', async () => {
 		const pairs = name('native_pk');
 		const p = native.cubridTable(

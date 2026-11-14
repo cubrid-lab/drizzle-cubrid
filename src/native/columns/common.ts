@@ -103,3 +103,24 @@ export function nameAndConfig<TConfig extends object>(
 ): { name: string; config: TConfig | undefined } {
 	return typeof a === 'string' ? { name: a, config: b } : { name: '', config: a };
 }
+
+/**
+ * A finite number as a plain decimal string with no exponent: the shortest
+ * round-trip digits of `String(value)`, with the decimal point moved by
+ * string arithmetic (`1e-7` → `'0.0000001'`, `1e21` → `'1000000000000000000000'`).
+ * CUBRID rejects exponent text for NUMERIC.
+ */
+export function plainDecimal(value: number, sqlType: string): string {
+	if (!Number.isFinite(value)) {
+		throw new RangeError(`${sqlType} value must be a finite number, got ${describeValue(value)}`);
+	}
+	const text = String(value);
+	const match = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/.exec(text);
+	if (!match) return text;
+	const [, sign, whole, fraction = '', exponent] = match;
+	const digits = `${whole}${fraction}`;
+	const point = whole.length + Number(exponent);
+	if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+	if (point >= digits.length) return `${sign}${digits}${'0'.repeat(point - digits.length)}`;
+	return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+}

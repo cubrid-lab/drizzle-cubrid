@@ -25,6 +25,31 @@ function toSafeInteger(value: unknown, sqlType: string): number {
 	throw new TypeError(`${sqlType} value from the driver must be an integer, got ${describeValue(value)}`);
 }
 
+/** Value ranges of the integer types, as written from a JavaScript `number`. */
+const NUMBER_RANGE = {
+	SMALLINT: [-32768, 32767],
+	INTEGER: [-2147483648, 2147483647],
+	BIGINT: [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+} as const;
+
+/**
+ * A `number` written to an integer column. The server would round 1.5 to 2
+ * and reject or wrap out-of-range values, so both are refused before sending.
+ */
+function integerToDriver(value: unknown, sqlType: keyof typeof NUMBER_RANGE): number {
+	if (typeof value !== 'number' || !Number.isInteger(value)) {
+		throw new TypeError(`${sqlType} column value must be an integer number, got ${describeValue(value)}`);
+	}
+	const [min, max] = NUMBER_RANGE[sqlType];
+	if (value < min || value > max) {
+		throw new RangeError(`${sqlType} column value ${value} is outside ${min}..${max}`);
+	}
+	return value;
+}
+
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+
 // ---------- SMALLINT ----------
 
 export class CubridSmallIntBuilder<
@@ -57,6 +82,10 @@ export class CubridSmallInt<T extends ColumnBaseConfig<'number', 'CubridSmallInt
 
 	override mapFromDriverValue(value: unknown): number {
 		return toSafeInteger(value, 'SMALLINT');
+	}
+
+	override mapToDriverValue(value: unknown): number {
+		return integerToDriver(value, 'SMALLINT');
 	}
 }
 
@@ -108,6 +137,10 @@ export class CubridInteger<T extends ColumnBaseConfig<'number', 'CubridInteger'>
 
 	override mapFromDriverValue(value: unknown): number {
 		return toSafeInteger(value, 'INTEGER');
+	}
+
+	override mapToDriverValue(value: unknown): number {
+		return integerToDriver(value, 'INTEGER');
 	}
 }
 
@@ -166,6 +199,22 @@ export class CubridBigInt<T extends ColumnBaseConfig<'bigint', 'CubridBigInt'>> 
 		if (typeof value === 'string' && /^-?\d+$/.test(value)) return BigInt(value);
 		throw new TypeError(`BIGINT value from the driver must be an integer, got ${describeValue(value)}`);
 	}
+
+	/**
+	 * A `bigint` within the signed 64-bit range. A safe-integer `number` is
+	 * accepted too and sent as a `bigint`, so a literal such as `5` in a filter
+	 * works; any other number is refused rather than rounded.
+	 */
+	override mapToDriverValue(value: unknown): bigint {
+		const big = typeof value === 'number' && Number.isSafeInteger(value) ? BigInt(value) : value;
+		if (typeof big !== 'bigint') {
+			throw new TypeError(`BIGINT column value must be a bigint, got ${describeValue(value)}`);
+		}
+		if (big < INT64_MIN || big > INT64_MAX) {
+			throw new RangeError(`BIGINT column value ${big} is outside the signed 64-bit range`);
+		}
+		return big;
+	}
 }
 
 export class CubridBigIntNumberBuilder<
@@ -202,6 +251,10 @@ export class CubridBigIntNumber<T extends ColumnBaseConfig<'number', 'CubridBigI
 
 	override mapFromDriverValue(value: unknown): number {
 		return toSafeInteger(value, 'BIGINT');
+	}
+
+	override mapToDriverValue(value: unknown): number {
+		return integerToDriver(value, 'BIGINT');
 	}
 }
 

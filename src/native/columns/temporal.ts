@@ -22,13 +22,28 @@ import {
 
 type TemporalSqlType = 'DATETIME' | 'TIMESTAMP' | 'DATE' | 'TIME';
 
-/** `YYYY-MM-DDTHH:MM:SS.mmmZ` of the UTC fields; CUBRID's years 0001-9999 always have four digits. */
+/** CUBRID TIMESTAMP's range, whole seconds: 1970-01-01 00:00:01 to 2038-01-19 03:14:07 UTC. */
+const TIMESTAMP_MIN = Date.UTC(1970, 0, 1, 0, 0, 1);
+const TIMESTAMP_MAX = Date.UTC(2038, 0, 19, 3, 14, 7, 999);
+
+/** `YYYY-MM-DDTHH:MM:SS.mmmZ` of the UTC fields, refusing dates CUBRID cannot store; CUBRID's years 0001-9999 always have four digits. */
 function isoOf(sqlType: TemporalSqlType, value: unknown): string {
 	if (!(value instanceof Date)) {
 		throw new TypeError(`${sqlType} column value must be a Date, got ${describeValue(value)}`);
 	}
-	if (Number.isNaN(value.getTime())) throw new RangeError(`${sqlType} column value is an invalid Date`);
-	return value.toISOString();
+	const time = value.getTime();
+	if (Number.isNaN(time)) throw new RangeError(`${sqlType} column value is an invalid Date`);
+	const iso = value.toISOString();
+	if (sqlType === 'TIMESTAMP' && (time < TIMESTAMP_MIN || time > TIMESTAMP_MAX)) {
+		throw new RangeError(
+			`TIMESTAMP column value ${iso} is outside CUBRID's range 1970-01-01 00:00:01 to 2038-01-19 03:14:07 UTC; use datetime()`,
+		);
+	}
+	const year = value.getUTCFullYear();
+	if (year < 1 || year > 9999) {
+		throw new RangeError(`${sqlType} column value ${iso} is outside CUBRID's years 0001 to 9999`);
+	}
+	return iso;
 }
 
 function textOf(sqlType: TemporalSqlType, value: unknown): string {
@@ -36,10 +51,13 @@ function textOf(sqlType: TemporalSqlType, value: unknown): string {
 	throw new TypeError(`${sqlType} column value must be a string, got ${describeValue(value)}`);
 }
 
-/** A driver value as a `Date`: cubrid-client 1.x returns `Date`s; text is read as a UTC wall clock. */
+const DATE_TEXT = /^\d{4}-\d{2}-\d{2}$/;
+const DATETIME_TEXT = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,3})?$/;
+
+/** A driver value as a `Date`: cubrid-client 1.x returns `Date`s; text in the documented formats is read as a UTC wall clock. */
 function dateOf(sqlType: TemporalSqlType, value: unknown): Date {
 	if (value instanceof Date) return value;
-	if (typeof value === 'string') {
+	if (typeof value === 'string' && (sqlType === 'DATE' ? DATE_TEXT : DATETIME_TEXT).test(value)) {
 		const parsed = new Date(sqlType === 'DATE' ? `${value}T00:00:00Z` : `${value.replace(' ', 'T')}Z`);
 		if (!Number.isNaN(parsed.getTime())) return parsed;
 	}

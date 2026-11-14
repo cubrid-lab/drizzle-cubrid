@@ -54,12 +54,12 @@ columns are not supported yet.
 
 | Builder | SQL type | TypeScript type | Codec |
 | --- | --- | --- | --- |
-| `smallint()` | `SMALLINT` | `number` | Reads integers; refuses anything else |
-| `integer()`, `int()` | `INTEGER` | `number` | As `smallint` |
-| `bigint({ mode: 'bigint' })` | `BIGINT` | `bigint` | Exact for the whole 64-bit range |
-| `bigint({ mode: 'number' })` | `BIGINT` | `number` | Throws a `RangeError` when a stored value is outside ±(2^53 − 1), instead of rounding |
-| `numeric({ precision?, scale?, mode? })`, `decimal()` | `NUMERIC(p,s)` | `string` (default) or `number` | String mode returns cubrid-client's exact decimal string (`NUMERIC(10,2)` reads `'12.50'`). Number mode converts with `Number()`, which rounds beyond a double's ~15–17 significant digits. A `number` is written as its shortest decimal string |
-| `float()` | `FLOAT` | `number` | 32-bit: `1.1` reads back as `Math.fround(1.1)` = `1.100000023841858` |
+| `smallint()` | `SMALLINT` | `number` | Reads integers. Writes only integer numbers in −32768..32767; `1.5` throws a `TypeError` instead of being rounded by the server |
+| `integer()`, `int()` | `INTEGER` | `number` | As `smallint`, range −2^31..2^31−1 |
+| `bigint({ mode: 'bigint' })` | `BIGINT` | `bigint` | Exact for the whole 64-bit range. Writes a `bigint` in the signed 64-bit range; a safe-integer `number` is also accepted and sent as a `bigint`, any other number throws |
+| `bigint({ mode: 'number' })` | `BIGINT` | `number` | Reading or writing a value outside ±(2^53 − 1) throws a `RangeError` instead of rounding; fractional writes throw a `TypeError` |
+| `numeric({ precision?, scale?, mode? })`, `decimal()` | `NUMERIC(p,s)` | `string` (default) or `number` | String mode returns cubrid-client's exact decimal string (`NUMERIC(10,2)` reads `'12.50'`). Number mode converts with `Number()`, which rounds beyond a double's ~15–17 significant digits. A `number` is written as its shortest round-trip digits in plain decimal notation (`1e-7` → `'0.0000001'`, `1e21` → `'1000000000000000000000'`; CUBRID rejects exponent text), and `NaN`/`±Infinity` throw. `precision` must be 1–38 and `scale` 0–`precision` |
+| `float()` | `FLOAT` | `number` | 32-bit: `1.1` reads back as `Math.fround(1.1)` = `1.100000023841858`. Driver text is read only as decimal notation (`'0x10'` throws) |
 | `double()` | `DOUBLE` | `number` | 64-bit, the same as a JavaScript `number` |
 | `char({ length })` | `CHAR(n)` | `string` | Read as sent: CUBRID pads to `n` with spaces (`'ab'` in `CHAR(5)` reads `'ab   '`) |
 | `varchar({ length })` | `VARCHAR(n)` | `string` | `length` is required |
@@ -69,7 +69,7 @@ columns are not supported yet.
 | `timestamp({ mode? })` | `TIMESTAMP` | `Date` or `string` | `YYYY-MM-DD HH:MM:SS`; whole seconds |
 | `date({ mode? })` | `DATE` | `Date` or `string` | `YYYY-MM-DD`; a `Date` is midnight UTC |
 | `time()` | `TIME` | `string` | `HH:MM:SS`; whole seconds |
-| `monetary()` | `MONETARY` | `string` | cubrid-client returns a number, read as its shortest decimal string (`12.34` → `'12.34'`) |
+| `monetary()` | `MONETARY` | `string` | cubrid-client returns a number, read as its shortest decimal string without an exponent (`12.34` → `'12.34'`, `1e21` → `'1000000000000000000000'`) |
 | `set({ element })` | `SET(T)` | `(E \| null)[]` | See [Collections](#collections) |
 | `multiset({ element })` | `MULTISET(T)` | `(E \| null)[]` | |
 | `sequence({ element })` | `SEQUENCE(T)` | `(E \| null)[]` | |
@@ -82,8 +82,16 @@ UTC getters. Writes therefore do not depend on the process zone, but reads are
 exact only from a client that decodes in UTC: create it with
 `createClient({ ..., timezone: 'utc' })` or run with `TZ=UTC`. The columns only
 convert values; refusing a client that decodes in another zone, as the 0.x
-session does, belongs to the native session (#160). `mode: 'string'` reads the
-wall clock in the formats above and writes the string as given.
+session does, belongs to the native session (#160), which will reuse the 0.x
+timezone guard. `mode: 'string'` reads the wall clock in the formats above and
+writes the string as given; text from the driver is accepted only in those
+formats.
+
+A `Date` outside CUBRID's years 0001–9999 is refused with a `RangeError`
+before anything is sent, instead of being written as `+010000-…`. A
+`timestamp()` `Date` must also lie within 1970-01-01 00:00:01 to
+2038-01-19 03:14:07 UTC (verified on CUBRID 11.4 with a UTC session; the
+server reads TIMESTAMP text in the session time zone).
 
 ### Collections
 
@@ -137,5 +145,12 @@ are not in `drizzle-cubrid/native`:
 - `TIMESTAMP` and `TIME` hold whole seconds; the server drops milliseconds.
   `TIMESTAMP` covers 1970-01-01 00:00:01 to 2038-01-19 03:14:07 UTC.
 - `NUMERIC` reads with the column's scale (`'12.5'` stored in `NUMERIC(10,2)`
-  reads `'12.50'`).
+  reads `'12.50'`), and the server rounds extra fractional digits without an
+  error: `'0.00000000005'` written to `NUMERIC(38,10)` reads `'0.0000000001'`.
+- Native columns assume a client that decodes date and time values in UTC
+  (`timezone: 'utc'` or `TZ=UTC`); nothing enforces it until the native
+  session (#160).
+- Collection values cannot be passed to Drizzle's generic operators
+  (`eq(t.tags, ['a'])`) yet: they need the collection literal, which the native
+  query builder will emit (#158).
 - Identifiers are case-insensitive: CUBRID stores `"userName"` as `username`.
