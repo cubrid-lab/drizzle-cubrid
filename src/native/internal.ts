@@ -7,6 +7,7 @@
 // enforces that.
 
 import type { Column } from 'drizzle-orm/column';
+import type { DriverValueDecoder, SQL } from 'drizzle-orm/sql/sql';
 import type { Table } from 'drizzle-orm/table';
 
 // drizzle-orm/table.js: `Table.Symbol.Columns` and `Table.Symbol.ExtraConfigColumns`
@@ -31,4 +32,17 @@ export function setTableColumns(table: Table, columns: Record<string, Column>): 
 /** Gives a builder created without a name its key in the table definition. */
 export function setColumnBuilderName(builder: object, name: string): void {
 	(builder as unknown as { setName(name: string): void }).setName(name);
+}
+
+// drizzle-orm/sql/sql.js: `SQL#decoder` is `@internal`; the public
+// `sql\`...\`.mapWith(decoder)` sets it and it defaults to a no-op decoder.
+// Drizzle's own row mapping reads it the same way. Checked against
+// drizzle-orm 0.44.1 and 0.45.4.
+/** The decoder `mapWith()` gave a `sql` expression, or undefined when there is none. */
+// biome-ignore lint/suspicious/noExplicitAny: decoders are any-typed in Drizzle's declarations too.
+export function getSqlDecoder(query: SQL): DriverValueDecoder<unknown, any> | undefined {
+	const decoder = (query as unknown as { decoder?: unknown }).decoder;
+	return typeof decoder === 'object' && decoder !== null && 'mapFromDriverValue' in decoder
+		? (decoder as DriverValueDecoder<unknown, unknown>)
+		: undefined;
 }

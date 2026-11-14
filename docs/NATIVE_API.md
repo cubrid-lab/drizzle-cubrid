@@ -16,11 +16,15 @@
   `unique(name?).on(...columns)`, read back with `getTableConfig(table)`.
 - `collectionLiteralSql(column, count)`: the typed literal a statement uses to
   write a collection (see [Collections](#collections)).
+- `drizzle(client)` with `db.select()`, `db.selectDistinct()` and
+  `db.execute()` (see [Queries](#queries)).
 
-**Not yet:** there is no query builder, session or `drizzle()` for native
-tables (#158, #160), no relations, no migrations or DDL generation (#163),
-and no indexes or foreign keys in `extraConfig`. Native tables are not
-supported by the 0.x `drizzle()` from `drizzle-cubrid`.
+**Not yet:** INSERT, UPDATE and DELETE (#159), transactions through Drizzle
+(#161; use cubrid-client's `transaction()` and pass its client to `drizzle()`),
+relational queries (`db.query`), set operations (`union` and friends),
+scalar subqueries as selected fields, migrations or DDL generation (#163), and
+indexes or foreign keys in `extraConfig`. Native tables are not supported by
+the 0.x `drizzle()` from `drizzle-cubrid`.
 
 ```ts
 import { bigint, cubridTable, integer, primaryKey, set, varchar } from 'drizzle-cubrid/native';
@@ -49,6 +53,78 @@ name. Every builder has Drizzle's neutral modifiers `.notNull()`,
 `bigint` also have `.autoIncrement()` (CUBRID `AUTO_INCREMENT`), which makes
 the column optional on insert. `.generatedAlwaysAs()` throws: CUBRID generated
 columns are not supported yet.
+
+## Queries
+
+```ts
+import { createClient } from 'cubrid-client';
+import { count, eq, gt, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-cubrid/native';
+
+const client = createClient({ host, database, user, password, timezone: 'utc' });
+const db = drizzle(client); // or drizzle(pool), drizzle(tx) inside client.transaction()
+
+const rows = await db
+  .select({ name: users.name, posts: count(posts.id) })
+  .from(users)
+  .leftJoin(posts, eq(users.id, posts.authorId))
+  .groupBy(users.name)
+  .having(({ posts }) => gt(posts, 1))
+  .orderBy(users.name)
+  .limit(10)
+  .offset(20);
+```
+
+`drizzle(client, { logger?, binding? })` takes a cubrid-client 1.4 client,
+pool or transaction client (anything with `query()`, and `queryPrepared()` for
+the default binding). Result types come from Drizzle's database-neutral select
+types, so they match Drizzle's other dialects.
+
+| Feature | Notes |
+| --- | --- |
+| `select()`, `select({ ... })`, `selectDistinct()` | Partial selections may nest objects and include `sql` fields; `sql.mapWith()` decoders are applied |
+| `from(table \| subquery)` | Only native tables and subqueries made with `.as(alias)` |
+| `innerJoin`, `leftJoin`, `rightJoin`, `crossJoin` | A left join makes the joined fields nullable, a right join the earlier ones. As in Drizzle, a top-level object (a table in `select()`, or `{ pet: { ... } }`) becomes `null` when its column fields all come from one such table or subquery and are all NULL; plain `sql` fields in it do not count. A join changes the builder it is called on, as Drizzle's do |
+| `where`, `groupBy`, `having`, `orderBy` | Drizzle's operators and aggregates (`eq`, `and`, `inArray`, `count`, `sum`, `asc`, `desc`, ...); callbacks receive the selected fields |
+| `limit`, `offset` | Bound as parameters; `offset()` needs `limit()` |
+| `.for('update')` | Locks the rows until the transaction ends; use it inside `client.transaction()` |
+| `.as(alias)` | A subquery for `from()` and joins. Inside it each column is named by its key path (`"users.id"`, `"pets.id"`), so joined tables that share column names stay apart, and a `sql` field, which needs `.as('name')`, keeps that name, so the subquery's own `having`/`orderBy` can use it. Outside, every use of a field (select list, `where`, `on`, `orderBy`, `having`) reads `"alias"."name"`. Names that differ only in case are refused, as CUBRID compares identifiers ignoring case. A subquery's `sql` fields are typed `SQL.Aliased`, as in Drizzle, but at runtime they are plain `sql` expressions (`sq.n.fieldAlias` is `undefined`), so that conditions on them render qualified |
+| `.prepare()` | Builds the SQL once; `execute({ name: value })` fills `sql.placeholder('name')` |
+| `.toSQL()`, `$dynamic()`, `await`/`then` | As in Drizzle |
+| `db.execute(sql\`...\`)` | Runs a raw statement; rows come back as cubrid-client returns them (objects by label), not decoded |
+
+Rows are read with `rowMode: 'array'` and mapped by position, so joined tables
+that share column names (`users.id`, `posts.id`) keep both values.
+
+### Binding
+
+By default values are sent as typed binds with cubrid-client's
+`queryPrepared()`; `drizzle()` refuses a client without it. With
+`{ binding: 'literal' }` they go through `query()`, where cubrid-client writes
+each value into the SQL text as an escaped literal. Values are encoded by the
+column they are compared with (`eq(users.active, true)` sends `1`), except
+`sql.placeholder()` values, which are sent as given, as in Drizzle's other
+dialects. An array parameter is refused: cubrid-client cannot bind one.
+
+### Identifier quoting
+
+Identifiers are double-quoted and an embedded `"` is doubled (`we"ird` →
+`"we""ird"`), which CUBRID 11.4 accepts. Every column is qualified with its
+table or subquery alias. CUBRID stores identifiers in lower case.
+
+### Errors and refusals
+
+cubrid-client errors are passed through unchanged, with their `code`, `kind`
+and `cause`. These are refused before anything is sent:
+
+| Refused | Why |
+| --- | --- |
+| FULL JOIN, lateral joins, `union`/`intersect`/`except` | No method: CUBRID has no FULL JOIN or LATERAL; set operations are a later slice |
+| `offset()` without `limit()` | CUBRID needs `LIMIT` with `OFFSET` |
+| `.for('share')`, `noWait`, `skipLocked` | CUBRID has only FOR UPDATE, without options |
+| `.for('update')` with DISTINCT, GROUP BY or HAVING | CUBRID 11.4 rejects it (-494) |
+| A SET/MULTISET/SEQUENCE column compared with a value (`eq(t.tags, ['a'])`) | Needs the typed collection literal (#159) |
+| Selected date or time columns (also through `mapWith()`, subqueries and collections of them) from a client that does not decode in UTC | See [Date and time](#date-and-time) |
 
 ## Column builders
 
@@ -80,10 +156,12 @@ The stored wall clock is UTC, as in the 0.x API: a `Date` is written as the
 text of its UTC fields, and the `Date`s cubrid-client returns are read with
 UTC getters. Writes therefore do not depend on the process zone, but reads are
 exact only from a client that decodes in UTC: create it with
-`createClient({ ..., timezone: 'utc' })` or run with `TZ=UTC`. The columns only
-convert values; refusing a client that decodes in another zone, as the 0.x
-session does, belongs to the native session (#160), which will reuse the 0.x
-timezone guard. `mode: 'string'` reads the wall clock in the formats above and
+`createClient({ ..., timezone: 'utc' })` or run with `TZ=UTC`. A native
+`select()` that reads a date or time column refuses any other client before
+sending the statement. It reads the client's declared `timezone`, or runs one
+probe query for a client that declares none, as the 0.x guard does.
+`db.execute()` does not decode, so it is not checked, and neither is a raw
+`sql\`${t.at}\`` field without `mapWith()`, which returns the driver's value. `mode: 'string'` reads the wall clock in the formats above and
 writes the string as given; text from the driver is accepted only in those
 formats.
 
@@ -147,10 +225,10 @@ are not in `drizzle-cubrid/native`:
 - `NUMERIC` reads with the column's scale (`'12.5'` stored in `NUMERIC(10,2)`
   reads `'12.50'`), and the server rounds extra fractional digits without an
   error: `'0.00000000005'` written to `NUMERIC(38,10)` reads `'0.0000000001'`.
-- Native columns assume a client that decodes date and time values in UTC
-  (`timezone: 'utc'` or `TZ=UTC`); nothing enforces it until the native
-  session (#160).
 - Collection values cannot be passed to Drizzle's generic operators
-  (`eq(t.tags, ['a'])`) yet: they need the collection literal, which the native
-  query builder will emit (#158).
+  (`eq(t.tags, ['a'])`) yet: they need the collection literal (#159).
+- Typing: as in Drizzle, a `sql` field keeps its declared type even from a
+  left-joined table; declare `sql<number | null>` when it can be NULL.
+- COUNT(*) is a BIGINT: Drizzle's `count()` maps it to a number; a bare
+  `sql\`count(*)\`` without `mapWith()` returns a `bigint`.
 - Identifiers are case-insensitive: CUBRID stores `"userName"` as `username`.
