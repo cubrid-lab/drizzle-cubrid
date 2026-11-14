@@ -5,7 +5,8 @@
 // local-zone getters by default (`timezone: 'local'`), which matches only when
 // the process zone is UTC, so a SELECT that reads one is refused for any other
 // client before it is sent. This is the native counterpart of the 0.x guard
-// (#207, #210); it shares no code with it.
+// (#207, #210) in src/timezone.ts. The duplication is deliberate (native code
+// may not import 0.x modules): fix a bug in one in the other too.
 
 /** How a client turns a stored wall clock into a `Date`. */
 type ClientZone = 'utc' | 'local' | 'other';

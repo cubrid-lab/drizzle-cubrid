@@ -156,21 +156,65 @@ describe('golden SQL', () => {
 		expect(query.toSQL()).toEqual({ sql: text, params });
 	});
 
-	it('renders subqueries in from() and joins, with fields under the alias', () => {
+	it('renders subqueries in from() and joins, with every field named by key path and qualified', () => {
 		const sq = db
 			.select({ authorId: posts.authorId, n: sql<number>`count(*)`.mapWith(Number).as('n') })
 			.from(posts)
 			.groupBy(posts.authorId)
 			.as('sq');
-		expect(db.select().from(sq).where(gt(sq.n, 1)).toSQL()).toEqual({
-			sql: 'select "sq"."author_id", "sq"."n" as "n" from (select "posts"."author_id", count(*) as "n" from "posts" group by "posts"."author_id") "sq" where "n" > ?',
+		const inner =
+			'(select "posts"."author_id" as "authorId", count(*) as "n" from "posts" group by "posts"."author_id") "sq"';
+		expect(db.select().from(sq).where(gt(sq.n, 1)).orderBy(desc(sq.n)).toSQL()).toEqual({
+			sql: `select "sq"."authorId", "sq"."n" from ${inner} where "sq"."n" > ? order by "sq"."n" desc`,
 			params: [1],
 		});
 		expect(
-			db.select({ name: users.name, n: sq.n }).from(users).leftJoin(sq, eq(users.id, sq.authorId)).toSQL(),
+			db
+				.select({ name: users.name, n: sq.n })
+				.from(users)
+				.leftJoin(sq, eq(users.id, sq.authorId))
+				.having(gt(sq.n, 0))
+				.toSQL(),
 		).toEqual({
-			sql: 'select "users"."name", "sq"."n" as "n" from "users" left join (select "posts"."author_id", count(*) as "n" from "posts" group by "posts"."author_id") "sq" on "users"."id" = "sq"."author_id"',
-			params: [],
+			sql: `select "users"."name", "sq"."n" from "users" left join ${inner} on "users"."id" = "sq"."authorId" having "sq"."n" > ?`,
+			params: [0],
+		});
+	});
+
+	it('names subquery fields by key path, so joined tables sharing column names stay apart (review item 4)', () => {
+		const pets = cubridTable('pets', { id: integer().primaryKey(), ownerId: bigint('owner_id', { mode: 'bigint' }) });
+		const all = db.select().from(users).innerJoin(pets, eq(users.id, pets.ownerId)).as('s3');
+		expect(db.select().from(all).where(eq(all.pets.id, 1)).toSQL().sql).toBe(
+			'select "s3"."users.id", "s3"."users.name", "s3"."users.active", "s3"."pets.id", "s3"."pets.ownerId" from (select "users"."id" as "users.id", "users"."name" as "users.name", "users"."active" as "users.active", "pets"."id" as "pets.id", "pets"."owner_id" as "pets.ownerId" from "users" inner join "pets" on "users"."id" = "pets"."owner_id") "s3" where "s3"."pets.id" = ?',
+		);
+		const pair = db
+			.select({ a: users.id, b: pets.id })
+			.from(users)
+			.innerJoin(pets, eq(users.id, pets.ownerId))
+			.as('s2');
+		expect(db.select().from(pair).toSQL().sql).toMatch(
+			/^select "s2"."a", "s2"."b" from \(select "users"."id" as "a", "pets"."id" as "b" /,
+		);
+		expect(() => db.select({ a: users.id, A: users.name }).from(users).as('s')).toThrow(
+			/Subquery fields a and A have the same name ignoring case/,
+		);
+	});
+
+	it('qualifies subquery sql fields in conditions (review item 3)', () => {
+		const sq2 = db
+			.select({ uid: users.id, label: sql<string>`upper(${users.name})`.as('name') })
+			.from(users)
+			.as('sq2');
+		expect(
+			db
+				.select({ id: posts.id, l: sq2.label })
+				.from(posts)
+				.innerJoin(sq2, eq(posts.authorId, sq2.uid))
+				.where(eq(sq2.label, 'ALICE'))
+				.toSQL(),
+		).toEqual({
+			sql: 'select "posts"."id", "sq2"."label" from "posts" inner join (select "users"."id" as "uid", upper("users"."name") as "label" from "users") "sq2" on "posts"."author_id" = "sq2"."uid" where "sq2"."label" = ?',
+			params: ['ALICE'],
 		});
 	});
 
@@ -311,13 +355,62 @@ describe('execution and row mapping', () => {
 		expect(rows).toEqual([{ u: null, p: { title: 'r', id: 12 } }]);
 	});
 
-	it('does not null an object mixing tables or holding sql values', async () => {
-		const client = fakeClient([[[null, null, null]]]);
-		const rows = await drizzle(client)
-			.select({ o: { a: users.id, b: posts.id, c: sql`1` } })
+	it('decides nullability from column fields only, as Drizzle does (review items 1, 2)', async () => {
+		// A left-joined table's columns are all NULL: the object is null even though a sql field has a value.
+		const mixed = fakeClient([[['a', null, 1]]]);
+		const rows = await drizzle(mixed)
+			.select({ u: users.name, post: { title: posts.title, one: sql<number>`1`.mapWith(Number) } })
 			.from(users)
 			.leftJoin(posts, eq(users.id, posts.authorId));
-		expect(rows).toEqual([{ o: { a: null, b: null, c: null } }]);
+		expect(rows).toEqual([{ u: 'a', post: null }]);
+		// A non-NULL column of the same table keeps the object.
+		const matched = fakeClient([[['a', 't', null]]]);
+		expect(
+			await drizzle(matched)
+				.select({ u: users.name, post: { title: posts.title, price: posts.price } })
+				.from(users)
+				.leftJoin(posts, eq(users.id, posts.authorId)),
+		).toEqual([{ u: 'a', post: { title: 't', price: null } }]);
+		// Columns of two tables in one object: never nulled.
+		const client = fakeClient([[[null, null, null]]]);
+		expect(
+			await drizzle(client)
+				.select({ o: { a: users.id, b: posts.id, c: sql`1` } })
+				.from(users)
+				.leftJoin(posts, eq(users.id, posts.authorId)),
+		).toEqual([{ o: { a: null, b: null, c: null } }]);
+		// An object of plain sql fields only is never nulled.
+		const onlySql = fakeClient([[[1n, null]]]);
+		expect(
+			await drizzle(onlySql)
+				.select({ id: users.id, o: { c: sql`null` } })
+				.from(users)
+				.leftJoin(posts, eq(users.id, posts.authorId)),
+		).toEqual([{ id: 1n, o: { c: null } }]);
+	});
+
+	it('nulls an unmatched left-joined subquery, sql fields included (review item 1)', async () => {
+		const sq2 = db
+			.select({ uid: users.id, label: sql<string>`upper(${users.name})`.as('name') })
+			.from(users)
+			.as('sq2');
+		const client = fakeClient([
+			[
+				[1n, 'a', null, null, null],
+				[2n, 'b', 0, 2n, 'B'],
+			],
+		]);
+		const rows = await drizzle(client)
+			.select()
+			.from(users)
+			.leftJoin(sq2, eq(users.id, sql`${sq2.uid} + 100`));
+		expect(rows).toEqual([
+			{ users: { id: 1n, name: 'a', active: null }, sq2: null },
+			{ users: { id: 2n, name: 'b', active: false }, sq2: { uid: 2n, label: 'B' } },
+		]);
+	});
+
+	it('keeps an inner-joined object whose values are NULL', async () => {
 		const inner = fakeClient([[[null, null]]]);
 		expect(
 			await drizzle(inner)
@@ -360,7 +453,7 @@ describe('execution and row mapping', () => {
 			.select()
 			.from(sq);
 		expect(q.toSQL().sql).toBe(
-			'select "nested_sq"."id", "nested_sq"."name", "nested_sq"."n" as "n" from (select "users"."id", "users"."name", 1 as "n" from "users") "nested_sq"',
+			'select "nested_sq"."id", "nested_sq"."info.name", "nested_sq"."info.n" from (select "users"."id" as "id", "users"."name" as "info.name", 1 as "info.n" from "users") "nested_sq"',
 		);
 		expect(await q).toEqual([{ id: 1n, info: { name: 'a', n: 1 } }]);
 	});

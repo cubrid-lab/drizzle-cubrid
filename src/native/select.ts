@@ -2,7 +2,7 @@
 // `query-builders/select.types`, so they match Drizzle's other dialects; SQL
 // generation and row mapping are in dialect.ts.
 
-import { aliasedTableColumn, Subquery } from 'drizzle-orm';
+import { aliasedTable, Subquery } from 'drizzle-orm';
 import { Column, type ColumnBaseConfig, type UpdateColConfig } from 'drizzle-orm/column';
 import type { ColumnDataType } from 'drizzle-orm/column-builder';
 import { entityKind, is } from 'drizzle-orm/entity';
@@ -39,10 +39,13 @@ import {
 	type CubridSelectConfig,
 	type CubridSelectSource,
 	mapRow,
+	markSubqueryField,
 	type OrderedField,
 	orderSelectedFields,
+	outputName,
 	readsTemporal,
 	sourceName,
+	subqueryFieldSource,
 } from './dialect.js';
 import { getSqlDecoder } from './internal.js';
 import type { CubridSession } from './session.js';
@@ -110,24 +113,44 @@ function assertSource(source: unknown, where: string): asserts source is CubridS
 	}
 }
 
-/** The fields of a subquery, re-pointed at its alias so outer queries read `"alias"."field"`. */
-function aliasFields(fields: Record<string, unknown>, alias: string, prefix = ''): Record<string, unknown> {
+/**
+ * A subquery's column as seen from outside: the column `"alias"."key.path"`,
+ * with the original column's codec. Its table is Drizzle's public
+ * `aliasedTable()`, so `getTableName()` gives the alias.
+ */
+function subqueryColumn(column: Column, alias: string, name: string): Column {
+	const table = aliasedTable(column.table, alias);
+	return new Proxy(column, {
+		get(target, prop, receiver) {
+			if (prop === 'table') return table;
+			if (prop === 'name') return name;
+			if (prop === 'keyAsName') return false;
+			return Reflect.get(target, prop, receiver);
+		},
+	});
+}
+
+/**
+ * The fields of a subquery, re-pointed at its alias: each one refers to the
+ * output name its key path got in the subquery (`"alias"."key.path"`), in the
+ * select list and in conditions alike.
+ */
+function aliasFields(fields: Record<string, unknown>, alias: string, prefix: string[] = []): Record<string, unknown> {
 	const aliased: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(fields)) {
-		const path = `${prefix}${key}`;
-		if (is(value, SQL.Aliased)) {
-			const decoder = getSqlDecoder(value.sql) ?? noopDecoder;
-			const ref = sql`${sql.identifier(alias)}.${sql.identifier(value.fieldAlias)}`.mapWith(decoder);
-			aliased[key] = new SQL.Aliased(ref, value.fieldAlias);
+		const path = [...prefix, key];
+		const name = outputName(path);
+		if (is(value, SQL.Aliased) || (is(value, SQL) && subqueryFieldSource(value) !== undefined)) {
+			const decoder = getSqlDecoder(is(value, SQL) ? value : value.sql) ?? noopDecoder;
+			aliased[key] = markSubqueryField(sql`${sql.identifier(alias)}.${sql.identifier(name)}`.mapWith(decoder), alias);
 		} else if (is(value, SQL)) {
-			throw new Error(`Subquery field ${path} is raw sql without a name; give it one with sql\`...\`.as('name')`);
+			throw new Error(`Subquery field ${name} is raw sql without a name; give it one with sql\`...\`.as('name')`);
 		} else if (is(value, Table)) {
-			aliased[key] = aliasFields(getTableColumns(value), alias, `${path}.`);
+			aliased[key] = aliasFields(getTableColumns(value), alias, path);
 		} else if (is(value, Column)) {
-			// Drizzle's public aliasedTableColumn() re-points the column's table at the alias.
-			aliased[key] = aliasedTableColumn(value, alias);
+			aliased[key] = subqueryColumn(value, alias, name);
 		} else if (typeof value === 'object' && value !== null) {
-			aliased[key] = aliasFields(value as Record<string, unknown>, alias, `${path}.`);
+			aliased[key] = aliasFields(value as Record<string, unknown>, alias, path);
 		}
 	}
 	return aliased;
@@ -331,7 +354,8 @@ export class CubridSelect<
 			if (key === '_' || key === 'getSQL') throw new Error(`A subquery field cannot be named ${key}`);
 		}
 		const fields = aliasFields(this.config.fields, alias);
-		return Object.assign(new Subquery(this.getSQL(), fields, alias), fields) as CubridSubquery<
+		const query = this.dialect.buildSelectQuery(this.config, true);
+		return Object.assign(new Subquery(query, fields, alias), fields) as CubridSubquery<
 			TAlias,
 			CubridAliasedSelection<BuildSubquerySelection<TSelection, TNullabilityMap>, TAlias>
 		>;

@@ -1251,6 +1251,72 @@ describe('drizzle-cubrid/native select and session (#158, #160)', () => {
 		).rejects.toThrow();
 	});
 
+	it('nulls unmatched left-joined subqueries and objects mixing columns with sql (review items 1, 2)', async () => {
+		const sq2 = db
+			.select({ uid: authors.id, label: sql<string>`upper(${authors.name})`.as('name') })
+			.from(authors)
+			.as('sq2');
+		const rows = await db
+			.select()
+			.from(authors)
+			.leftJoin(sq2, eq(authors.id, sql`${sq2.uid} + 100`))
+			.where(eq(authors.id, 1n));
+		expect(rows).toEqual([{ [native.getTableConfig(authors).name]: { id: 1n, name: 'Ann', joined }, sq2: null }]);
+		const mixed = await db
+			.select({ a: authors.name, book: { name: books.name, one: sql<number>`1`.mapWith(Number) } })
+			.from(authors)
+			.leftJoin(books, eq(authors.id, books.authorId))
+			.where(eq(authors.id, 3n));
+		expect(mixed).toEqual([{ a: 'Cy', book: null }]);
+	});
+
+	it('qualifies subquery sql fields in conditions next to a same-named column (review item 3)', async () => {
+		const sq2 = db
+			.select({ uid: authors.id, label: sql<string>`upper(${authors.name})`.as('name') })
+			.from(authors)
+			.as('sq2');
+		const rows = await db
+			.select({ b: books.name, l: sq2.label })
+			.from(books)
+			.innerJoin(sq2, eq(books.authorId, sq2.uid))
+			.where(eq(sq2.label, 'ANN'))
+			.orderBy(books.id, sq2.label);
+		expect(rows).toEqual([
+			{ b: 'A1', l: 'ANN' },
+			{ b: 'A2', l: 'ANN' },
+		]);
+	});
+
+	it('selects from a subquery over a join whose tables share column names (review item 4)', async () => {
+		const s3 = db.select().from(authors).innerJoin(books, eq(authors.id, books.authorId)).as('s3');
+		const rows = await db
+			.select()
+			.from(s3)
+			.where(eq(s3[native.getTableConfig(books).name as 'x'].id, 12));
+		expect(rows).toEqual([
+			{
+				[native.getTableConfig(authors).name]: { id: big, name: 'Bob', joined: null },
+				[native.getTableConfig(books).name]: {
+					id: 12,
+					authorId: big,
+					name: 'B1',
+					price: '2.2500000000',
+					day: '9999-12-31',
+				},
+			},
+		]);
+		const s2 = db
+			.select({ a: authors.id, b: books.id, an: authors.name, bn: books.name })
+			.from(authors)
+			.innerJoin(books, eq(authors.id, books.authorId))
+			.as('s2');
+		expect(await db.select().from(s2).orderBy(s2.b)).toEqual([
+			{ a: 1n, b: 10, an: 'Ann', bn: 'A1' },
+			{ a: 1n, b: 11, an: 'Ann', bn: 'A2' },
+			{ a: big, b: 12, an: 'Bob', bn: 'B1' },
+		]);
+	});
+
 	it('quotes identifiers with embedded double quotes', async () => {
 		expect(await db.select().from(weird)).toEqual([{ 'co"l': 7 }]);
 	});

@@ -73,6 +73,30 @@ export interface CubridSelectConfig {
 	forUpdate: boolean;
 }
 
+/**
+ * `sql` expressions that stand for a field of a subquery (`"alias"."field"`),
+ * by the subquery alias they belong to. They count as that source's fields
+ * when a join makes it nullable.
+ */
+const subqueryFieldSources = new WeakMap<SQL, string>();
+
+export function markSubqueryField(field: SQL, alias: string): SQL {
+	subqueryFieldSources.set(field, alias);
+	return field;
+}
+
+export function subqueryFieldSource(field: unknown): string | undefined {
+	return is(field, SQL) ? subqueryFieldSources.get(field) : undefined;
+}
+
+/**
+ * The output name of a selected field inside a subquery: its key path, so
+ * joined tables that share column names stay distinct (`users.id`, `pets.id`).
+ */
+export function outputName(path: readonly string[]): string {
+	return path.join('.');
+}
+
 /** The name a source is referred to by: a table's (alias) name or a subquery's alias. */
 export function sourceName(source: CubridSelectSource): string {
 	return is(source, Subquery) ? source._.alias : getTableName(source);
@@ -113,11 +137,18 @@ export function readsTemporal(field: Column | SQL | SQL.Aliased): boolean {
 	return temporal(decoder) || (decoder instanceof CubridCollection && temporal(decoder.element));
 }
 
+/** The table or subquery a field's value comes from, or undefined for a plain `sql` expression. */
+function sourceOf(field: Column | SQL | SQL.Aliased): string | undefined {
+	return is(field, Column) ? getTableName(field.table) : subqueryFieldSource(field);
+}
+
 /**
  * One result row from a positional driver row. Values are decoded by their
- * field's decoder; NULL stays `null`. A nested object whose values all come
- * from one table that a join made nullable, and are all NULL, becomes `null`,
- * as in Drizzle's other dialects.
+ * field's decoder; NULL stays `null`. As in Drizzle's other dialects, a
+ * top-level object (`{ pet: { name: pets.name, ... } }`, or a table in a join)
+ * becomes `null` when a join made its source nullable: its column fields
+ * (and subquery fields) all come from that one source and are all NULL.
+ * Plain `sql` fields in the object do not count.
  */
 export function mapRow(
 	fields: readonly OrderedField[],
@@ -133,7 +164,7 @@ export function mapRow(
 		throw new Error(`The CUBRID client returned a row of ${row.length} values for ${fields.length} selected fields`);
 	}
 	const result: Record<string, unknown> = {};
-	// Per top-level object: the one table all its NULL values came from, or false.
+	// Per top-level object: the one source all its column values came from while NULL, or false.
 	const nullable = new Map<string, string | false>();
 	fields.forEach(({ path, field }, index) => {
 		const raw = row[index];
@@ -144,15 +175,12 @@ export function mapRow(
 			node = node[key] as Record<string, unknown>;
 		}
 		node[path[path.length - 1] as string] = value;
-		if (path.length > 1) {
+		const source = path.length === 2 ? sourceOf(field) : undefined;
+		if (source !== undefined) {
 			const objectName = path[0] as string;
-			const tableName = is(field, Column) ? getTableName(field.table) : undefined;
 			const previous = nullable.get(objectName);
-			if (value !== null || tableName === undefined || (previous !== undefined && previous !== tableName)) {
-				nullable.set(objectName, false);
-			} else if (previous === undefined) {
-				nullable.set(objectName, tableName);
-			}
+			if (value !== null || (previous !== undefined && previous !== source)) nullable.set(objectName, false);
+			else if (previous === undefined) nullable.set(objectName, source);
 		}
 	});
 	if (nullability) {
@@ -184,11 +212,27 @@ function refuseCollectionParams(chunks: readonly unknown[]): void {
 	}
 }
 
-function selectionSql(fields: readonly OrderedField[]): SQL {
+/**
+ * The select list. In a subquery (`outputNames`) every field is named by its
+ * key path, so outer queries can refer to each one; names must differ
+ * ignoring case, as CUBRID compares identifiers that way.
+ */
+function selectionSql(fields: readonly OrderedField[], outputNames: boolean): SQL {
+	const seen = new Map<string, string>();
 	return sql.join(
-		fields.map(({ field }) =>
-			is(field, SQL.Aliased) ? sql`${field.sql} as ${sql.identifier(field.fieldAlias)}` : sql`${field}`,
-		),
+		fields.map(({ path, field }) => {
+			const expression = is(field, SQL.Aliased) ? field.sql : field;
+			if (!outputNames) {
+				return is(field, SQL.Aliased) ? sql`${expression} as ${sql.identifier(field.fieldAlias)}` : sql`${field}`;
+			}
+			const name = outputName(path);
+			const clash = seen.get(name.toLowerCase());
+			if (clash !== undefined) {
+				throw new Error(`Subquery fields ${clash} and ${name} have the same name ignoring case; rename one`);
+			}
+			seen.set(name.toLowerCase(), name);
+			return sql`${expression} as ${sql.identifier(name)}`;
+		}),
 		sql`, `,
 	);
 }
@@ -209,7 +253,8 @@ export class CubridDialect {
 		return { sql: text, params };
 	}
 
-	buildSelectQuery(config: CubridSelectConfig): SQL {
+	/** The SELECT; with `outputNames`, as a subquery whose fields are named by key path. */
+	buildSelectQuery(config: CubridSelectConfig, outputNames = false): SQL {
 		if (config.offset !== undefined && config.limit === undefined) {
 			throw new Error('CUBRID needs limit() with offset(); add .limit() or remove .offset()');
 		}
@@ -221,7 +266,7 @@ export class CubridDialect {
 		const fields = orderSelectedFields(config.fields);
 		if (fields.length === 0) throw new Error('A select needs at least one field');
 		const parts: SQL[] = [
-			sql`select ${config.distinct ? sql`distinct ` : undefined}${selectionSql(fields)} from ${config.source}`,
+			sql`select ${config.distinct ? sql`distinct ` : undefined}${selectionSql(fields, outputNames)} from ${config.source}`,
 		];
 		for (const join of config.joins) {
 			parts.push(

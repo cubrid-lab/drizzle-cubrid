@@ -84,11 +84,11 @@ types, so they match Drizzle's other dialects.
 | --- | --- |
 | `select()`, `select({ ... })`, `selectDistinct()` | Partial selections may nest objects and include `sql` fields; `sql.mapWith()` decoders are applied |
 | `from(table \| subquery)` | Only native tables and subqueries made with `.as(alias)` |
-| `innerJoin`, `leftJoin`, `rightJoin`, `crossJoin` | A left join makes the joined fields nullable, a right join the earlier ones; a nested object whose fields all come from one such table and are all NULL becomes `null` |
+| `innerJoin`, `leftJoin`, `rightJoin`, `crossJoin` | A left join makes the joined fields nullable, a right join the earlier ones. As in Drizzle, a top-level object (a table in `select()`, or `{ pet: { ... } }`) becomes `null` when its column fields all come from one such table or subquery and are all NULL; plain `sql` fields in it do not count. A join changes the builder it is called on, as Drizzle's do |
 | `where`, `groupBy`, `having`, `orderBy` | Drizzle's operators and aggregates (`eq`, `and`, `inArray`, `count`, `sum`, `asc`, `desc`, ...); callbacks receive the selected fields |
 | `limit`, `offset` | Bound as parameters; `offset()` needs `limit()` |
 | `.for('update')` | Locks the rows until the transaction ends; use it inside `client.transaction()` |
-| `.as(alias)` | A subquery for `from()` and joins; its fields are read as `"alias"."field"`. A `sql` field needs `.as('name')` |
+| `.as(alias)` | A subquery for `from()` and joins. Inside it each field is named by its key path (`"users.id"`, `"pets.id"`), so joined tables that share column names stay apart; outside, every use of a field (select list, `where`, `on`, `orderBy`, `having`) reads `"alias"."key.path"`. Names that differ only in case are refused, as CUBRID compares identifiers ignoring case. A `sql` field needs `.as('name')` (the name itself is not used) |
 | `.prepare()` | Builds the SQL once; `execute({ name: value })` fills `sql.placeholder('name')` |
 | `.toSQL()`, `$dynamic()`, `await`/`then` | As in Drizzle |
 | `db.execute(sql\`...\`)` | Runs a raw statement; rows come back as cubrid-client returns them (objects by label), not decoded |
@@ -160,7 +160,8 @@ exact only from a client that decodes in UTC: create it with
 `select()` that reads a date or time column refuses any other client before
 sending the statement. It reads the client's declared `timezone`, or runs one
 probe query for a client that declares none, as the 0.x guard does.
-`db.execute()` does not decode, so it is not checked. `mode: 'string'` reads the wall clock in the formats above and
+`db.execute()` does not decode, so it is not checked, and neither is a raw
+`sql\`${t.at}\`` field without `mapWith()`, which returns the driver's value. `mode: 'string'` reads the wall clock in the formats above and
 writes the string as given; text from the driver is accepted only in those
 formats.
 
