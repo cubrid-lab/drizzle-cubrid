@@ -414,7 +414,7 @@ describe('$returningId()', () => {
 		const client = fakeClient([{ affectedRows: 1 }, { affectedRows: 2, lastInsertId: 9 }]);
 		const local = drizzle(client);
 		await expect(local.insert(users).values({ name: 'a' }).$returningId()).rejects.toThrow(
-			/reported no generated key for AUTO_INCREMENT column id/,
+			/the row was inserted \(affectedRows 1\), but CUBRID reported no generated key for AUTO_INCREMENT column id; do not retry/,
 		);
 		expect(
 			await local
@@ -455,7 +455,7 @@ describe('$returningId()', () => {
 		expect(await prepared.execute({ id: 6 })).toEqual([{ id: 6n }]);
 	});
 
-	it('asks for generated keys only when the INSERT is not plain', async () => {
+	it('asks for generated keys for every AUTO_INCREMENT $returningId(), and only then', async () => {
 		const client = fakeClient([
 			{ affectedRows: 1, lastInsertId: 1 },
 			{ affectedRows: 1, lastInsertId: 2 },
@@ -491,7 +491,7 @@ describe('$returningId()', () => {
 		await local.insert(tagged).values({ tags: [1] });
 		expect(client.calls.map((c) => c.options)).toEqual([
 			{ generatedKeys: true },
-			undefined,
+			{ generatedKeys: true },
 			{ generatedKeys: true },
 			{ generatedKeys: true },
 			undefined,
@@ -571,6 +571,8 @@ describe('$returningId()', () => {
 			'insert into "docs" ("id", "title", "at") values (?, ?, ?), (?, default, ?), (\'s\', default, ?)',
 		);
 		expect(await query).toEqual([{ id: 'id-2' }, { id: 'mine' }]);
+		// No AUTO_INCREMENT key: the INSERT runs without asking for generated keys.
+		expect(client.calls[0]?.options).toBeUndefined();
 	});
 
 	it('returns no rows for a table without a reportable key', async () => {

@@ -305,35 +305,22 @@ function columnsOf(table: Table): Record<string, Column> {
  * values are left out; columns with `$onUpdateFn()` that `set` does not name
  * are set to its value, as in Drizzle's other dialects.
  */
-function updateSetSql(
-	table: Table,
-	set: Record<string, unknown>,
-	statement: string,
-	written?: (column: Column, value: unknown) => void,
-): SQL {
+function updateSetSql(table: Table, set: Record<string, unknown>, statement: string): SQL {
 	const columns = columnsOf(table);
 	const assignments: SQL[] = [];
 	for (const [key, value] of Object.entries(set)) {
 		if (value === undefined) continue;
 		const column = columns[key];
 		if (!column) throw new Error(`${statement}: ${getTableName(table)} has no column with the key ${key}`);
-		written?.(column, value);
 		assignments.push(sql`${sql.identifier(column.name)} = ${columnValueSql(column, value)}`);
 	}
 	if (assignments.length === 0) throw new Error(`${statement} needs at least one value to set`);
 	for (const [key, column] of Object.entries(columns)) {
 		if (column.onUpdateFn && set[key] === undefined) {
-			const value = column.onUpdateFn();
-			written?.(column, value);
-			assignments.push(sql`${sql.identifier(column.name)} = ${columnValueSql(column, value)}`);
+			assignments.push(sql`${sql.identifier(column.name)} = ${columnValueSql(column, column.onUpdateFn())}`);
 		}
 	}
 	return sql.join(assignments, sql`, `);
-}
-
-/** Whether a written value becomes SQL text other than a parameter: `sql`, or a collection literal (a CAST call). */
-function writesExpression(column: Column, value: unknown): boolean {
-	return is(value, SQL) || (column instanceof CubridCollection && value !== null && value !== undefined);
 }
 
 export class CubridDialect {
@@ -386,20 +373,13 @@ export class CubridDialect {
 
 	/**
 	 * The INSERT, and for VALUES the value each row wrote to each column,
-	 * given or generated, and whether every value is a parameter or DEFAULT
-	 * (both for `$returningId()`). Every column
+	 * given or generated (for `$returningId()`). Every column
 	 * is listed; a row without a value for one writes its `$defaultFn()`
 	 * value, else its `$onUpdateFn()` value when it has no `.default()`, else
 	 * the `DEFAULT` keyword (the table's DDL default, or NULL).
 	 */
-	buildInsertQuery(config: CubridInsertConfig): { query: SQL; inserted: CubridInsertedValues; plain: boolean } {
+	buildInsertQuery(config: CubridInsertConfig): { query: SQL; inserted: CubridInsertedValues } {
 		const { table } = config;
-		// Whether every value is a parameter or DEFAULT: cubrid-client reads the
-		// session's last insert id only after such an INSERT (see dml.ts).
-		let plain = config.select === undefined;
-		const track = (column: Column, value: unknown) => {
-			if (writesExpression(column, value)) plain = false;
-		};
 		const entries = Object.entries(columnsOf(table));
 		const inserted: CubridInsertedValues = [];
 		let body: SQL;
@@ -419,7 +399,6 @@ export class CubridDialect {
 						else return sql`default`;
 					}
 					written[key] = value;
-					track(column, value);
 					return columnValueSql(column, value);
 				});
 				inserted.push(written);
@@ -429,9 +408,9 @@ export class CubridDialect {
 			body = sql`(${sql.join(names, sql`, `)}) values ${sql.join(tuples, sql`, `)}`;
 		}
 		const onDuplicate = config.onDuplicateKeyUpdate
-			? sql` on duplicate key update ${updateSetSql(table, config.onDuplicateKeyUpdate, 'onDuplicateKeyUpdate()', track)}`
+			? sql` on duplicate key update ${updateSetSql(table, config.onDuplicateKeyUpdate, 'onDuplicateKeyUpdate()')}`
 			: undefined;
-		return { query: sql`insert into ${table} ${body}${onDuplicate}`, inserted, plain };
+		return { query: sql`insert into ${table} ${body}${onDuplicate}`, inserted };
 	}
 
 	/** `UPDATE … SET … [WHERE …] [ORDER BY …] [LIMIT …]`. */

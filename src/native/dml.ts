@@ -251,7 +251,7 @@ export class CubridInsertReturningId<TTable extends CubridTable>
 				'$returningId() with onDuplicateKeyUpdate() needs an INSERT of one row: CUBRID does not report which rows were inserted and which updated',
 			);
 		}
-		const { query, inserted, plain } = this.dialect.buildInsertQuery(this.config);
+		const { query, inserted } = this.dialect.buildInsertQuery(this.config);
 		const map = (result: CubridDmlResult, placeholderValues: Record<string, unknown>) => {
 			// With ON DUPLICATE KEY UPDATE, CUBRID reports affectedRows 2 whenever
 			// the row conflicted (changed or not): no row then has the written key.
@@ -271,7 +271,7 @@ export class CubridInsertReturningId<TTable extends CubridTable>
 						// The server generated the key (none given, or NULL).
 						if (result.lastInsertId === undefined) {
 							throw new Error(
-								`$returningId(): the CUBRID client reported no generated key for AUTO_INCREMENT column ${column.name} of the inserted row`,
+								`$returningId(): the row was inserted (affectedRows 1), but CUBRID reported no generated key for AUTO_INCREMENT column ${column.name}; do not retry the insert`,
 							);
 						}
 						row[key] = column.mapFromDriverValue(result.lastInsertId);
@@ -281,12 +281,12 @@ export class CubridInsertReturningId<TTable extends CubridTable>
 			}
 			return rows as CubridReturningId<TTable>[];
 		};
-		// cubrid-client reads the session's last insert id only after a plain
-		// INSERT (values and DEFAULT, no function call such as the CAST of a
-		// collection literal). For any other INSERT it asks the server for the
-		// keys the statement generated instead, which CUBRID 11.0-11.4 refuses
-		// for a table with an INSERT trigger.
-		const options: CubridWriteOptions | undefined = autoIncrement && !plain ? { generatedKeys: true } : undefined;
+		// AUTO_INCREMENT keys come from the keys the server says this INSERT
+		// generated (GET_GENERATED_KEYS), never from the session's last insert
+		// id, which cubrid-client leaves out when it equals the value seen
+		// before. CUBRID 11.0-11.4 refuses the request, before inserting, for a
+		// table with an INSERT trigger (-983).
+		const options: CubridWriteOptions | undefined = autoIncrement ? { generatedKeys: true } : undefined;
 		return new CubridPreparedWrite(this.session, this.dialect.sqlToQuery(query), map, options);
 	}
 

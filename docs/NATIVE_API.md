@@ -186,18 +186,22 @@ the driver's error and its `code` (-670 on CUBRID 11.4).
 table's `.primaryKey()` columns that have `.autoIncrement()` or `$defaultFn()`
 (typed so):
 
-- An AUTO_INCREMENT key is the generated key cubrid-client reports, read
-  through the column's codec (a `bigint({ mode: 'bigint' })` key stays exact
-  above 2^53; an `integer()` key that does not fit throws). For an INSERT
-  whose values are all parameters or `DEFAULT` this is the session's last
-  insert id. cubrid-client does not read that after an INSERT with a
-  function call, such as the `CAST(...)` of a collection value or a `sql`
-  value like `sql\`upper(${name})\``, so for those `$returningId()` asks for
-  the statement's generated keys (`generatedKeys: true`), which is exact.
-  CUBRID 11.0–11.4 rejects that request for a table with an INSERT trigger
-  (-983): on such a table, `$returningId()` works only for plain values.
-  If an inserted row's generated key is still not reported, `$returningId()`
-  throws instead of returning `[]`.
+- An AUTO_INCREMENT key comes from the keys the server says the INSERT
+  generated: `$returningId()` runs it with cubrid-client's
+  `generatedKeys: true` (CAS GET_GENERATED_KEYS), which is exact for every
+  INSERT, including one with a collection literal or a `sql` value, and a key
+  equal to the one the connection saw before (cubrid-client's plain
+  `lastInsertId` leaves such a key out as ambiguous). The key is read through
+  the column's codec (a `bigint({ mode: 'bigint' })` key stays exact above
+  2^53; an `integer()` key that does not fit throws). If the row was inserted
+  but the server still reports no key, `$returningId()` throws, saying the
+  row was inserted, so do not retry it.
+- **Tables with an INSERT trigger:** CUBRID 11.0–11.4 rejects a generated-keys
+  INSERT on a table with an INSERT trigger (-983) before inserting anything
+  (verified on 11.4, also inside `client.transaction()`). Use `insert()`
+  without `$returningId()` on such tables and read the key back by a unique
+  column. Inserts without `$returningId()`, and `$returningId()` on tables
+  whose only keys are `$defaultFn()` keys, never ask for generated keys.
 - CUBRID does not promise that the keys of a multi-row INSERT are
   consecutive, so a multi-row `values()` into a table with an AUTO_INCREMENT
   key is refused before anything is sent: insert the rows one at a time.

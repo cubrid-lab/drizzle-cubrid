@@ -1660,8 +1660,8 @@ describe('drizzle-cubrid/native insert, update and delete (#159)', () => {
 				{ id: big + 2n, label: null },
 				{ id: big + 3n, label: 'y' },
 			]);
-			// CUBRID 11.4 refuses the generated-keys request on a table with an INSERT
-			// trigger (-983); plain values still use the session's last insert id.
+			// $returningId() asks for generated keys, which CUBRID 11.4 refuses on a
+			// table with an INSERT trigger (-983) before inserting anything.
 			const log = name('ntaglog');
 			await createTable(log, 'n INTEGER');
 			const trigger = name('ntagtrg');
@@ -1669,16 +1669,64 @@ describe('drizzle-cubrid/native insert, update and delete (#159)', () => {
 				`CREATE TRIGGER ${trigger} AFTER INSERT ON ${quoted(tagged)} EXECUTE INSERT INTO ${log} VALUES (1)`,
 			);
 			try {
-				expect(await db.insert(tagged).values({ label: 'plain' }).$returningId()).toEqual([{ id: big + 4n }]);
-				const error = await db
-					.insert(tagged)
-					.values({ tags: [1] })
-					.$returningId()
-					.catch((e: unknown) => e);
-				expect((error as { code?: unknown }).code).toBe(-983);
+				const before = await countRows(tagged);
+				for (const values of [{ label: 'plain' }, { tags: [1] }]) {
+					const error = await db
+						.insert(tagged)
+						.values(values)
+						.$returningId()
+						.catch((e: unknown) => e);
+					expect((error as { code?: unknown }).code).toBe(-983);
+				}
+				expect(await countRows(tagged)).toBe(before);
+				await client.transaction(async (tx) => {
+					const error = await native
+						.drizzle(tx)
+						.insert(tagged)
+						.values({ label: 'tx' })
+						.$returningId()
+						.catch((e: unknown) => e);
+					expect((error as { code?: unknown }).code).toBe(-983);
+					const [row] = await tx.query<{ n: number | bigint }>(`SELECT COUNT(*) AS n FROM ${quoted(tagged)}`);
+					expect(Number(row?.n)).toBe(before);
+				});
+				expect(await countRows(tagged)).toBe(before);
+				// Without $returningId() the insert runs, and the trigger fires.
+				expect(await db.insert(tagged).values({ label: 'no ids' })).toMatchObject({ affectedRows: 1 });
+				expect(await countRows(tagged)).toBe(before + 1);
+				const [logged] = await client.query<{ n: number | bigint }>(`SELECT COUNT(*) AS n FROM ${log}`);
+				expect(Number(logged?.n)).toBe(1);
 			} finally {
 				await client.query(`DROP TRIGGER ${trigger}`);
 			}
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'reports a key equal to the last one the connection saw (two new tables)',
+		async () => {
+			const first = native.cubridTable(name('nfirst'), {
+				id: native.integer().primaryKey().autoIncrement(),
+				v: native.integer(),
+			});
+			const second = native.cubridTable(name('nsecond'), {
+				id: native.integer().primaryKey().autoIncrement(),
+				v: native.integer(),
+			});
+			for (const table of [first, second]) {
+				await client.query(createTableSql(table));
+				created.push(quoted(table));
+			}
+			expect(await db.insert(first).values({ v: 1 }).$returningId()).toEqual([{ id: 1 }]);
+			expect(await db.insert(second).values({ v: 2 }).$returningId()).toEqual([{ id: 1 }]);
+			const literal = native.drizzle(client, { binding: 'literal' });
+			expect(await literal.insert(first).values({ v: 3 }).$returningId()).toEqual([{ id: 2 }]);
+			expect(await literal.insert(second).values({ v: 4 }).$returningId()).toEqual([{ id: 2 }]);
+			expect(await db.select().from(second).orderBy(second.id)).toEqual([
+				{ id: 1, v: 2 },
+				{ id: 2, v: 4 },
+			]);
 		},
 		DDL_TIMEOUT,
 	);
