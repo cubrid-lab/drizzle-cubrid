@@ -149,13 +149,13 @@ await db.delete(users).where(lt(users.visits, 1n)).limit(100);
 
 | Method | Notes |
 | --- | --- |
-| `insert(t).values(row \| rows)` | Every column of the table is listed. A column a row leaves out (or gives `undefined`) gets its `$defaultFn()` value, else its `$onUpdateFn()` value when it has no `.default()`, else the `DEFAULT` keyword. `null` writes NULL. An empty array is refused |
+| `insert(t).values(row \| rows)` | Every column of the table is listed; an `.autoIncrement()` column also accepts `null` (the server generates it). A column a row leaves out (or gives `undefined`) gets its `$defaultFn()` value, else its `$onUpdateFn()` value when it has no `.default()`, else the `DEFAULT` keyword. `null` writes NULL. An empty array is refused |
 | `insert(t).select(query \| (qb) => query)` | INSERT … SELECT with a native select. Each selected field's key names the table column it goes to (`select({ name: users.name })` writes `name`); columns not selected get their DDL default, and `$defaultFn()` is not applied. A key that is not a column of the table, or a nested object or table, is refused. It is a separate method, so it cannot be combined with `values()` |
 | `.onDuplicateKeyUpdate({ set })` | `ON DUPLICATE KEY UPDATE "col" = value, …`; values as in `update().set()`, `$onUpdateFn()` columns not named are set too. An empty `set` is refused |
 | `update(t).set(values)` | Values are encoded by their columns; `undefined` ones are left out, and a set with no value is refused. Columns with `$onUpdateFn()` that `set` does not name get its value |
 | `.where()`, `.orderBy()`, `.limit()` on update | `orderBy()` decides which rows `limit()` updates |
 | `delete(t)`, `.where()`, `.limit()` | Without `where()` every row is deleted. There is no `orderBy()` (see below) |
-| `.prepare()`, `.toSQL()`, `$dynamic()`, `await`/`then` | `prepare()` builds the SQL once, generating `$defaultFn()` values once; `execute({ name: value })` fills `sql.placeholder('name')` |
+| `.prepare()`, `.toSQL()`, `$dynamic()`, `await`/`then` | `prepare()` builds the SQL once, generating `$defaultFn()` values once (every `execute()` reuses them; see [`$returningId()`](#returningid)); `execute({ name: value })` fills `sql.placeholder('name')` |
 
 Any value can also be a `sql` expression or a `sql.placeholder()`
 (placeholders are encoded by their column when the prepared statement runs),
@@ -174,9 +174,10 @@ from cubrid-client's `executePrepared()` (or `execute()` with
 `binding: 'literal'`); a client without that method is refused. As
 cubrid-client documents, `lastInsertId` is set only when the INSERT left the
 session with a new AUTO_INCREMENT value; it is a `number` while it is a safe
-integer and a `bigint` beyond that. `affectedRows` is 2 for a row that
-`onDuplicateKeyUpdate()` changed, as in MySQL. No ID is ever derived from
-another. Driver errors pass through unchanged, so a duplicate key rejects with
+integer and a `bigint` beyond that. With `onDuplicateKeyUpdate()`,
+`affectedRows` is 1 for an inserted row and 2 for every row that hit a
+duplicate key, also when the update left the row unchanged (MySQL reports 0
+then; verified on CUBRID 11.4). No ID is ever derived from another. Driver errors pass through unchanged, so a duplicate key rejects with
 the driver's error and its `code` (-670 on CUBRID 11.4).
 
 ### `$returningId()`
@@ -185,22 +186,44 @@ the driver's error and its `code` (-670 on CUBRID 11.4).
 table's `.primaryKey()` columns that have `.autoIncrement()` or `$defaultFn()`
 (typed so):
 
-- An AUTO_INCREMENT key is the driver's `lastInsertId`, read through the
-  column's codec (a `bigint({ mode: 'bigint' })` key stays exact above 2^53; an
-  `integer()` key that does not fit throws). CUBRID does not promise that the
-  keys of a multi-row INSERT are consecutive, so a multi-row `values()` into a
-  table with an AUTO_INCREMENT key is refused before anything is sent: insert
-  the rows one at a time. When the row gave the key itself, that value is
-  returned (CUBRID reports no `lastInsertId` then); NULL lets the server
-  generate it. When the driver reports no `lastInsertId`, or `affectedRows` is not
-  1 (an `onDuplicateKeyUpdate()` that changed an existing row; CUBRID still
-  reports a consumed AUTO_INCREMENT value then), the key is left out.
+- An AUTO_INCREMENT key is the generated key cubrid-client reports, read
+  through the column's codec (a `bigint({ mode: 'bigint' })` key stays exact
+  above 2^53; an `integer()` key that does not fit throws). For an INSERT
+  whose values are all parameters or `DEFAULT` this is the session's last
+  insert id. cubrid-client does not read that after an INSERT with a
+  function call, such as the `CAST(...)` of a collection value or a `sql`
+  value like `sql\`upper(${name})\``, so for those `$returningId()` asks for
+  the statement's generated keys (`generatedKeys: true`), which is exact.
+  CUBRID 11.0–11.4 rejects that request for a table with an INSERT trigger
+  (-983): on such a table, `$returningId()` works only for plain values.
+  If an inserted row's generated key is still not reported, `$returningId()`
+  throws instead of returning `[]`.
+- CUBRID does not promise that the keys of a multi-row INSERT are
+  consecutive, so a multi-row `values()` into a table with an AUTO_INCREMENT
+  key is refused before anything is sent: insert the rows one at a time.
+- A key the row gives itself (a value or a placeholder's value) is returned
+  as the column reads it back (`5` for a `bigint({ mode: 'bigint' })` key is
+  returned as `5n`). An AUTO_INCREMENT column also accepts `null`, which
+  makes the server generate the key, as when it is left out.
 - A `$defaultFn()` key is the value written for that row, generated or given.
   A key written as `sql` is unknown and left out.
+- With `onDuplicateKeyUpdate()`, keys are reported only when the row was
+  inserted (`affectedRows` 1). A row that hit a duplicate key keeps its old
+  key, which the statement does not report, so the result is `[]`. A
+  multi-row upsert is refused before anything is sent when the table has
+  such keys, as CUBRID does not report which rows were inserted.
 - A row with no reported key is left out, so a table without such keys
   returns `[]`.
 - INSERT … SELECT is refused before anything is sent: select the rows back by
   a unique column.
+
+> **Prepared inserts reuse generated values.** As in Drizzle's other
+> dialects, `prepare()` runs `$defaultFn()` once, when it builds the
+> statement, and every `execute()` writes those same values. For a
+> `$defaultFn()` key (a UUID, say), a second `execute()` writes the same key
+> and fails with a duplicate key, and `$returningId()` reports the same key
+> each time. Pass such keys through `sql.placeholder()`, or build the insert
+> anew for each row instead of preparing it.
 
 There is no `.returning()`: CUBRID has no RETURNING clause.
 
@@ -229,7 +252,7 @@ built and refused by the same rules as any native select.
 | `delete().orderBy()` | No method: CUBRID 11.4 rejects DELETE with ORDER BY (-493, #189) |
 | `insert().ignore()` / INSERT IGNORE, `.returning()` | No method: CUBRID has neither |
 | `values(col)` / `sql\`values(${t.col})\`` in `onDuplicateKeyUpdate()` | CUBRID 11.4 rejects MySQL's `VALUES()` function there (#189); repeat the value instead |
-| Multi-row `$returningId()` with an AUTO_INCREMENT key; `$returningId()` of INSERT … SELECT | See [`$returningId()`](#returningid) |
+| Multi-row `$returningId()` with an AUTO_INCREMENT key or with `onDuplicateKeyUpdate()`; `$returningId()` of INSERT … SELECT | See [`$returningId()`](#returningid) |
 | `sql.placeholder()` as a collection value | cubrid-client cannot bind an array |
 
 ## Column builders

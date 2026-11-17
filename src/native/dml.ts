@@ -18,12 +18,27 @@ import type {
 	CubridUpdateConfig,
 } from './dialect.js';
 import { CubridQueryBuilder, CubridSelect } from './select.js';
-import type { CubridDmlResult, CubridSession } from './session.js';
+import type { CubridDmlResult, CubridSession, CubridWriteOptions } from './session.js';
 import type { CubridTable } from './table.js';
 
-/** One row for `insert().values()`: the table's insert type, where any value may also be `sql` or a placeholder. */
+/** `null` for an `.autoIncrement()` column, which makes the server generate the value. */
+type AutoIncrementNull<TColumns, K> = K extends keyof TColumns
+	? TColumns[K] extends { _: { isAutoincrement: true } }
+		? null
+		: never
+	: never;
+
+/**
+ * One row for `insert().values()`: the table's insert type, where any value
+ * may also be `sql` or a placeholder, and an `.autoIncrement()` column may be
+ * `null` (the server generates the value, as for a missing one).
+ */
 export type CubridInsertValue<TTable extends CubridTable> = {
-	[K in keyof TTable['$inferInsert']]: TTable['$inferInsert'][K] | SQL | Placeholder;
+	[K in keyof TTable['$inferInsert']]:
+		| TTable['$inferInsert'][K]
+		| SQL
+		| Placeholder
+		| AutoIncrementNull<TTable['_']['columns'], K>;
 } & {};
 
 /** The values of `update().set()` and `onDuplicateKeyUpdate({ set })`: any column, as a value or `sql`. */
@@ -57,11 +72,12 @@ export class CubridPreparedWrite<TResult> {
 		private readonly session: CubridSession,
 		private readonly query: Query,
 		private readonly map: (result: CubridDmlResult, placeholderValues: Record<string, unknown>) => TResult,
+		private readonly options?: CubridWriteOptions,
 	) {}
 
 	async execute(placeholderValues: Record<string, unknown> = {}): Promise<TResult> {
 		const params = fillPlaceholders(this.query.params, placeholderValues);
-		return this.map(await this.session.write(this.query.sql, params), placeholderValues);
+		return this.map(await this.session.write(this.query.sql, params, this.options), placeholderValues);
 	}
 }
 
@@ -207,10 +223,11 @@ export class CubridInsertReturningId<TTable extends CubridTable>
 	}
 
 	/**
-	 * Builds the SQL once. Refuses, before anything is sent, an INSERT … SELECT
-	 * and a multi-row INSERT into a table with an AUTO_INCREMENT key: CUBRID
-	 * does not promise that a statement's keys are consecutive, so they are
-	 * not derived from `lastInsertId`.
+	 * Builds the SQL once. Refuses, before anything is sent, an INSERT … SELECT,
+	 * a multi-row INSERT into a table with an AUTO_INCREMENT key (CUBRID does
+	 * not promise that a statement's keys are consecutive, so they are not
+	 * derived from `lastInsertId`) and a multi-row `onDuplicateKeyUpdate()`
+	 * (which rows were inserted is not reported).
 	 */
 	prepare(): CubridPreparedWrite<CubridReturningId<TTable>[]> {
 		const keys = Object.entries(getTableColumns(this.config.table)).filter(
@@ -222,13 +239,23 @@ export class CubridInsertReturningId<TTable extends CubridTable>
 			);
 		}
 		const rowCount = this.config.values?.length ?? 0;
-		if (rowCount !== 1 && keys.some(([, column]) => isAutoIncrement(column))) {
+		const autoIncrement = keys.some(([, column]) => isAutoIncrement(column));
+		if (rowCount !== 1 && autoIncrement) {
 			throw new Error(
 				'$returningId() can report an AUTO_INCREMENT key only for an INSERT of one row on CUBRID, which does not promise consecutive keys for a multi-row INSERT; insert the rows one at a time',
 			);
 		}
-		const { query, inserted } = this.dialect.buildInsertQuery(this.config);
-		return new CubridPreparedWrite(this.session, this.dialect.sqlToQuery(query), (result, placeholderValues) => {
+		const upsert = this.config.onDuplicateKeyUpdate !== undefined;
+		if (rowCount !== 1 && upsert && keys.length > 0) {
+			throw new Error(
+				'$returningId() with onDuplicateKeyUpdate() needs an INSERT of one row: CUBRID does not report which rows were inserted and which updated',
+			);
+		}
+		const { query, inserted, plain } = this.dialect.buildInsertQuery(this.config);
+		const map = (result: CubridDmlResult, placeholderValues: Record<string, unknown>) => {
+			// With ON DUPLICATE KEY UPDATE, CUBRID reports affectedRows 2 whenever
+			// the row conflicted (changed or not): no row then has the written key.
+			if (upsert && result.affectedRows !== 1) return [];
 			const rows: Record<string, unknown>[] = [];
 			for (const written of inserted) {
 				const row: Record<string, unknown> = {};
@@ -238,18 +265,29 @@ export class CubridInsertReturningId<TTable extends CubridTable>
 					// A key written as sql is unknown.
 					if (is(value, SQL)) continue;
 					if (value !== undefined && value !== null) {
-						row[key] = value;
-					} else if (isAutoIncrement(column) && result.lastInsertId !== undefined && result.affectedRows === 1) {
-						// The server generated the key (none given, or NULL). affectedRows is
-						// 2 when ON DUPLICATE KEY UPDATE changed an existing row; CUBRID then
-						// still reports a consumed AUTO_INCREMENT value, which is no row's key.
+						// As read back: a number given for a bigint key is reported as a bigint.
+						row[key] = column.mapFromDriverValue(column.mapToDriverValue(value));
+					} else if (isAutoIncrement(column) && result.affectedRows === 1) {
+						// The server generated the key (none given, or NULL).
+						if (result.lastInsertId === undefined) {
+							throw new Error(
+								`$returningId(): the CUBRID client reported no generated key for AUTO_INCREMENT column ${column.name} of the inserted row`,
+							);
+						}
 						row[key] = column.mapFromDriverValue(result.lastInsertId);
 					}
 				}
 				if (Object.keys(row).length > 0) rows.push(row);
 			}
 			return rows as CubridReturningId<TTable>[];
-		});
+		};
+		// cubrid-client reads the session's last insert id only after a plain
+		// INSERT (values and DEFAULT, no function call such as the CAST of a
+		// collection literal). For any other INSERT it asks the server for the
+		// keys the statement generated instead, which CUBRID 11.0-11.4 refuses
+		// for a table with an INSERT trigger.
+		const options: CubridWriteOptions | undefined = autoIncrement && !plain ? { generatedKeys: true } : undefined;
+		return new CubridPreparedWrite(this.session, this.dialect.sqlToQuery(query), map, options);
 	}
 
 	override async execute(): Promise<CubridReturningId<TTable>[]> {

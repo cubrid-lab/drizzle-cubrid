@@ -39,7 +39,7 @@ const db = drizzle(client);
 describe('insert', () => {
 	it('requires notNull columns without a default and makes the others optional', () => {
 		expectTypeOf<CubridInsertValue<typeof users>>().toEqualTypeOf<{
-			id?: bigint | SQL | Placeholder;
+			id?: bigint | null | SQL | Placeholder;
 			name: string | SQL | Placeholder;
 			email?: string | null | SQL | Placeholder;
 			visits?: number | SQL | Placeholder;
@@ -55,6 +55,9 @@ describe('insert', () => {
 		db.insert(users).values({ email: 'a' });
 		// @ts-expect-error name is not nullable
 		db.insert(users).values({ name: null });
+		db.insert(users).values({ id: null, name: 'a' });
+		// @ts-expect-error only an autoIncrement column may be null
+		db.insert(docs).values({ id: null, given: 1 });
 		// @ts-expect-error wrong value type
 		db.insert(users).values({ name: 'a', visits: 'many' });
 	});

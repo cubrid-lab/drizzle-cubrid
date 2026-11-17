@@ -47,7 +47,7 @@ const bags = cubridTable('bags', {
 });
 const plain = cubridTable('plain', { a: integer(), b: varchar({ length: 5 }) });
 
-type Call = { method: string; sql: string; params: readonly unknown[] | undefined };
+type Call = { method: string; sql: string; params: readonly unknown[] | undefined; options?: unknown };
 
 /** A cubrid-client stand-in for writes: records calls and returns the queued results. */
 function fakeClient(results: unknown[] = []) {
@@ -56,8 +56,8 @@ function fakeClient(results: unknown[] = []) {
 	// Typed `never` so one stand-in fits both the row and the write methods.
 	const respond =
 		(method: string) =>
-		async (sql: string, params?: readonly unknown[]): Promise<never> => {
-			calls.push({ method, sql, params });
+		async (sql: string, params?: readonly unknown[], options?: unknown): Promise<never> => {
+			calls.push(options === undefined ? { method, sql, params } : { method, sql, params, options });
 			const result = queue.shift() ?? { affectedRows: 1 };
 			if (result instanceof Error) throw result;
 			return result as never;
@@ -410,10 +410,12 @@ describe('$returningId()', () => {
 		await expect(local.insert(users).values({ name: 'a' }).$returningId()).rejects.toThrow(/MAX_SAFE_INTEGER/);
 	});
 
-	it('reports no key when the driver reports none or ON DUPLICATE KEY UPDATE changed a row', async () => {
+	it('throws when the driver reports no generated key for an inserted row, and reports none for an upsert conflict', async () => {
 		const client = fakeClient([{ affectedRows: 1 }, { affectedRows: 2, lastInsertId: 9 }]);
 		const local = drizzle(client);
-		expect(await local.insert(users).values({ name: 'a' }).$returningId()).toEqual([]);
+		await expect(local.insert(users).values({ name: 'a' }).$returningId()).rejects.toThrow(
+			/reported no generated key for AUTO_INCREMENT column id/,
+		);
 		expect(
 			await local
 				.insert(users)
@@ -425,10 +427,7 @@ describe('$returningId()', () => {
 
 	it('reports lastInsertId for an AUTO_INCREMENT key written as NULL', async () => {
 		const client = fakeClient([{ affectedRows: 1, lastInsertId: 6 }]);
-		const query = drizzle(client)
-			.insert(users)
-			.values({ id: null as never, name: 'a' })
-			.$returningId();
+		const query = drizzle(client).insert(users).values({ id: null, name: 'a' }).$returningId();
 		expect(await query).toEqual([{ id: 6 }]);
 	});
 
@@ -442,6 +441,100 @@ describe('$returningId()', () => {
 			.$returningId()
 			.prepare();
 		expect(await prepared.execute({ id: 43 })).toEqual([{ id: 43 }]);
+	});
+
+	it('reports a given key as read back through the column codec', async () => {
+		const client = fakeClient([{ affectedRows: 1 }, { affectedRows: 1 }]);
+		const local = drizzle(client);
+		expect(await local.insert(bigUsers).values({ id: 5n }).$returningId()).toEqual([{ id: 5n }]);
+		const prepared = local
+			.insert(bigUsers)
+			.values({ id: sql.placeholder('id') })
+			.$returningId()
+			.prepare();
+		expect(await prepared.execute({ id: 6 })).toEqual([{ id: 6n }]);
+	});
+
+	it('asks for generated keys only when the INSERT is not plain', async () => {
+		const client = fakeClient([
+			{ affectedRows: 1, lastInsertId: 1 },
+			{ affectedRows: 1, lastInsertId: 2 },
+			{ affectedRows: 1, lastInsertId: 3 },
+			{ affectedRows: 1, lastInsertId: 4 },
+			{ affectedRows: 1, lastInsertId: 5 },
+		]);
+		const local = drizzle(client);
+		const tagged = cubridTable('tagged', {
+			id: integer().primaryKey().autoIncrement(),
+			tags: set({ element: integer() }),
+		});
+		expect(
+			await local
+				.insert(tagged)
+				.values({ tags: [1] })
+				.$returningId(),
+		).toEqual([{ id: 1 }]);
+		expect(await local.insert(tagged).values({ tags: null }).$returningId()).toEqual([{ id: 2 }]);
+		expect(
+			await local
+				.insert(users)
+				.values({ name: sql`upper(${'a'})` })
+				.$returningId(),
+		).toEqual([{ id: 3 }]);
+		expect(
+			await local
+				.insert(users)
+				.values({ name: 'a' })
+				.onDuplicateKeyUpdate({ set: { name: sql`concat(${'a'}, ${'b'})` } })
+				.$returningId(),
+		).toEqual([{ id: 4 }]);
+		await local.insert(tagged).values({ tags: [1] });
+		expect(client.calls.map((c) => c.options)).toEqual([
+			{ generatedKeys: true },
+			undefined,
+			{ generatedKeys: true },
+			{ generatedKeys: true },
+			undefined,
+		]);
+		const literal = fakeClient([{ affectedRows: 1, lastInsertId: 7 }]);
+		await drizzle(literal, { binding: 'literal' }).insert(tagged).values({ tags: [] }).$returningId();
+		expect(literal.calls[0]).toMatchObject({ method: 'execute', options: { generatedKeys: true } });
+	});
+
+	it('with onDuplicateKeyUpdate, reports keys only of an inserted row and refuses several rows', async () => {
+		next = 0;
+		const client = fakeClient([{ affectedRows: 2 }, { affectedRows: 1 }, { affectedRows: 2 }]);
+		const local = drizzle(client);
+		const upsert = () =>
+			local
+				.insert(docs)
+				.values({ title: 'a' })
+				.onDuplicateKeyUpdate({ set: { title: 'a' } })
+				.$returningId();
+		expect(await upsert()).toEqual([]);
+		expect(await upsert()).toEqual([{ id: 'id-2' }]);
+		expect(
+			await local
+				.insert(users)
+				.values({ id: 4, name: 'a' })
+				.onDuplicateKeyUpdate({ set: { name: 'a' } })
+				.$returningId(),
+		).toEqual([]);
+		await expect(
+			local
+				.insert(docs)
+				.values([{ title: 'a' }, { title: 'b' }])
+				.onDuplicateKeyUpdate({ set: { title: 'c' } })
+				.$returningId(),
+		).rejects.toThrow(/onDuplicateKeyUpdate\(\) needs an INSERT of one row/);
+		expect(client.calls).toHaveLength(3);
+		expect(
+			await local
+				.insert(plain)
+				.values([{ a: 1 }, { a: 2 }])
+				.onDuplicateKeyUpdate({ set: { a: 3 } })
+				.$returningId(),
+		).toEqual([]);
 	});
 
 	it('refuses a multi-row insert with an AUTO_INCREMENT key before sending', async () => {

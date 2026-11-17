@@ -31,6 +31,15 @@ export interface CubridDmlResult {
 }
 
 /**
+ * Write options this session passes: `generatedKeys` asks cubrid-client for
+ * the keys the server says the INSERT generated (CAS GET_GENERATED_KEYS)
+ * instead of the session's last insert id.
+ */
+export interface CubridWriteOptions {
+	generatedKeys: true;
+}
+
+/**
  * What the native session needs from a client: `CubridClient`, `CubridPool`
  * and their transaction clients from cubrid-client 1.4 provide it. Writes
  * need `executePrepared()` (default binding) or `execute()` (`'literal'`).
@@ -38,8 +47,8 @@ export interface CubridDmlResult {
 export interface CubridNativeClient {
 	query(sql: string, params?: readonly unknown[], options?: CubridArrayRowOptions): Promise<unknown[]>;
 	queryPrepared?(sql: string, params?: readonly unknown[], options?: CubridArrayRowOptions): Promise<unknown[]>;
-	execute?(sql: string, params?: readonly unknown[]): Promise<CubridDmlResult>;
-	executePrepared?(sql: string, params?: readonly unknown[]): Promise<CubridDmlResult>;
+	execute?(sql: string, params?: readonly unknown[], options?: CubridWriteOptions): Promise<CubridDmlResult>;
+	executePrepared?(sql: string, params?: readonly unknown[], options?: CubridWriteOptions): Promise<CubridDmlResult>;
 }
 
 const ARRAY_ROWS: CubridArrayRowOptions = { rowMode: 'array' };
@@ -112,7 +121,7 @@ export class CubridSession {
 	 * under `'literal'` binding) and reports the driver's `affectedRows` and
 	 * `lastInsertId` unchanged. Driver errors are passed through unchanged.
 	 */
-	async write(sql: string, params: unknown[]): Promise<CubridDmlResult> {
+	async write(sql: string, params: unknown[], options?: CubridWriteOptions): Promise<CubridDmlResult> {
 		const literal = this.binding === 'literal';
 		const method = literal ? this.client.execute : this.client.executePrepared;
 		if (typeof method !== 'function') {
@@ -121,7 +130,9 @@ export class CubridSession {
 			);
 		}
 		this.send(sql, params);
-		const result = await method.call(this.client, sql, params);
+		const result = await (options
+			? method.call(this.client, sql, params, options)
+			: method.call(this.client, sql, params));
 		const { affectedRows, lastInsertId } = result;
 		return lastInsertId === undefined ? { affectedRows } : { affectedRows, lastInsertId };
 	}

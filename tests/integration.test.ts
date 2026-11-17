@@ -1349,6 +1349,10 @@ describe('drizzle-cubrid/native select and session (#158, #160)', () => {
 });
 
 describe('drizzle-cubrid/native insert, update and delete (#159)', () => {
+	// These tests create tables. On a new CUBRID database the server adds a
+	// volume once the first one fills, which stalled a CREATE TABLE for about
+	// 100 s in a fresh 11.4 container; the default 30 s timeout is too short then.
+	const DDL_TIMEOUT = 180_000;
 	const big = 9007199254740993n; // 2^53 + 1
 	let nextDoc = 0;
 	const people = native.cubridTable(name('npeople'), {
@@ -1556,6 +1560,128 @@ describe('drizzle-cubrid/native insert, update and delete (#159)', () => {
 			{ id: 4, tags: ["it's"], counts: [big], days: null },
 		]);
 	});
+
+	it(
+		'reports $returningId() keys of an upsert only when it inserted (review item 1)',
+		async () => {
+			let n = 0;
+			const accounts = native.cubridTable(name('naccounts'), {
+				id: native
+					.varchar({ length: 36 })
+					.primaryKey()
+					.$defaultFn(() => `gen-${++n}`),
+				email: native.varchar({ length: 30 }).notNull().unique(),
+				n: native.integer(),
+			});
+			await client.query(createTableSql(accounts));
+			created.push(quoted(accounts));
+			expect(await db.insert(accounts).values({ email: 'e' }).$returningId()).toEqual([{ id: 'gen-1' }]);
+			const upsert = (value: number) =>
+				db
+					.insert(accounts)
+					.values({ email: 'e', n: value })
+					.onDuplicateKeyUpdate({ set: { n: value } })
+					.$returningId();
+			expect(await upsert(2)).toEqual([]);
+			// Unchanged by the update: CUBRID still reports affectedRows 2.
+			expect(await upsert(2)).toEqual([]);
+			expect(
+				await db
+					.insert(accounts)
+					.values({ email: 'f' })
+					.onDuplicateKeyUpdate({ set: { n: 0 } })
+					.$returningId(),
+			).toEqual([{ id: 'gen-4' }]);
+			await expect(
+				db
+					.insert(accounts)
+					.values([{ email: 'e' }, { email: 'g' }])
+					.onDuplicateKeyUpdate({ set: { n: 9 } })
+					.$returningId(),
+			).rejects.toThrow(/needs an INSERT of one row/);
+			expect(
+				await db
+					.select({ id: accounts.id, email: accounts.email, n: accounts.n })
+					.from(accounts)
+					.orderBy(accounts.email),
+			).toEqual([
+				{ id: 'gen-1', email: 'e', n: 2 },
+				{ id: 'gen-4', email: 'f', n: null },
+			]);
+			// An explicit AUTO_INCREMENT key that conflicts on another UNIQUE column.
+			expect(
+				await db
+					.insert(people)
+					.values({ id: 999, name: 'Ann' })
+					.onDuplicateKeyUpdate({ set: { score: 5 } })
+					.$returningId(),
+			).toEqual([]);
+			expect(await db.select({ id: people.id }).from(people).where(eq(people.id, 999))).toEqual([]);
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'reports AUTO_INCREMENT keys of inserts with a collection literal, a sql function or NULL (review item 2)',
+		async () => {
+			const tagged = native.cubridTable(name('ntagged'), {
+				id: native.bigint({ mode: 'bigint' }).primaryKey().autoIncrement(),
+				label: native.varchar({ length: 30 }),
+				tags: native.set({ element: native.integer() }),
+			});
+			await client.query(createTableSql(tagged));
+			created.push(quoted(tagged));
+			await client.query(`ALTER TABLE ${quoted(tagged)} AUTO_INCREMENT = ${big}`);
+			expect(
+				await db
+					.insert(tagged)
+					.values({ tags: [1, 2] })
+					.$returningId(),
+			).toEqual([{ id: big }]);
+			expect(
+				await db
+					.insert(tagged)
+					.values({ label: sql`upper(${'x'})` })
+					.$returningId(),
+			).toEqual([{ id: big + 1n }]);
+			expect(await db.insert(tagged).values({ id: null, tags: [] }).$returningId()).toEqual([{ id: big + 2n }]);
+			expect(
+				await native
+					.drizzle(client, { binding: 'literal' })
+					.insert(tagged)
+					.values({ label: sql`lower(${'Y'})`, tags: [3] })
+					.$returningId(),
+			).toEqual([{ id: big + 3n }]);
+			expect(await db.insert(tagged).values({ id: 5 }).$returningId()).toEqual([{ id: 5n }]);
+			expect(await db.select({ id: tagged.id, label: tagged.label }).from(tagged).orderBy(tagged.id)).toEqual([
+				{ id: 5n, label: null },
+				{ id: big, label: null },
+				{ id: big + 1n, label: 'X' },
+				{ id: big + 2n, label: null },
+				{ id: big + 3n, label: 'y' },
+			]);
+			// CUBRID 11.4 refuses the generated-keys request on a table with an INSERT
+			// trigger (-983); plain values still use the session's last insert id.
+			const log = name('ntaglog');
+			await createTable(log, 'n INTEGER');
+			const trigger = name('ntagtrg');
+			await client.query(
+				`CREATE TRIGGER ${trigger} AFTER INSERT ON ${quoted(tagged)} EXECUTE INSERT INTO ${log} VALUES (1)`,
+			);
+			try {
+				expect(await db.insert(tagged).values({ label: 'plain' }).$returningId()).toEqual([{ id: big + 4n }]);
+				const error = await db
+					.insert(tagged)
+					.values({ tags: [1] })
+					.$returningId()
+					.catch((e: unknown) => e);
+				expect((error as { code?: unknown }).code).toBe(-983);
+			} finally {
+				await client.query(`DROP TRIGGER ${trigger}`);
+			}
+		},
+		DDL_TIMEOUT,
+	);
 
 	it('rolls back writes made inside client.transaction()', async () => {
 		const before = await countRows(people);
