@@ -284,14 +284,14 @@ describe('refusals', () => {
 		expect(() => db.select({ n: count() }).from(users).groupBy(users.name).for('update').toSQL()).toThrow(/-494/);
 	});
 
-	it('refuses collection values in conditions until #159', async () => {
+	it('refuses collection values in conditions', async () => {
 		expect(() =>
 			db
 				.select()
 				.from(posts)
 				.where(eq(posts.tags, ['a']))
 				.toSQL(),
-		).toThrow(/Comparing SET column tags with a value is not supported yet: .*#159/);
+		).toThrow(/Comparing SET column tags with a value is not supported: .*insert and update values/);
 		const client = fakeClient();
 		const placeholderDb = drizzle(client);
 		const prepared = placeholderDb
@@ -300,7 +300,7 @@ describe('refusals', () => {
 			.where(eq(posts.tags, sql.placeholder('t')))
 			.prepare();
 		await expect(prepared.execute({ t: ['a'] })).rejects.toThrow(
-			/Parameter 1 is an array, which cannot be bound; .*#159/,
+			/Parameter 1 is an array, which cannot be bound; .*insert or update value/,
 		);
 		await expect(placeholderDb.execute(sql`select ${sql.param(['a'])}`)).rejects.toThrow(/Parameter 1 is an array/);
 		expect(client.calls).toEqual([]);

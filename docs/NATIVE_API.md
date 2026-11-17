@@ -17,9 +17,10 @@
 - `collectionLiteralSql(column, count)`: the typed literal a statement uses to
   write a collection (see [Collections](#collections)).
 - `drizzle(client)` with `db.select()`, `db.selectDistinct()` and
-  `db.execute()` (see [Queries](#queries)).
+  `db.execute()` (see [Queries](#queries)), and `db.insert()`, `db.update()`
+  and `db.delete()` (see [Writes](#writes-insert-update-delete)).
 
-**Not yet:** INSERT, UPDATE and DELETE (#159), transactions through Drizzle
+**Not yet:** transactions through Drizzle
 (#161; use cubrid-client's `transaction()` and pass its client to `drizzle()`),
 relational queries (`db.query`), set operations (`union` and friends),
 scalar subqueries as selected fields, migrations or DDL generation (#163), and
@@ -123,8 +124,149 @@ and `cause`. These are refused before anything is sent:
 | `offset()` without `limit()` | CUBRID needs `LIMIT` with `OFFSET` |
 | `.for('share')`, `noWait`, `skipLocked` | CUBRID has only FOR UPDATE, without options |
 | `.for('update')` with DISTINCT, GROUP BY or HAVING | CUBRID 11.4 rejects it (-494) |
-| A SET/MULTISET/SEQUENCE column compared with a value (`eq(t.tags, ['a'])`) | Needs the typed collection literal (#159) |
+| A SET/MULTISET/SEQUENCE column compared with a value (`eq(t.tags, ['a'])`) | cubrid-client cannot bind an array; collection values are written only as insert and update values |
 | Selected date or time columns (also through `mapWith()`, subqueries and collections of them) from a client that does not decode in UTC | See [Date and time](#date-and-time) |
+
+## Writes: INSERT, UPDATE, DELETE
+
+```ts
+import { desc, eq, gt, lt, sql } from 'drizzle-orm';
+
+const { lastInsertId } = await db.insert(users).values({ name: 'Ann' });
+await db.insert(users).values([{ name: 'Bob' }, { name: 'Cy', tags: ['a', 'b'] }]);
+const [{ id }] = await db.insert(users).values({ name: 'Dee' }).$returningId();
+
+await db
+  .insert(users)
+  .values({ id: 1, name: 'Ann' })
+  .onDuplicateKeyUpdate({ set: { visits: sql`${users.visits} + 1` } });
+await db.insert(archive).select((qb) => qb.select({ name: users.name }).from(users).where(gt(users.id, 10)));
+
+const { affectedRows } = await db.update(users).set({ name: 'Ann B.' }).where(eq(users.id, 1));
+await db.update(users).set({ visits: 0n }).orderBy(desc(users.id)).limit(10);
+await db.delete(users).where(lt(users.visits, 1n)).limit(100);
+```
+
+| Method | Notes |
+| --- | --- |
+| `insert(t).values(row \| rows)` | Every column of the table is listed; an `.autoIncrement()` column also accepts `null` (the server generates it). A column a row leaves out (or gives `undefined`) gets its `$defaultFn()` value, else its `$onUpdateFn()` value when it has no `.default()`, else the `DEFAULT` keyword. `null` writes NULL. An empty array is refused |
+| `insert(t).select(query \| (qb) => query)` | INSERT … SELECT with a native select. Each selected field's key names the table column it goes to (`select({ name: users.name })` writes `name`); columns not selected get their DDL default, and `$defaultFn()` is not applied. A key that is not a column of the table, or a nested object or table, is refused. It is a separate method, so it cannot be combined with `values()` |
+| `.onDuplicateKeyUpdate({ set })` | `ON DUPLICATE KEY UPDATE "col" = value, …`; values as in `update().set()`, `$onUpdateFn()` columns not named are set too. An empty `set` is refused |
+| `update(t).set(values)` | Values are encoded by their columns; `undefined` ones are left out, and a set with no value is refused. Columns with `$onUpdateFn()` that `set` does not name get its value |
+| `.where()`, `.orderBy()`, `.limit()` on update | `orderBy()` decides which rows `limit()` updates |
+| `delete(t)`, `.where()`, `.limit()` | Without `where()` every row is deleted. There is no `orderBy()` (see below) |
+| `.prepare()`, `.toSQL()`, `$dynamic()`, `await`/`then` | `prepare()` builds the SQL once, generating `$defaultFn()` values once (every `execute()` reuses them; see [`$returningId()`](#returningid)); `execute({ name: value })` fills `sql.placeholder('name')` |
+
+Any value can also be a `sql` expression or a `sql.placeholder()`
+(placeholders are encoded by their column when the prepared statement runs),
+except that a placeholder cannot stand for a collection value.
+
+`.default(value)` keeps Drizzle's semantics: insert writes the `DEFAULT`
+keyword, so the value comes from the table's DDL (`DEFAULT value` in
+`CREATE TABLE`), not from the TypeScript declaration. A database whose DDL
+has no default stores NULL (or rejects the row for a NOT NULL column).
+
+### Results
+
+`insert`, `update` and `delete` resolve to `CubridDmlResult`,
+`{ affectedRows: number; lastInsertId?: number | bigint }`, taken unchanged
+from cubrid-client's `executePrepared()` (or `execute()` with
+`binding: 'literal'`); a client without that method is refused. As
+cubrid-client documents, `lastInsertId` is set only when the INSERT left the
+session with a new AUTO_INCREMENT value; it is a `number` while it is a safe
+integer and a `bigint` beyond that. With `onDuplicateKeyUpdate()`,
+`affectedRows` is 1 for an inserted row and 2 for every row that hit a
+duplicate key, also when the update left the row unchanged (MySQL reports 0
+then; verified on CUBRID 11.4). No ID is ever derived from another. Driver errors pass through unchanged, so a duplicate key rejects with
+the driver's error and its `code` (-670 on CUBRID 11.4).
+
+### `$returningId()`
+
+`insert(...).$returningId()` resolves to one object per inserted row with the
+table's `.primaryKey()` columns that have `.autoIncrement()` or `$defaultFn()`
+(typed so):
+
+- An AUTO_INCREMENT key comes from the keys the server says the INSERT
+  generated: `$returningId()` runs it with cubrid-client's
+  `generatedKeys: true` (CAS GET_GENERATED_KEYS), which is exact for every
+  INSERT, including one with a collection literal or a `sql` value, and a key
+  equal to the one the connection saw before (cubrid-client's plain
+  `lastInsertId` leaves such a key out as ambiguous). The key is read through
+  the column's codec (a `bigint({ mode: 'bigint' })` key stays exact above
+  2^53; an `integer()` key that does not fit throws). If the row was inserted
+  but the server still reports no key, `$returningId()` throws, saying the
+  row was inserted, so do not retry it.
+- **Known limit, concurrent inserts on a pool:** with cubrid-client 1.4.0,
+  generated keys are sometimes missing when many inserts run at once on a
+  pool, mostly on newly created tables. In one run, about 6 to 8 of 60
+  concurrent inserts on new tables reported no key
+  ([cubrid-client#297](https://github.com/cubrid-lab/cubrid-client/issues/297)).
+  No reported key has been wrong. The row is inserted and `$returningId()`
+  throws the "do not retry" error above. If a key you get back is all you
+  need, read it back by a unique column when that error occurs, or call
+  `$returningId()` from one connection at a time until #297 is fixed.
+- **Tables with an INSERT trigger:** CUBRID 11.0–11.4 rejects a generated-keys
+  INSERT on a table with an INSERT trigger (-983) before inserting anything
+  (verified on 11.4, also inside `client.transaction()`). Use `insert()`
+  without `$returningId()` on such tables and read the key back by a unique
+  column. Inserts without `$returningId()`, and `$returningId()` on tables
+  whose only keys are `$defaultFn()` keys, never ask for generated keys.
+- CUBRID does not promise that the keys of a multi-row INSERT are
+  consecutive, so a multi-row `values()` into a table with an AUTO_INCREMENT
+  key is refused before anything is sent: insert the rows one at a time.
+- A key the row gives itself (a value or a placeholder's value) is returned
+  as the column reads it back (`5` for a `bigint({ mode: 'bigint' })` key is
+  returned as `5n`). An AUTO_INCREMENT column also accepts `null`, which
+  makes the server generate the key, as when it is left out.
+- A `$defaultFn()` key is the value written for that row, generated or given.
+  A key written as `sql` is unknown and left out.
+- With `onDuplicateKeyUpdate()`, keys are reported only when the row was
+  inserted (`affectedRows` 1). A row that hit a duplicate key keeps its old
+  key, which the statement does not report, so the result is `[]`. A
+  multi-row upsert is refused before anything is sent when the table has
+  such keys, as CUBRID does not report which rows were inserted.
+- A row with no reported key is left out, so a table without such keys
+  returns `[]`.
+- INSERT … SELECT is refused before anything is sent: select the rows back by
+  a unique column.
+
+> **Prepared inserts reuse generated values.** As in Drizzle's other
+> dialects, `prepare()` runs `$defaultFn()` once, when it builds the
+> statement, and every `execute()` writes those same values. For a
+> `$defaultFn()` key (a UUID, say), a second `execute()` writes the same key
+> and fails with a duplicate key, and `$returningId()` reports the same key
+> each time. Pass such keys through `sql.placeholder()`, or build the insert
+> anew for each row instead of preparing it.
+
+There is no `.returning()`: CUBRID has no RETURNING clause.
+
+### Collections in writes
+
+A SET, MULTISET or SEQUENCE value in `values()`, `set()` or
+`onDuplicateKeyUpdate()` is written as the typed literal from
+[Collections](#collections), one parameter per element encoded by the element
+codec: `CAST(SET{?, ?} AS SET(STRING))`. An empty array writes
+`CAST(SET{} AS SET(STRING))`, which CUBRID 11.4 stores as an empty collection
+(not NULL); `null` writes NULL. This works under both bindings.
+
+### Date and time in writes
+
+Date and time values are written as the UTC wall-clock text their codecs
+produce, which does not depend on how the client decodes, so writes are not
+refused for a client that does not decode in UTC. INSERT … SELECT reads
+nothing back into JavaScript, so it is not checked either; its select is
+built and refused by the same rules as any native select.
+
+### Refused writes
+
+| Refused | Why |
+| --- | --- |
+| `values([])`, `set({})`, `onDuplicateKeyUpdate({ set: {} })` | Nothing to write |
+| `delete().orderBy()` | No method: CUBRID 11.4 rejects DELETE with ORDER BY (-493, #189) |
+| `insert().ignore()` / INSERT IGNORE, `.returning()` | No method: CUBRID has neither |
+| `values(col)` / `sql\`values(${t.col})\`` in `onDuplicateKeyUpdate()` | CUBRID 11.4 rejects MySQL's `VALUES()` function there (#189); repeat the value instead |
+| Multi-row `$returningId()` with an AUTO_INCREMENT key or with `onDuplicateKeyUpdate()`; `$returningId()` of INSERT … SELECT | See [`$returningId()`](#returningid) |
+| `sql.placeholder()` as a collection value | cubrid-client cannot bind an array |
 
 ## Column builders
 
@@ -193,8 +335,8 @@ collectionLiteralSql(users.tags, 2); // 'CAST(SET{?, ?} AS SET(STRING))'
 
 The cast uses the element's declared type, except that `VARCHAR` and `STRING`
 elements cast to `STRING`, so the cast cannot truncate a value that the column
-would refuse. The native query builder (#158, #159) will emit this literal
-itself.
+would refuse. `insert()` and `update()` emit this literal themselves (see
+[Collections in writes](#collections-in-writes)).
 
 ## MySQL-only builders and their CUBRID replacements
 
@@ -226,7 +368,9 @@ are not in `drizzle-cubrid/native`:
   reads `'12.50'`), and the server rounds extra fractional digits without an
   error: `'0.00000000005'` written to `NUMERIC(38,10)` reads `'0.0000000001'`.
 - Collection values cannot be passed to Drizzle's generic operators
-  (`eq(t.tags, ['a'])`) yet: they need the collection literal (#159).
+  (`eq(t.tags, ['a'])`); they are written only by insert and update.
+- An empty collection written by insert or update reads back as `[]`, not
+  `null`.
 - Typing: as in Drizzle, a `sql` field keeps its declared type even from a
   left-joined table; declare `sql<number | null>` when it can be NULL.
 - COUNT(*) is a BIGINT: Drizzle's `count()` maps it to a number; a bare

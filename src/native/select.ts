@@ -162,6 +162,37 @@ function aliasFields(fields: Record<string, unknown>, alias: string, prefix: str
 	return aliased;
 }
 
+/**
+ * What the callback of `insert().select((qb) => …)` receives: `select()` and
+ * `selectDistinct()` as on the database.
+ */
+export class CubridQueryBuilder {
+	static readonly [entityKind]: string = 'CubridQueryBuilder';
+
+	constructor(
+		private readonly session: CubridSession,
+		private readonly dialect: CubridDialect,
+	) {}
+
+	select(): CubridSelectBuilder<undefined>;
+	select<TSelection extends SelectedFields<CubridColumn, CubridTable>>(
+		fields: TSelection,
+	): CubridSelectBuilder<TSelection>;
+	select(fields?: SelectedFields<CubridColumn, CubridTable>): CubridSelectBuilder<ColumnsSelection | undefined> {
+		return new CubridSelectBuilder(this.session, this.dialect, fields, false);
+	}
+
+	selectDistinct(): CubridSelectBuilder<undefined>;
+	selectDistinct<TSelection extends SelectedFields<CubridColumn, CubridTable>>(
+		fields: TSelection,
+	): CubridSelectBuilder<TSelection>;
+	selectDistinct(
+		fields?: SelectedFields<CubridColumn, CubridTable>,
+	): CubridSelectBuilder<ColumnsSelection | undefined> {
+		return new CubridSelectBuilder(this.session, this.dialect, fields, true);
+	}
+}
+
 export class CubridSelectBuilder<TSelection extends ColumnsSelection | undefined> {
 	static readonly [entityKind]: string = 'CubridSelectBuilder';
 
@@ -346,6 +377,11 @@ export class CubridSelect<
 
 	getSQL(): SQL {
 		return this.dialect.buildSelectQuery(this.config);
+	}
+
+	/** The selected fields by key, as `insert().select()` reads them. */
+	getSelectedFields(): Record<string, unknown> {
+		return this.config.fields;
 	}
 
 	toSQL(): Query {

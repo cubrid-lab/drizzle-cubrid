@@ -6,9 +6,14 @@ import type { SelectedFields } from 'drizzle-orm/operations';
 import type { SQLWrapper } from 'drizzle-orm/sql/sql';
 import type { CubridColumn } from './columns/common.js';
 import { CubridDialect } from './dialect.js';
+import { CubridDelete, CubridInsertBuilder, CubridUpdateBuilder } from './dml.js';
 import { CubridSelectBuilder } from './select.js';
 import { type CubridBinding, type CubridNativeClient, CubridSession } from './session.js';
-import type { CubridTable } from './table.js';
+import { CubridTable } from './table.js';
+
+function assertTable(table: unknown, method: string): asserts table is CubridTable {
+	if (!(table instanceof CubridTable)) throw new TypeError(`${method} needs a drizzle-cubrid/native table`);
+}
 
 export type CubridSelectedFields = SelectedFields<CubridColumn, CubridTable>;
 
@@ -38,6 +43,24 @@ export class CubridDatabase {
 	selectDistinct<TSelection extends CubridSelectedFields>(fields: TSelection): CubridSelectBuilder<TSelection>;
 	selectDistinct(fields?: CubridSelectedFields): CubridSelectBuilder<CubridSelectedFields | undefined> {
 		return new CubridSelectBuilder(this.session, this.dialect, fields, true);
+	}
+
+	/** `INSERT INTO table`: continue with `values()` or `select()`. */
+	insert<TTable extends CubridTable>(table: TTable): CubridInsertBuilder<TTable> {
+		assertTable(table, 'insert()');
+		return new CubridInsertBuilder(table, this.session, this.dialect);
+	}
+
+	/** `UPDATE table`: continue with `set()`. */
+	update<TTable extends CubridTable>(table: TTable): CubridUpdateBuilder<TTable> {
+		assertTable(table, 'update()');
+		return new CubridUpdateBuilder(table, this.session, this.dialect);
+	}
+
+	/** `DELETE FROM table`; without `where()` it deletes every row. */
+	delete<TTable extends CubridTable>(table: TTable): CubridDelete<TTable> {
+		assertTable(table, 'delete()');
+		return new CubridDelete(this.session, this.dialect, table);
 	}
 
 	/**
