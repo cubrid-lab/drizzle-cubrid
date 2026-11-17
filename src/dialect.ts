@@ -1,4 +1,6 @@
-import { entityKind } from 'drizzle-orm/entity';
+import type { CasingCache } from 'drizzle-orm/casing';
+import { Column } from 'drizzle-orm/column';
+import { entityKind, is } from 'drizzle-orm/entity';
 import { MySqlDialect } from 'drizzle-orm/mysql-core/dialect';
 import type { BuildRelationalQueryResult } from 'drizzle-orm/relations';
 import { type Query, type SQL, sql as sqlTag } from 'drizzle-orm/sql/sql';
@@ -121,6 +123,29 @@ function recordFields<T extends BuildRelationalQueryResult>(args: RelationalQuer
 	return result;
 }
 
+const utf8 = new TextEncoder();
+
+/**
+ * The placeholder for a value bound to a column: `cast(? as CHAR(m))` for a
+ * string compared with or written to a `char()` column, `?` otherwise.
+ *
+ * CUBRID 11.4 types the host variables of `IN (?, ?)` (two or more) as
+ * VARCHAR and compares a CHAR column with VARCHAR values without space
+ * padding, so `inArray()` matched no row and `notInArray()` every row (#237).
+ * Typed CHAR, the values compare padded, as a single `= ?` already does.
+ * `m` is the column length, or the value's UTF-8 byte length when that is
+ * larger, so a longer value is never truncated into a match; that byte length
+ * is at least its length in characters in any database charset.
+ */
+function charParamSql(encoder: unknown, value: unknown): string {
+	if (!is(encoder, Column) || typeof value !== 'string') return '?';
+	const type = /^char(?:\((\d+)\))?$/i.exec(encoder.getSQLType().trim());
+	if (!type) return '?';
+	// CUBRID reads CHAR without a length as CHAR(1).
+	const length = Number(type[1] ?? 1);
+	return `cast(? as CHAR(${Math.max(length, utf8.encode(value).length)}))`;
+}
+
 /** Drizzle's MySQL dialect with the relational-query limits of CUBRID enforced. */
 export class CubridDialect extends MySqlDialect {
 	static override readonly [entityKind]: string = 'CubridDialect';
@@ -168,7 +193,27 @@ export class CubridDialect extends MySqlDialect {
 	}
 
 	override sqlToQuery(sql: SQL, invokeSource?: 'indexes'): ReturnType<MySqlDialect['sqlToQuery']> {
-		const query = super.sqlToQuery(sql, invokeSource);
+		// MySqlDialect#sqlToQuery() with the CHAR casts of charParamSql(): it passes
+		// no prepareTyping, through which Drizzle hands over each parameter's
+		// column. Drizzle calls prepareTyping(encoder) and then escapeParam() for
+		// each bound value, and only escapeParam() for a placeholder; `casing` is
+		// internal to MySqlDialect. Checked against drizzle-orm 0.44.1 and 0.45.4.
+		let encoder: unknown;
+		const query = sql.toQuery({
+			casing: (this as unknown as { casing: CasingCache }).casing,
+			escapeName: this.escapeName,
+			escapeParam: (_num, value) => {
+				const current = encoder;
+				encoder = undefined;
+				return charParamSql(current, value);
+			},
+			escapeString: this.escapeString,
+			invokeSource,
+			prepareTyping: (next) => {
+				encoder = next;
+				return 'none';
+			},
+		});
 		// ilike()/notIlike() build raw `<column> ilike <value>`; values are
 		// parameters here, so only the statement's own text is searched.
 		if (/\bilike\b/i.test(sqlKeywordsText(query.sql))) {

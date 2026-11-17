@@ -477,6 +477,20 @@ with literals, some value errors report a different code (an ENUM value that
 does not fit is `-181` rather than `-494`), and typed binds take more round
 trips per statement.
 
+A string compared with or written to a `char()` column is sent as
+`cast(? as CHAR(n))` under both bindings (`inArray(t.code, ['ab', 'cd'])` is
+`` `code` in (cast(? as CHAR(10)), cast(? as CHAR(10))) ``). CUBRID 11.4 types
+the bound values of an `IN` list of two or more as `VARCHAR` and compares a
+`CHAR` column with `VARCHAR` values without space padding, so with typed binds
+`inArray()` matched no row and `notInArray()` every row; typed `CHAR`, they
+compare padded, as `eq()` always did. A value longer than the column is cast
+to its own length, so it never matches by truncation. `sql.placeholder()`
+values are not cast (their value is not known when the SQL is built): with
+typed binds, an `inArray()` of two or more placeholders on a `char()` column
+still matches nothing; pass the values, or write
+`` sql`cast(${sql.placeholder('a')} as CHAR(10))` `` for values that fit the
+column ([#237](https://github.com/cubrid-lab/drizzle-cubrid/issues/237)).
+
 `binary()` and `varbinary()` encode their value as a string, which a CUBRID
 `BIT VARYING` column accepts only from a literal: use `binding: "literal"` for
 them, or a `customType` that passes a `Buffer`.

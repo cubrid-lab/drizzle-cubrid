@@ -247,6 +247,18 @@ column they are compared with (`eq(users.active, true)` sends `1`), except
 `sql.placeholder()` values, which are sent as given, as in Drizzle's other
 dialects. An array parameter is refused: cubrid-client cannot bind one.
 
+A string bound to a `char()` column is sent as `cast(? as CHAR(n))` under both
+bindings (`inArray(t.code, ['ab', 'cd'])` is
+`"t"."code" in (cast(? as CHAR(10)), cast(? as CHAR(10)))`). CUBRID 11.4
+types the bound values of an `IN` list of two or more as `VARCHAR` and
+compares a `CHAR` column with `VARCHAR` values without space padding, so with
+typed binds `inArray()` matched no row and `notInArray()` every row; typed
+`CHAR`, they compare padded, as `eq()` always did. A value longer than `n` is
+cast to its own length (UTF-8 bytes), so it never matches by truncation.
+Placeholders are not cast: with typed binds, an `inArray()` of two or more
+`sql.placeholder()` values on a `char()` column still matches nothing; pass
+the values instead (#237).
+
 ### Identifier quoting
 
 Identifiers are double-quoted and an embedded `"` is doubled (`we"ird` →
@@ -584,7 +596,7 @@ at runtime too, rather than given a meaning Drizzle does not type.
 | --- | --- | --- |
 | Same SQL type and codec | On the reference as read | |
 | `SMALLINT`, `INTEGER`, `BIGINT`, `NUMERIC(p,s)` with each other (also other precisions and scales) | On the reference cast to the parent type | `BIGINT` with `INTEGER` (both directions), `NUMERIC(10,2)` with `NUMERIC(10,3)`: `1.500` matches `1.50`, `1.505` matches nothing |
-| `CHAR(n)` with `CHAR(m)` | On the reference cast to the parent type; the keys are sent as `cast(? as CHAR(n))` | `CHAR(5)` with `CHAR(10)`: both space-padded, `'ab'` matches `'ab'`. CUBRID compares a `CHAR` column with an `IN` list of two or more untyped bound values exactly, without padding (`'ab   '` did not match a `CHAR(10)` `'ab'`), but pads when they are typed `CHAR` |
+| `CHAR(n)` with `CHAR(m)` | On the reference cast to the parent type; the keys are sent as `cast(? as CHAR(n))`, as every `CHAR` value is (see [Binding](#binding)) | `CHAR(5)` with `CHAR(10)`: both space-padded, `'ab'` matches `'ab'` |
 | `VARCHAR(n)`/`STRING` with each other | On the reference cast to the parent type | |
 | `CHAR` with `VARCHAR`, numbers with strings, `FLOAT` with `DOUBLE`, dates with times, any other pair | Refused | CUBRID matched a `VARCHAR` value against `CHAR` column values but not a `CHAR` value against `VARCHAR` ones, and `FLOAT` `0.1` does not equal `DOUBLE` `0.1` |
 | A SET/MULTISET/SEQUENCE column | Refused | cubrid-client cannot bind a collection value |
@@ -748,6 +760,9 @@ are not in `drizzle-cubrid/native`:
 ## Known CUBRID behaviors
 
 - `CHAR(n)` values come back padded with spaces to `n`.
+- A `CHAR` column compared with an `IN` list of two or more `VARCHAR` values,
+  which is how CUBRID types untyped bound values there, compares without space
+  padding; the dialect sends `CHAR` values typed `CHAR` (see [Binding](#binding)).
 - `FLOAT` is 32-bit; use `double()` for JavaScript-exact numbers.
 - `MONETARY` is stored as a double: amounts have double precision, not exact
   decimal precision. Use `numeric({ precision, scale })` for exact money.

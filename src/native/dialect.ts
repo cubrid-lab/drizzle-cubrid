@@ -23,8 +23,9 @@ import { getTableName, Table } from 'drizzle-orm/table';
 import { getTableColumns } from 'drizzle-orm/utils';
 import { CubridCollection } from './columns/collections.js';
 import { describeValue } from './columns/common.js';
+import { charParamSql } from './columns/string.js';
 import { CubridTemporalDate, CubridTemporalString } from './columns/temporal.js';
-import { getAliasedTableOriginalName, getSqlDecoder } from './internal.js';
+import { escapeParamWithEncoder, getAliasedTableOriginalName, getSqlDecoder } from './internal.js';
 
 /**
  * A double-quoted identifier, with an embedded `"` doubled (`a"b` → `"a""b"`).
@@ -473,14 +474,17 @@ function updateSetSql(table: Table, set: Record<string, unknown>, statement: str
 export class CubridDialect {
 	private readonly casing = new CasingCache();
 
-	/** SQL text with `?` for each parameter, and the parameters. */
+	/**
+	 * SQL text with `?` for each parameter, and the parameters. A string bound
+	 * to a CHAR column is `cast(? as CHAR(n))` (see `charParamSql()`, #237).
+	 */
 	sqlToQuery(query: SQLWrapper): Query {
 		const statement = query.getSQL();
 		refuseCollectionParams(statement.queryChunks);
 		const { sql: text, params } = statement.toQuery({
 			casing: this.casing,
 			escapeName: quoteIdentifier,
-			escapeParam: () => '?',
+			...escapeParamWithEncoder(charParamSql),
 			escapeString: quoteString,
 		});
 		return { sql: text, params };
