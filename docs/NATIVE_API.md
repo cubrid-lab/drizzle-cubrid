@@ -17,12 +17,11 @@
 - `collectionLiteralSql(column, count)`: the typed literal a statement uses to
   write a collection (see [Collections](#collections)).
 - `drizzle(client)` with `db.select()`, `db.selectDistinct()` and
-  `db.execute()` (see [Queries](#queries)), and `db.insert()`, `db.update()`
-  and `db.delete()` (see [Writes](#writes-insert-update-delete)).
+  `db.execute()` (see [Queries](#queries)), `db.insert()`, `db.update()`
+  and `db.delete()` (see [Writes](#writes-insert-update-delete)), and
+  `db.transaction()` with nested transactions (see [Transactions](#transactions)).
 
-**Not yet:** transactions through Drizzle
-(#161; use cubrid-client's `transaction()` and pass its client to `drizzle()`),
-relational queries (`db.query`), set operations (`union` and friends),
+**Not yet:** relational queries (`db.query`), set operations (`union` and friends),
 scalar subqueries as selected fields, migrations or DDL generation (#163), and
 indexes or foreign keys in `extraConfig`. Native tables are not supported by
 the 0.x `drizzle()` from `drizzle-cubrid`.
@@ -63,7 +62,7 @@ import { count, eq, gt, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-cubrid/native';
 
 const client = createClient({ host, database, user, password, timezone: 'utc' });
-const db = drizzle(client); // or drizzle(pool), drizzle(tx) inside client.transaction()
+const db = drizzle(client); // or drizzle(pool)
 
 const rows = await db
   .select({ name: users.name, posts: count(posts.id) })
@@ -88,7 +87,7 @@ types, so they match Drizzle's other dialects.
 | `innerJoin`, `leftJoin`, `rightJoin`, `crossJoin` | A left join makes the joined fields nullable, a right join the earlier ones. As in Drizzle, a top-level object (a table in `select()`, or `{ pet: { ... } }`) becomes `null` when its column fields all come from one such table or subquery and are all NULL; plain `sql` fields in it do not count. A join changes the builder it is called on, as Drizzle's do |
 | `where`, `groupBy`, `having`, `orderBy` | Drizzle's operators and aggregates (`eq`, `and`, `inArray`, `count`, `sum`, `asc`, `desc`, ...); callbacks receive the selected fields |
 | `limit`, `offset` | Bound as parameters; `offset()` needs `limit()` |
-| `.for('update')` | Locks the rows until the transaction ends; use it inside `client.transaction()` |
+| `.for('update')` | Locks the rows until the transaction ends; use it inside `db.transaction()` |
 | `.as(alias)` | A subquery for `from()` and joins. Inside it each column is named by its key path (`"users.id"`, `"pets.id"`), so joined tables that share column names stay apart, and a `sql` field, which needs `.as('name')`, keeps that name, so the subquery's own `having`/`orderBy` can use it. Outside, every use of a field (select list, `where`, `on`, `orderBy`, `having`) reads `"alias"."name"`. Names that differ only in case are refused, as CUBRID compares identifiers ignoring case. A subquery's `sql` fields are typed `SQL.Aliased`, as in Drizzle, but at runtime they are plain `sql` expressions (`sq.n.fieldAlias` is `undefined`), so that conditions on them render qualified |
 | `.prepare()` | Builds the SQL once; `execute({ name: value })` fills `sql.placeholder('name')` |
 | `.toSQL()`, `$dynamic()`, `await`/`then` | As in Drizzle |
@@ -267,6 +266,62 @@ built and refused by the same rules as any native select.
 | `values(col)` / `sql\`values(${t.col})\`` in `onDuplicateKeyUpdate()` | CUBRID 11.4 rejects MySQL's `VALUES()` function there (#189); repeat the value instead |
 | Multi-row `$returningId()` with an AUTO_INCREMENT key or with `onDuplicateKeyUpdate()`; `$returningId()` of INSERT … SELECT | See [`$returningId()`](#returningid) |
 | `sql.placeholder()` as a collection value | cubrid-client cannot bind an array |
+
+## Transactions
+
+```ts
+import { drizzle } from 'drizzle-cubrid/native';
+
+const db = drizzle(pool); // or drizzle(client)
+
+const orderId = await db.transaction(
+  async (tx) => {
+    const [order] = await tx.insert(orders).values({ item: 'Widget' }).$returningId();
+    const [stock] = await tx.select().from(inventory).where(eq(inventory.item, 'Widget')).for('update');
+    if (!stock || stock.qty < 1) tx.rollback();
+    await tx.update(inventory).set({ qty: stock.qty - 1 }).where(eq(inventory.item, 'Widget'));
+    // A nested transaction is a savepoint: its failure undoes only its own work.
+    await tx
+      .transaction(async (audit) => {
+        await audit.insert(auditLog).values({ orderId: order.id });
+      })
+      .catch(() => undefined);
+    return order.id;
+  },
+  { isolationLevel: 'repeatable read' },
+);
+```
+
+`db.transaction(callback, config?)` runs on cubrid-client's
+`transaction(callback, options)`, which gives the callback a connection of its
+own (a pooled one for a pool). `tx` is a native database (`CubridTransaction`)
+bound to that connection, with the same `select`, `insert`, `update`,
+`delete`, `execute`, binding and logger as `db`. Every statement of `tx`
+belongs to the transaction, and statements of `db` (even on the same client
+while the transaction runs) never do. Date and time reads in `tx` are checked
+against the time zone of the client or pool that started it.
+
+| Behavior | Details |
+| --- | --- |
+| Result | Commits when the callback resolves and resolves to its value |
+| Callback rejects | Rolls back and rejects with the callback's own error. cubrid-client's wrapping `TransactionError` is kept on it as `transactionError`, and a failed rollback as `rollbackError`; neither replaces it |
+| A statement of `tx` fails | It rejects with cubrid-client's error unchanged; for a transaction client that is a `TransactionError` carrying the server's `code` and `kind` (`'unique-violation'`, …). Uncaught, it rolls the transaction back as above |
+| Commit fails | Rejects with cubrid-client's error unchanged; check its `outcomeUnknown` (the commit may have happened) before retrying |
+| `tx.rollback()` | Throws `CubridTransactionRollbackError` (a subclass of Drizzle's `TransactionRollbackError`), so the level it was called in rolls back and its `transaction()` rejects with that error |
+| `tx.transaction(cb)` | `savepoint "spN"` (N is the depth) before `cb`, and `rollback to savepoint "spN"` when `cb` rejects; the error is rethrown, so the outer transaction goes on if you catch it, and rolls back if you do not. CUBRID has no `RELEASE SAVEPOINT`, so a savepoint stays until the transaction ends. It takes no config |
+| `config.isolationLevel` | `'read committed'`, `'repeatable read'` or `'serializable'`, applied by cubrid-client before the transaction starts (verified on 11.4: under `'repeatable read'` and `'serializable'` a row committed meanwhile by another connection stays invisible) |
+| Parallel statements in one `tx` | Allowed (`Promise.all`); cubrid-client runs them one at a time on the transaction's connection. Await them all before the callback returns |
+| Using `tx` after its callback settled | Every statement, `transaction()` and `rollback()` of it (and of its nested transactions) throws `This transaction has ended …` before anything is sent; a nested `tx` ends when its own callback settles |
+
+Refused before a connection is taken:
+
+| Refused | Why |
+| --- | --- |
+| `isolationLevel: 'read uncommitted'` or any other level | CUBRID has no READ UNCOMMITTED |
+| `accessMode`, `withConsistentSnapshot`, any other config key | CUBRID has no read-only transactions or consistent-snapshot start; cubrid-client options such as `lockTimeout` are not passed yet |
+| A client without `transaction()` | `BEGIN`/`COMMIT` on a connection that other callers may share would let their statements join, commit or roll back the transaction (#185). Pass a cubrid-client 1.3+ client or pool |
+| `isolationLevel` with a `transaction()` that declares no options parameter | It would run at the server's default level |
+| Two nested transactions of one level at the same time | They would roll back to the same point of one connection |
 
 ## Column builders
 

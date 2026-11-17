@@ -91,13 +91,15 @@ beforeAll(async () => {
 	}
 });
 
+// Each DROP TABLE took about 3 s on a fresh 11.4 container, so dropping every
+// table of a run can exceed the default 60 s hook timeout.
 afterAll(async () => {
 	for (const table of created.reverse()) {
 		await client.query(`DROP TABLE IF EXISTS ${table}`).catch(() => undefined);
 	}
 	await pool?.close();
 	await client?.close();
-});
+}, 300_000);
 
 describe('transactions run on a driver-owned connection (#185)', () => {
 	const table = name('tx');
@@ -1747,5 +1749,326 @@ describe('drizzle-cubrid/native insert, update and delete (#159)', () => {
 		expect(await db.select({ name: people.name }).from(people).where(eq(people.name, 'Bob'))).toEqual([
 			{ name: 'Bob' },
 		]);
+	});
+});
+
+describe('drizzle-cubrid/native transactions (#161)', () => {
+	// Creates tables; see the DDL_TIMEOUT note above (a fresh database can
+	// stall CREATE TABLE for about 100 s while it adds a volume).
+	const DDL_TIMEOUT = 180_000;
+	const items = native.cubridTable(name('ntx'), { id: native.integer().primaryKey() });
+	const events = native.cubridTable(name('ntxev'), {
+		id: native.integer().primaryKey().autoIncrement(),
+		label: native.varchar({ length: 30 }).notNull(),
+		at: native.datetime(),
+	});
+	const table = () => `"${native.getTableConfig(items).name}"`;
+	const itemIds = async () =>
+		(await client.query<{ id: number }>(`SELECT id FROM ${table()} ORDER BY id`)).map((row) => row.id);
+	const gate = () => {
+		let open!: () => void;
+		const opened = new Promise<void>((resolve) => {
+			open = resolve;
+		});
+		return { open, opened };
+	};
+
+	beforeAll(async () => {
+		for (const t of [items, events]) {
+			await client.query(createTableSql(t));
+			created.push(`"${native.getTableConfig(t).name}"`);
+		}
+	}, DDL_TIMEOUT);
+
+	for (const [label, source] of [
+		['client', () => client],
+		['pool', () => pool],
+	] as const) {
+		it(`commits and returns the callback's value, visible afterwards (${label})`, async () => {
+			await client.query(`DELETE FROM ${table()}`);
+			const db = native.drizzle(source());
+			const value = await db.transaction(async (tx) => {
+				await tx.insert(items).values([{ id: 1 }, { id: 2 }]);
+				await tx.update(items).set({ id: 3 }).where(eq(items.id, 2));
+				return tx.select({ id: items.id }).from(items).orderBy(items.id);
+			});
+			expect(value).toEqual([{ id: 1 }, { id: 3 }]);
+			expect(await itemIds()).toEqual([1, 3]);
+		});
+
+		it(`rolls back everything when the callback throws, rejecting with its error (${label})`, async () => {
+			await client.query(`DELETE FROM ${table()}`);
+			await client.query(`INSERT INTO ${table()} VALUES (50)`);
+			const db = native.drizzle(source());
+			const failure = new Error('roll back');
+			const error = await db
+				.transaction(async (tx) => {
+					await tx.insert(items).values({ id: 1 });
+					await tx.delete(items).where(eq(items.id, 50));
+					throw failure;
+				})
+				.catch((e: unknown) => e);
+			expect(error).toBe(failure);
+			expect((error as { transactionError?: unknown }).transactionError).toBeInstanceOf(Error);
+			expect(await itemIds()).toEqual([50]);
+		});
+	}
+
+	it('rejects with the driver error of a failed statement, unchanged, and rolls back', async () => {
+		await client.query(`DELETE FROM ${table()}`);
+		const db = native.drizzle(client);
+		let statementError: unknown;
+		const error = await db
+			.transaction(async (tx) => {
+				await tx.insert(items).values({ id: 1 });
+				await tx
+					.insert(items)
+					.values({ id: 1 })
+					.catch((e: unknown) => {
+						statementError = e;
+						throw e;
+					});
+			})
+			.catch((e: unknown) => e);
+		// cubrid-client reports a statement of a transaction client as its
+		// TransactionError, with the server's kind; it reaches the caller as is.
+		expect(error).toBe(statementError);
+		expect(error).toMatchObject({ name: 'TransactionError', kind: 'unique-violation' });
+		expect(await itemIds()).toEqual([]);
+	});
+
+	it('rolls back a failed nested transaction to its quoted savepoint and keeps the outer work', async () => {
+		await client.query(`DELETE FROM ${table()}`);
+		const db = native.drizzle(client);
+		const statements: string[] = [];
+		const logged = native.drizzle(client, { logger: { logQuery: (q) => statements.push(q) } });
+		await logged.transaction(async (tx) => {
+			await tx.insert(items).values({ id: 1 });
+			const inner = await tx
+				.transaction(async (one) => {
+					await one.insert(items).values({ id: 2 });
+					await one
+						.transaction(async (two) => {
+							await two.insert(items).values({ id: 3 });
+							throw new Error('level 2');
+						})
+						.catch(() => undefined);
+					await one.insert(items).values({ id: 4 });
+					return 'level 1';
+				})
+				.catch(() => 'failed');
+			expect(inner).toBe('level 1');
+			await tx
+				.transaction(async (again) => {
+					await again.insert(items).values({ id: 5 });
+					throw new Error('sibling');
+				})
+				.catch(() => undefined);
+			// Reading inside the transaction sees its own uncommitted work.
+			expect(await tx.select({ id: items.id }).from(items).orderBy(items.id)).toEqual([
+				{ id: 1 },
+				{ id: 2 },
+				{ id: 4 },
+			]);
+		});
+		expect(await itemIds()).toEqual([1, 2, 4]);
+		expect(statements.filter((s) => s.includes('savepoint'))).toEqual([
+			'savepoint "sp1"',
+			'savepoint "sp2"',
+			'rollback to savepoint "sp2"',
+			'savepoint "sp1"',
+			'rollback to savepoint "sp1"',
+		]);
+		// An uncaught nested failure rolls back the whole transaction.
+		await expect(
+			db.transaction(async (tx) => {
+				await tx.insert(items).values({ id: 9 });
+				await tx.transaction(async () => {
+					throw new Error('uncaught');
+				});
+			}),
+		).rejects.toThrow('uncaught');
+		expect(await itemIds()).toEqual([1, 2, 4]);
+	});
+
+	it('tx.rollback() rejects with CubridTransactionRollbackError and commits nothing', async () => {
+		await client.query(`DELETE FROM ${table()}`);
+		const db = native.drizzle(client);
+		const error = await db
+			.transaction(async (tx) => {
+				await tx.insert(items).values({ id: 7 });
+				tx.rollback();
+			})
+			.catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(native.CubridTransactionRollbackError);
+		expect(error).toBeInstanceOf(TransactionRollbackError);
+		expect(await itemIds()).toEqual([]);
+
+		// In a nested transaction it undoes only the savepoint's work.
+		await db.transaction(async (tx) => {
+			await tx.insert(items).values({ id: 1 });
+			await tx
+				.transaction(async (nested) => {
+					await nested.insert(items).values({ id: 2 });
+					nested.rollback();
+				})
+				.catch(() => undefined);
+		});
+		expect(await itemIds()).toEqual([1]);
+	});
+
+	it('applies the isolation level: repeatable read and serializable keep a snapshot, read committed does not', async () => {
+		const db = native.drizzle(pool);
+		const seen: Record<string, number[]> = {};
+		for (const isolationLevel of ['read committed', 'repeatable read', 'serializable'] as const) {
+			await client.query(`DELETE FROM ${table()}`);
+			seen[isolationLevel] = await db.transaction(
+				async (tx) => {
+					const before = (await tx.select({ id: items.id }).from(items)).length;
+					// Committed meanwhile on another connection of the pool.
+					await db.insert(items).values({ id: 1 });
+					const after = (await tx.select({ id: items.id }).from(items)).length;
+					return [before, after];
+				},
+				{ isolationLevel },
+			);
+		}
+		expect(seen).toEqual({
+			'read committed': [0, 1],
+			'repeatable read': [0, 0],
+			serializable: [0, 0],
+		});
+		await expect(
+			db.transaction(async () => undefined, {
+				isolationLevel: 'read uncommitted' as native.CubridIsolationLevel,
+			}),
+		).rejects.toThrow(/does not support isolation level 'read uncommitted'/);
+	});
+
+	it('keeps concurrent transactions on a pool apart: neither sees nor commits the other', async () => {
+		await client.query(`DELETE FROM ${table()}`);
+		const db = native.drizzle(pool);
+		const aInserted = gate();
+		const bDone = gate();
+		const a = db
+			.transaction(async (tx) => {
+				await tx.insert(items).values({ id: 1 });
+				aInserted.open();
+				await bDone.opened;
+				// B's committed row is visible (read committed), A's own too.
+				expect(await tx.select({ id: items.id }).from(items).orderBy(items.id)).toEqual([{ id: 1 }, { id: 2 }]);
+				throw new Error('roll back A');
+			})
+			.catch((e: Error) => e.message);
+		await aInserted.opened;
+		const bSaw = await db.transaction(async (tx) => {
+			await tx.insert(items).values({ id: 2 });
+			return tx.select({ id: items.id }).from(items).orderBy(items.id);
+		});
+		bDone.open();
+		expect(bSaw).toEqual([{ id: 2 }]);
+		expect(await a).toBe('roll back A');
+		expect(await itemIds()).toEqual([2]);
+	});
+
+	for (const [label, source] of [
+		['client', () => client],
+		['pool', () => pool],
+	] as const) {
+		it(`keeps a statement on the same ${label} outside a running transaction`, async () => {
+			await client.query(`DELETE FROM ${table()}`);
+			const db = native.drizzle(source());
+			const inside = gate();
+			const release = gate();
+			const rolledBack = db
+				.transaction(async (tx) => {
+					await tx.insert(items).values({ id: 1 });
+					inside.open();
+					await release.opened;
+					throw new Error('roll back');
+				})
+				.catch((e: Error) => e.message);
+			await inside.opened;
+			await db.insert(items).values({ id: 2 });
+			// The outside reader does not see the transaction's uncommitted row.
+			expect(await db.select({ id: items.id }).from(items)).toEqual([{ id: 2 }]);
+			release.open();
+			expect(await rolledBack).toBe('roll back');
+			expect(await itemIds()).toEqual([2]);
+		});
+	}
+
+	it('runs statements started together in one transaction, all on its connection', async () => {
+		await client.query(`DELETE FROM ${table()}`);
+		const db = native.drizzle(pool);
+		await db.transaction(async (tx) => {
+			await Promise.all([1, 2, 3, 4, 5].map((id) => tx.insert(items).values({ id })));
+		});
+		expect(await itemIds()).toEqual([1, 2, 3, 4, 5]);
+		await expect(
+			db.transaction(async (tx) => {
+				await Promise.all([6, 7].map((id) => tx.insert(items).values({ id })));
+				throw new Error('roll back both');
+			}),
+		).rejects.toThrow('roll back both');
+		expect(await itemIds()).toEqual([1, 2, 3, 4, 5]);
+	});
+
+	it('refuses tx after its callback settled, before sending anything', async () => {
+		await client.query(`DELETE FROM ${table()}`);
+		const db = native.drizzle(client);
+		let kept!: native.CubridTransaction;
+		let keptNested!: native.CubridTransaction;
+		await db.transaction(async (tx) => {
+			kept = tx;
+			await tx.transaction(async (nested) => {
+				keptNested = nested;
+			});
+			await expect(keptNested.insert(items).values({ id: 2 })).rejects.toThrow(/savepoint sp1\) has ended/);
+			await tx.insert(items).values({ id: 1 });
+		});
+		await expect(kept.insert(items).values({ id: 3 })).rejects.toThrow(/This transaction has ended/);
+		await expect(kept.select().from(items)).rejects.toThrow(/This transaction has ended/);
+		await expect(kept.transaction(async () => undefined)).rejects.toThrow(/This transaction has ended/);
+		expect(await itemIds()).toEqual([1]);
+	});
+
+	it('returns $returningId() keys and reads them back with a native select inside the transaction', async () => {
+		const db = native.drizzle(pool);
+		const at = new Date(Date.UTC(2024, 1, 29, 23, 59, 58, 123));
+		const [first] = await db.insert(events).values({ label: 'before' }).$returningId();
+		const result = await db.transaction(async (tx) => {
+			const ids = await tx.insert(events).values({ label: 'inside', at }).$returningId();
+			const rows = await tx
+				.select()
+				.from(events)
+				.where(eq(events.id, ids[0]?.id ?? -1));
+			return { ids, rows };
+		});
+		const id = result.ids[0]?.id;
+		expect(id).toBeGreaterThan(first?.id ?? Number.POSITIVE_INFINITY);
+		expect(result.rows).toEqual([{ id, label: 'inside', at }]);
+		expect(
+			await db
+				.select()
+				.from(events)
+				.where(eq(events.id, id ?? -1)),
+		).toEqual([{ id, label: 'inside', at }]);
+
+		// A rolled-back insert leaves no row behind.
+		let rolledBackId: number | undefined;
+		await db
+			.transaction(async (tx) => {
+				rolledBackId = (await tx.insert(events).values({ label: 'gone' }).$returningId())[0]?.id;
+				tx.rollback();
+			})
+			.catch(() => undefined);
+		expect(rolledBackId).toBeGreaterThan(id ?? Number.POSITIVE_INFINITY);
+		expect(
+			await db
+				.select()
+				.from(events)
+				.where(eq(events.id, rolledBackId ?? -1)),
+		).toEqual([]);
 	});
 });

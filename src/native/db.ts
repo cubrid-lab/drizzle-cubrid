@@ -1,6 +1,6 @@
 // `drizzle()` for drizzle-cubrid/native (#160).
 
-import { DefaultLogger, type Logger } from 'drizzle-orm';
+import { DefaultLogger, type Logger, TransactionRollbackError } from 'drizzle-orm';
 import { entityKind } from 'drizzle-orm/entity';
 import type { SelectedFields } from 'drizzle-orm/operations';
 import type { SQLWrapper } from 'drizzle-orm/sql/sql';
@@ -8,7 +8,7 @@ import type { CubridColumn } from './columns/common.js';
 import { CubridDialect } from './dialect.js';
 import { CubridDelete, CubridInsertBuilder, CubridUpdateBuilder } from './dml.js';
 import { CubridSelectBuilder } from './select.js';
-import { type CubridBinding, type CubridNativeClient, CubridSession } from './session.js';
+import { type CubridBinding, type CubridNativeClient, CubridSession, type CubridTransactionConfig } from './session.js';
 import { CubridTable } from './table.js';
 
 function assertTable(table: unknown, method: string): asserts table is CubridTable {
@@ -29,7 +29,7 @@ export class CubridDatabase {
 
 	private readonly dialect = new CubridDialect();
 
-	constructor(private readonly session: CubridSession) {}
+	constructor(protected readonly session: CubridSession) {}
 
 	/** `select()` reads every column of the source; `select({ ... })` the given fields. */
 	select(): CubridSelectBuilder<undefined>;
@@ -71,6 +71,59 @@ export class CubridDatabase {
 	execute<TRow = Record<string, unknown>>(query: SQLWrapper | string): Promise<TRow[]> {
 		const statement = typeof query === 'string' ? { sql: query, params: [] } : this.dialect.sqlToQuery(query);
 		return this.session.rawRows(statement.sql, statement.params) as Promise<TRow[]>;
+	}
+
+	/**
+	 * Runs `transaction` on a connection cubrid-client's `transaction()` owns,
+	 * so every statement of `tx` belongs to it while statements of `db` stay
+	 * outside. Commits when the callback resolves and resolves to its value;
+	 * rolls back when it rejects and rejects with its error. A failed commit
+	 * is cubrid-client's error, unchanged. `config.isolationLevel` is applied
+	 * before the transaction starts.
+	 */
+	transaction<T>(transaction: (tx: CubridTransaction) => Promise<T>, config?: CubridTransactionConfig): Promise<T> {
+		return this.session.transaction((session) => transaction(new CubridTransaction(session)), config);
+	}
+}
+
+/**
+ * `tx.rollback()` throws it to roll back the transaction (or, in a nested
+ * transaction, to its savepoint); `transaction()` then rejects with it. It is
+ * Drizzle's `TransactionRollbackError`, so `instanceof` checks for either work.
+ */
+export class CubridTransactionRollbackError extends TransactionRollbackError {
+	static override readonly [entityKind]: string = 'CubridNativeTransactionRollbackError';
+}
+
+/**
+ * The `tx` of a native transaction: a database bound to the transaction's
+ * connection. It refuses every statement once its callback has settled.
+ */
+export class CubridTransaction extends CubridDatabase {
+	static override readonly [entityKind]: string = 'CubridNativeTransaction';
+
+	/**
+	 * A nested transaction: `SAVEPOINT "spN"`, and `ROLLBACK TO SAVEPOINT` when
+	 * the callback rejects, which leaves the enclosing transaction's earlier
+	 * work in place. The error is rethrown, so catch it to go on. It takes no
+	 * config: the isolation level belongs to the outermost transaction.
+	 */
+	override transaction<T>(
+		transaction: (tx: CubridTransaction) => Promise<T>,
+		config?: CubridTransactionConfig,
+	): Promise<T> {
+		if (config !== undefined) {
+			return Promise.reject(
+				new Error('A nested transaction takes no config; set isolationLevel on the outermost transaction'),
+			);
+		}
+		return this.session.savepoint((session) => transaction(new CubridTransaction(session)));
+	}
+
+	/** Rolls back this transaction (or nested transaction) by throwing `CubridTransactionRollbackError`. */
+	rollback(): never {
+		this.session.assertActive();
+		throw new CubridTransactionRollbackError();
 	}
 }
 
