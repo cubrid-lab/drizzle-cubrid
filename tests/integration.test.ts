@@ -1347,3 +1347,231 @@ describe('drizzle-cubrid/native select and session (#158, #160)', () => {
 		expect(typeof (error as { code?: unknown }).code).toBe('number');
 	});
 });
+
+describe('drizzle-cubrid/native insert, update and delete (#159)', () => {
+	const big = 9007199254740993n; // 2^53 + 1
+	let nextDoc = 0;
+	const people = native.cubridTable(name('npeople'), {
+		id: native.integer().primaryKey().autoIncrement(),
+		name: native.varchar({ length: 30 }).notNull().unique(),
+		score: native.integer().default(7),
+		active: native.boolean(),
+		at: native.datetime(),
+	});
+	const bigKeys = native.cubridTable(name('nbigkeys'), {
+		id: native.bigint({ mode: 'bigint' }).primaryKey().autoIncrement(),
+		note: native.varchar({ length: 30 }),
+	});
+	const docs = native.cubridTable(name('ndocs'), {
+		id: native
+			.varchar({ length: 36 })
+			.primaryKey()
+			.$defaultFn(() => `doc-${run}-${++nextDoc}`),
+		title: native.varchar({ length: 30 }),
+	});
+	const archive = native.cubridTable(name('narchive'), {
+		name: native.varchar({ length: 30 }),
+		score: native.integer(),
+		copied: native.integer().default(1),
+	});
+	const bags = native.cubridTable(name('nbags'), {
+		id: native.integer().primaryKey(),
+		tags: native.set({ element: native.varchar({ length: 10 }) }),
+		counts: native.multiset({ element: native.bigint({ mode: 'bigint' }) }),
+		days: native.sequence({ element: native.date({ mode: 'string' }) }),
+	});
+	const at = new Date(Date.UTC(2024, 1, 29, 23, 59, 58, 123));
+
+	let db: ReturnType<typeof native.drizzle<CubridClient>>;
+
+	const quoted = (table: native.CubridTable) => `"${native.getTableConfig(table).name}"`;
+	const countRows = async (table: native.CubridTable) => {
+		const [row] = await client.query<{ n: number | bigint }>(`SELECT COUNT(*) AS n FROM ${quoted(table)}`);
+		return Number(row?.n);
+	};
+
+	beforeAll(async () => {
+		for (const table of [people, bigKeys, docs, archive, bags]) {
+			await client.query(createTableSql(table));
+			created.push(quoted(table));
+		}
+		db = native.drizzle(client);
+	});
+
+	it('inserts one and several rows, with NULL and DEFAULT, and reads them back', async () => {
+		expect(await db.insert(people).values({ name: 'Ann', score: null, active: true, at })).toEqual({
+			affectedRows: 1,
+			lastInsertId: 1,
+		});
+		const many = await db.insert(people).values([{ name: 'Bob' }, { name: 'Cy', score: 3, active: false }]);
+		expect(many.affectedRows).toBe(2);
+		expect(await db.select().from(people).orderBy(people.id)).toEqual([
+			{ id: 1, name: 'Ann', score: null, active: true, at },
+			{ id: 2, name: 'Bob', score: 7, active: null, at: null },
+			{ id: 3, name: 'Cy', score: 3, active: false, at: null },
+		]);
+	});
+
+	it('reports AUTO_INCREMENT keys of one-row inserts, keeping a key above 2^53 exact', async () => {
+		expect(await db.insert(people).values({ name: 'Dee' }).$returningId()).toEqual([{ id: 4 }]);
+		await client.query(`ALTER TABLE ${quoted(bigKeys)} AUTO_INCREMENT = ${big}`);
+		expect(await db.insert(bigKeys).values({ note: 'a' }).$returningId()).toEqual([{ id: big }]);
+		expect(await db.insert(bigKeys).values({ note: 'b' })).toEqual({ affectedRows: 1, lastInsertId: big + 1n });
+		expect(await db.select().from(bigKeys).orderBy(bigKeys.id)).toEqual([
+			{ id: big, note: 'a' },
+			{ id: big + 1n, note: 'b' },
+		]);
+	});
+
+	it('refuses a multi-row $returningId() with an AUTO_INCREMENT key before sending', async () => {
+		const before = await countRows(bigKeys);
+		await expect(
+			db
+				.insert(bigKeys)
+				.values([{ note: 'x' }, { note: 'y' }])
+				.$returningId(),
+		).rejects.toThrow(/only for an INSERT of one row/);
+		expect(await countRows(bigKeys)).toBe(before);
+	});
+
+	it('reports $defaultFn keys of every row', async () => {
+		const keys = await db
+			.insert(docs)
+			.values([{ title: 'a' }, { id: `given-${run}`, title: 'b' }, { title: 'c' }])
+			.$returningId();
+		expect(keys).toHaveLength(3);
+		expect(keys[1]).toEqual({ id: `given-${run}` });
+		const rows = await db.select({ id: docs.id, title: docs.title }).from(docs);
+		expect(new Map(rows.map((r) => [r.id, r.title]))).toEqual(
+			new Map([
+				[keys[0]?.id, 'a'],
+				[keys[1]?.id, 'b'],
+				[keys[2]?.id, 'c'],
+			]),
+		);
+	});
+
+	it('passes a duplicate-key error through with its code', async () => {
+		const error = await db
+			.insert(people)
+			.values({ name: 'Ann' })
+			.catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(Error);
+		expect((error as { code?: unknown }).code).toBe(-670);
+	});
+
+	it('updates on a duplicate key, reporting affectedRows 2 for a changed row', async () => {
+		const updated = await db
+			.insert(people)
+			.values({ name: 'Ann' })
+			.onDuplicateKeyUpdate({ set: { score: sql`${people.id} + 100`, active: false } });
+		expect(updated.affectedRows).toBe(2);
+		const inserted = await db
+			.insert(people)
+			.values({ name: 'Eve' })
+			.onDuplicateKeyUpdate({ set: { score: 0 } })
+			.$returningId();
+		expect(inserted).toHaveLength(1);
+		expect(
+			await db
+				.insert(people)
+				.values({ name: 'Eve' })
+				.onDuplicateKeyUpdate({ set: { score: 1 } })
+				.$returningId(),
+		).toEqual([]);
+		expect(
+			await db.select({ score: people.score, active: people.active }).from(people).where(eq(people.name, 'Ann')),
+		).toEqual([{ score: 101, active: false }]);
+	});
+
+	it('inserts from a native select', async () => {
+		const result = await db
+			.insert(archive)
+			.select((qb) => qb.select({ name: people.name, score: people.score }).from(people).where(gt(people.id, 1)));
+		expect(result.affectedRows).toBe(4);
+		expect(await db.select().from(archive).orderBy(archive.name)).toEqual([
+			{ name: 'Bob', score: 7, copied: 1 },
+			{ name: 'Cy', score: 3, copied: 1 },
+			{ name: 'Dee', score: 7, copied: 1 },
+			{ name: 'Eve', score: 1, copied: 1 },
+		]);
+	});
+
+	it('updates with where, and with orderBy and limit', async () => {
+		expect(await db.update(people).set({ active: true }).where(gt(people.score, 5))).toEqual({ affectedRows: 3 });
+		expect(await db.update(people).set({ score: 0 }).where(eq(people.name, 'nobody'))).toEqual({ affectedRows: 0 });
+		expect(await db.update(people).set({ at }).orderBy(desc(people.id)).limit(2)).toEqual({ affectedRows: 2 });
+		const rows = await db.select({ name: people.name, at: people.at }).from(people).orderBy(people.id);
+		expect(rows.slice(-2)).toEqual([
+			{ name: 'Dee', at },
+			{ name: 'Eve', at },
+		]);
+		expect(rows[1]).toEqual({ name: 'Bob', at: null });
+	});
+
+	it('deletes with where and with limit', async () => {
+		expect(await db.delete(archive).where(eq(archive.name, 'Bob'))).toEqual({ affectedRows: 1 });
+		expect(await db.delete(archive).limit(2)).toEqual({ affectedRows: 2 });
+		expect(await countRows(archive)).toBe(1);
+		expect(await db.delete(archive)).toEqual({ affectedRows: 1 });
+	});
+
+	it('writes collections as typed literals, empty ones included, under both bindings', async () => {
+		await db
+			.insert(bags)
+			.values([
+				{ id: 1, tags: ['b', 'a', null], counts: [big, big, -1n], days: ['2024-01-02', null] },
+				{ id: 2, tags: [], counts: [], days: [] },
+				{ id: 3 },
+			]);
+		// SET and MULTISET have no defined order: compare them sorted.
+		const unordered = (rows: { tags: unknown[] | null; counts: unknown[] | null }[]) =>
+			rows.map((row) => ({
+				...row,
+				tags: row.tags && [...row.tags].sort(),
+				counts: row.counts && [...row.counts].sort((a, b) => (a === b ? 0 : (a as bigint) < (b as bigint) ? -1 : 1)),
+			}));
+		expect(unordered(await db.select().from(bags).orderBy(bags.id))).toEqual([
+			{ id: 1, tags: ['a', 'b', null], counts: [-1n, big, big], days: ['2024-01-02', null] },
+			{ id: 2, tags: [], counts: [], days: [] },
+			{ id: 3, tags: null, counts: null, days: null },
+		]);
+		await db
+			.update(bags)
+			.set({ tags: ['z'], days: [] })
+			.where(eq(bags.id, 1));
+		await native
+			.drizzle(client, { binding: 'literal' })
+			.insert(bags)
+			.values({ id: 4, tags: ["it's"], counts: [big] })
+			.onDuplicateKeyUpdate({ set: { tags: [] } });
+		await db
+			.insert(bags)
+			.values({ id: 3 })
+			.onDuplicateKeyUpdate({ set: { counts: [5n] } });
+		expect(unordered(await db.select().from(bags).orderBy(bags.id))).toEqual([
+			{ id: 1, tags: ['z'], counts: [-1n, big, big], days: [] },
+			{ id: 2, tags: [], counts: [], days: [] },
+			{ id: 3, tags: null, counts: [5n], days: null },
+			{ id: 4, tags: ["it's"], counts: [big], days: null },
+		]);
+	});
+
+	it('rolls back writes made inside client.transaction()', async () => {
+		const before = await countRows(people);
+		const failure = new Error('roll back');
+		await expect(
+			client.transaction(async (tx) => {
+				const txDb = native.drizzle(tx);
+				expect(await txDb.insert(people).values({ name: 'Tx' })).toMatchObject({ affectedRows: 1 });
+				expect(await txDb.update(people).set({ score: 9 }).where(eq(people.name, 'Tx'))).toEqual({ affectedRows: 1 });
+				expect(await txDb.delete(people).where(eq(people.name, 'Bob'))).toEqual({ affectedRows: 1 });
+				throw failure;
+			}),
+		).rejects.toMatchObject({ cause: failure });
+		expect(await countRows(people)).toBe(before);
+		expect(await db.select({ name: people.name }).from(people).where(eq(people.name, 'Bob'))).toEqual([
+			{ name: 'Bob' },
+		]);
+	});
+});

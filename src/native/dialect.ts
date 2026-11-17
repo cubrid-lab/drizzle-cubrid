@@ -12,7 +12,7 @@ import {
 	type DriverValueDecoder,
 	noopDecoder,
 	Param,
-	type Placeholder,
+	Placeholder,
 	type Query,
 	SQL,
 	type SQLWrapper,
@@ -58,6 +58,36 @@ export interface CubridJoin {
 }
 
 export type CubridOrderByItem = Column | SQL | SQL.Aliased;
+
+/** One row of an INSERT: the column values by property key; a missing key means none was given. */
+export type CubridInsertRow = Record<string, unknown>;
+
+export interface CubridInsertConfig {
+	table: Table;
+	/** VALUES rows, or `select` for INSERT … SELECT. */
+	values?: readonly CubridInsertRow[];
+	/** INSERT … SELECT: the select and the table columns its fields go to, in select-list order. */
+	select?: { query: SQLWrapper; columns: readonly Column[] };
+	/** `ON DUPLICATE KEY UPDATE` values by property key. */
+	onDuplicateKeyUpdate?: Record<string, unknown>;
+}
+
+export interface CubridUpdateConfig {
+	table: Table;
+	set: Record<string, unknown>;
+	where?: SQL;
+	orderBy: CubridOrderByItem[];
+	limit?: number | Placeholder;
+}
+
+export interface CubridDeleteConfig {
+	table: Table;
+	where?: SQL;
+	limit?: number | Placeholder;
+}
+
+/** Per VALUES row, the value written to each column (given or generated), by property key; `DEFAULT` is left out. */
+export type CubridInsertedValues = Record<string, unknown>[];
 
 export interface CubridSelectConfig {
 	fields: Record<string, unknown>;
@@ -193,13 +223,17 @@ export function mapRow(
 	return result;
 }
 
-/** Throws for a collection column compared with an array: the collection literal comes with #159. */
+/**
+ * Throws for a collection column compared with a value: cubrid-client cannot
+ * bind an array, and the typed collection literal is written only for insert
+ * and update values (see collectionValueSql).
+ */
 function refuseCollectionParams(chunks: readonly unknown[]): void {
 	for (const chunk of chunks) {
 		if (is(chunk, Param)) {
 			if (chunk.encoder instanceof CubridCollection && chunk.value !== null) {
 				throw new Error(
-					`Comparing ${chunk.encoder.kind} column ${chunk.encoder.name} with a value is not supported yet: collection values in conditions need the typed collection literal (#159)`,
+					`Comparing ${chunk.encoder.kind} column ${chunk.encoder.name} with a value is not supported: collection values can be written only as insert and update values`,
 				);
 			}
 		} else if (is(chunk, SQL)) {
@@ -237,6 +271,56 @@ function selectionSql(fields: readonly OrderedField[], outputNames: boolean): SQ
 		}),
 		sql`, `,
 	);
+}
+
+/**
+ * A value written to a column: a `sql` expression as is, a SET, MULTISET or
+ * SEQUENCE array as its typed literal with one parameter per element encoded
+ * by the element codec (`CAST(SET{?, ?} AS SET(INTEGER))`, see
+ * `CubridCollection.literalSql()`), anything else as a parameter encoded by
+ * the column's codec.
+ */
+export function columnValueSql(column: Column, value: unknown): SQL {
+	if (is(value, SQL)) return value;
+	if (column instanceof CubridCollection && value !== null) {
+		if (is(value, Placeholder)) {
+			throw new Error(
+				`sql.placeholder() cannot stand for the value of ${column.kind} column ${column.name}: cubrid-client cannot bind an array; pass the array`,
+			);
+		}
+		const elements = column.mapToDriverValue(value);
+		const [head = '', ...rest] = column.literalSql(elements.length).split('?');
+		return sql.join([sql.raw(head), ...rest.flatMap((text, index) => [sql.param(elements[index]), sql.raw(text)])]);
+	}
+	return sql`${sql.param(value, column)}`;
+}
+
+/** The table's columns by property key. */
+function columnsOf(table: Table): Record<string, Column> {
+	return getTableColumns(table);
+}
+
+/**
+ * `"col" = value, …` for UPDATE and ON DUPLICATE KEY UPDATE. `undefined`
+ * values are left out; columns with `$onUpdateFn()` that `set` does not name
+ * are set to its value, as in Drizzle's other dialects.
+ */
+function updateSetSql(table: Table, set: Record<string, unknown>, statement: string): SQL {
+	const columns = columnsOf(table);
+	const assignments: SQL[] = [];
+	for (const [key, value] of Object.entries(set)) {
+		if (value === undefined) continue;
+		const column = columns[key];
+		if (!column) throw new Error(`${statement}: ${getTableName(table)} has no column with the key ${key}`);
+		assignments.push(sql`${sql.identifier(column.name)} = ${columnValueSql(column, value)}`);
+	}
+	if (assignments.length === 0) throw new Error(`${statement} needs at least one value to set`);
+	for (const [key, column] of Object.entries(columns)) {
+		if (column.onUpdateFn && set[key] === undefined) {
+			assignments.push(sql`${sql.identifier(column.name)} = ${columnValueSql(column, column.onUpdateFn())}`);
+		}
+	}
+	return sql.join(assignments, sql`, `);
 }
 
 export class CubridDialect {
@@ -284,6 +368,65 @@ export class CubridDialect {
 		if (config.limit !== undefined) parts.push(sql` limit ${config.limit}`);
 		if (config.offset !== undefined) parts.push(sql` offset ${config.offset}`);
 		if (config.forUpdate) parts.push(sql` for update`);
+		return sql.join(parts);
+	}
+
+	/**
+	 * The INSERT, and for VALUES the value each row wrote to each column,
+	 * given or generated (for `$returningId()`). Every column
+	 * is listed; a row without a value for one writes its `$defaultFn()`
+	 * value, else its `$onUpdateFn()` value when it has no `.default()`, else
+	 * the `DEFAULT` keyword (the table's DDL default, or NULL).
+	 */
+	buildInsertQuery(config: CubridInsertConfig): { query: SQL; inserted: CubridInsertedValues } {
+		const { table } = config;
+		const entries = Object.entries(columnsOf(table));
+		const inserted: CubridInsertedValues = [];
+		let body: SQL;
+		if (config.select) {
+			const names = config.select.columns.map((column) => sql.identifier(column.name));
+			body = sql`(${sql.join(names, sql`, `)}) ${config.select.query.getSQL()}`;
+		} else {
+			const rows = config.values ?? [];
+			if (rows.length === 0) throw new Error('insert().values() needs at least one row');
+			const tuples = rows.map((row) => {
+				const written: Record<string, unknown> = {};
+				const values = entries.map(([key, column]) => {
+					let value = row[key];
+					if (value === undefined) {
+						if (column.defaultFn) value = column.defaultFn();
+						else if (column.default === undefined && column.onUpdateFn) value = column.onUpdateFn();
+						else return sql`default`;
+					}
+					written[key] = value;
+					return columnValueSql(column, value);
+				});
+				inserted.push(written);
+				return sql`(${sql.join(values, sql`, `)})`;
+			});
+			const names = entries.map(([, column]) => sql.identifier(column.name));
+			body = sql`(${sql.join(names, sql`, `)}) values ${sql.join(tuples, sql`, `)}`;
+		}
+		const onDuplicate = config.onDuplicateKeyUpdate
+			? sql` on duplicate key update ${updateSetSql(table, config.onDuplicateKeyUpdate, 'onDuplicateKeyUpdate()')}`
+			: undefined;
+		return { query: sql`insert into ${table} ${body}${onDuplicate}`, inserted };
+	}
+
+	/** `UPDATE … SET … [WHERE …] [ORDER BY …] [LIMIT …]`. */
+	buildUpdateQuery(config: CubridUpdateConfig): SQL {
+		const parts: SQL[] = [sql`update ${config.table} set ${updateSetSql(config.table, config.set, 'update().set()')}`];
+		if (config.where) parts.push(sql` where ${config.where}`);
+		if (config.orderBy.length > 0) parts.push(sql` order by ${sql.join(config.orderBy, sql`, `)}`);
+		if (config.limit !== undefined) parts.push(sql` limit ${config.limit}`);
+		return sql.join(parts);
+	}
+
+	/** `DELETE FROM … [WHERE …] [LIMIT …]`. */
+	buildDeleteQuery(config: CubridDeleteConfig): SQL {
+		const parts: SQL[] = [sql`delete from ${config.table}`];
+		if (config.where) parts.push(sql` where ${config.where}`);
+		if (config.limit !== undefined) parts.push(sql` limit ${config.limit}`);
 		return sql.join(parts);
 	}
 }

@@ -20,12 +20,26 @@ export interface CubridArrayRowOptions {
 }
 
 /**
+ * The outcome of an INSERT, UPDATE or DELETE, as cubrid-client's `execute()`
+ * and `executePrepared()` report it: `affectedRows`, and `lastInsertId` only
+ * when an INSERT made the session hold a new AUTO_INCREMENT value (a `number`
+ * while it is a safe integer, a `bigint` beyond that).
+ */
+export interface CubridDmlResult {
+	affectedRows: number;
+	lastInsertId?: number | bigint;
+}
+
+/**
  * What the native session needs from a client: `CubridClient`, `CubridPool`
- * and their transaction clients from cubrid-client 1.4 provide it.
+ * and their transaction clients from cubrid-client 1.4 provide it. Writes
+ * need `executePrepared()` (default binding) or `execute()` (`'literal'`).
  */
 export interface CubridNativeClient {
 	query(sql: string, params?: readonly unknown[], options?: CubridArrayRowOptions): Promise<unknown[]>;
 	queryPrepared?(sql: string, params?: readonly unknown[], options?: CubridArrayRowOptions): Promise<unknown[]>;
+	execute?(sql: string, params?: readonly unknown[]): Promise<CubridDmlResult>;
+	executePrepared?(sql: string, params?: readonly unknown[]): Promise<CubridDmlResult>;
 }
 
 const ARRAY_ROWS: CubridArrayRowOptions = { rowMode: 'array' };
@@ -57,18 +71,26 @@ export class CubridSession {
 		this.binding = binding;
 	}
 
-	private run(sql: string, params: unknown[], options?: CubridArrayRowOptions): Promise<unknown[]> {
+	/** Refuses an array parameter, then logs the statement. */
+	private send(sql: string, params: unknown[]): void {
 		const index = params.findIndex(Array.isArray);
 		if (index >= 0) {
-			// cubrid-client cannot bind an array; a collection value needs the typed
-			// collection literal (#159), and a list needs one placeholder per value.
-			return Promise.reject(
-				new TypeError(
-					`Parameter ${index + 1} is an array, which cannot be bound; collection values need #159, and inArray() takes a list of values, not one placeholder`,
-				),
+			// cubrid-client cannot bind an array; a collection value is written as
+			// the typed collection literal by insert and update, and a list needs
+			// one placeholder per value.
+			throw new TypeError(
+				`Parameter ${index + 1} is an array, which cannot be bound; collection values can be written only as an insert or update value of a collection column, and inArray() takes a list of values, not one placeholder`,
 			);
 		}
 		this.options.logger?.logQuery(sql, params);
+	}
+
+	private run(sql: string, params: unknown[], options?: CubridArrayRowOptions): Promise<unknown[]> {
+		try {
+			this.send(sql, params);
+		} catch (error) {
+			return Promise.reject(error);
+		}
 		// Driver errors are passed through unchanged, with their code, kind and cause.
 		if (this.binding === 'literal') return this.client.query(sql, params, options);
 		const prepared = this.client.queryPrepared;
@@ -83,6 +105,25 @@ export class CubridSession {
 	async selectRows(sql: string, params: unknown[], readsTemporal: boolean): Promise<unknown[]> {
 		if (readsTemporal) await assertUtcDecoding(this.client);
 		return this.run(sql, params, ARRAY_ROWS);
+	}
+
+	/**
+	 * Runs an INSERT, UPDATE or DELETE with `executePrepared()` (or `execute()`
+	 * under `'literal'` binding) and reports the driver's `affectedRows` and
+	 * `lastInsertId` unchanged. Driver errors are passed through unchanged.
+	 */
+	async write(sql: string, params: unknown[]): Promise<CubridDmlResult> {
+		const literal = this.binding === 'literal';
+		const method = literal ? this.client.execute : this.client.executePrepared;
+		if (typeof method !== 'function') {
+			throw new Error(
+				`The CUBRID client has no ${literal ? 'execute' : 'executePrepared'}() for INSERT, UPDATE and DELETE (cubrid-client 1.3.0 or later)`,
+			);
+		}
+		this.send(sql, params);
+		const result = await method.call(this.client, sql, params);
+		const { affectedRows, lastInsertId } = result;
+		return lastInsertId === undefined ? { affectedRows } : { affectedRows, lastInsertId };
 	}
 
 	/** Rows of a raw statement as cubrid-client returns them. */
