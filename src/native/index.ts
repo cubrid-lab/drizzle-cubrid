@@ -1,7 +1,8 @@
 // drizzle-cubrid/native: the CUBRID-native dialect (experimental preview).
 //
 // Tables, column builders with codecs, and drizzle() with select(), insert(),
-// update(), delete(), execute() and transaction() (#158, #159, #160, #161).
+// update(), delete(), execute(), transaction() and relational queries
+// (db.query) (#158, #159, #160, #161).
 // See docs/NATIVE_API.md.
 // It must never import the 0.x modules, which are built on Drizzle's MySQL
 // classes (ADR 0003, ADR 0007); scripts/check-dialect-boundary.mjs enforces it.
@@ -75,6 +76,7 @@ export {
 export {
 	CubridDatabase,
 	type CubridDrizzleConfig,
+	type CubridRelationalQueries,
 	type CubridSelectedFields,
 	CubridTransaction,
 	CubridTransactionRollbackError,
@@ -94,6 +96,7 @@ export {
 	CubridUpdateBuilder,
 	type CubridUpdateSet,
 } from './dml.js';
+export { CubridRelationalQuery, CubridRelationalQueryBuilder } from './relational.js';
 export {
 	type CubridAliasedSelection,
 	CubridPreparedSelect,

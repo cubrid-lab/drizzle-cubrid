@@ -1,10 +1,21 @@
 // `drizzle()` for drizzle-cubrid/native (#160).
 
 import { DefaultLogger, type Logger, TransactionRollbackError } from 'drizzle-orm';
-import { entityKind } from 'drizzle-orm/entity';
+import { entityKind, is } from 'drizzle-orm/entity';
+import {
+	createTableRelationsHelpers,
+	type ExtractTablesWithRelations,
+	extractTablesRelationalConfig,
+	type RelationalSchemaConfig,
+	type TableRelationalConfig,
+	type TablesRelationalConfig,
+} from 'drizzle-orm/relations';
 import type { SQLWrapper } from 'drizzle-orm/sql/sql';
+import { Table } from 'drizzle-orm/table';
+import type { DrizzleTypeError } from 'drizzle-orm/utils';
 import { CubridDialect } from './dialect.js';
 import { CubridDelete, CubridInsertBuilder, CubridUpdateBuilder } from './dml.js';
+import { CubridRelationalQueryBuilder } from './relational.js';
 import { CubridSelectBuilder, type CubridSelectedFields } from './select.js';
 
 export type { CubridSelectedFields };
@@ -16,19 +27,47 @@ function assertTable(table: unknown, method: string): asserts table is CubridTab
 	if (!(table instanceof CubridTable)) throw new TypeError(`${method} needs a drizzle-cubrid/native table`);
 }
 
-export interface CubridDrizzleConfig {
+export interface CubridDrizzleConfig<TSchema extends Record<string, unknown> = Record<string, never>> {
 	/** `true` logs every statement with Drizzle's `DefaultLogger`. */
 	logger?: boolean | Logger;
 	/** How values reach the server: `'prepared'` (typed binds, default) or `'literal'`. */
 	binding?: CubridBinding;
+	/** Native tables and Drizzle `relations()`, for `db.query` (relational queries). */
+	schema?: TSchema;
 }
 
-export class CubridDatabase {
+/** `db.query`: a relational query builder per table of the schema given to `drizzle()`. */
+export type CubridRelationalQueries<
+	TFullSchema extends Record<string, unknown>,
+	TSchema extends TablesRelationalConfig,
+> =
+	TFullSchema extends Record<string, never>
+		? DrizzleTypeError<'Seems like the schema generic is missing - did you forget to add it to your DB type?'>
+		: { [K in keyof TSchema]: CubridRelationalQueryBuilder<TSchema, TSchema[K]> };
+
+export class CubridDatabase<
+	TFullSchema extends Record<string, unknown> = Record<string, never>,
+	TSchema extends TablesRelationalConfig = ExtractTablesWithRelations<TFullSchema>,
+> {
 	static readonly [entityKind]: string = 'CubridNativeDatabase';
 
 	private readonly dialect = new CubridDialect();
 
-	constructor(protected readonly session: CubridSession) {}
+	/** Relational queries (`db.query.users.findMany({ with: … })`); needs `drizzle(client, { schema })`. */
+	readonly query: CubridRelationalQueries<TFullSchema, TSchema>;
+
+	constructor(
+		protected readonly session: CubridSession,
+		protected readonly schema?: RelationalSchemaConfig<TSchema>,
+	) {
+		const query: Record<string, CubridRelationalQueryBuilder<TSchema, TableRelationalConfig>> = {};
+		if (schema) {
+			for (const [key, tableConfig] of Object.entries(schema.schema)) {
+				query[key] = new CubridRelationalQueryBuilder(session, this.dialect, schema, tableConfig);
+			}
+		}
+		this.query = query as CubridRelationalQueries<TFullSchema, TSchema>;
+	}
 
 	/** `select()` reads every column of the source; `select({ ... })` the given fields. */
 	select(): CubridSelectBuilder<undefined>;
@@ -80,8 +119,11 @@ export class CubridDatabase {
 	 * is cubrid-client's error, unchanged. `config.isolationLevel` is applied
 	 * before the transaction starts.
 	 */
-	transaction<T>(transaction: (tx: CubridTransaction) => Promise<T>, config?: CubridTransactionConfig): Promise<T> {
-		return this.session.transaction((session) => transaction(new CubridTransaction(session)), config);
+	transaction<T>(
+		transaction: (tx: CubridTransaction<TFullSchema, TSchema>) => Promise<T>,
+		config?: CubridTransactionConfig,
+	): Promise<T> {
+		return this.session.transaction((session) => transaction(new CubridTransaction(session, this.schema)), config);
 	}
 }
 
@@ -98,7 +140,10 @@ export class CubridTransactionRollbackError extends TransactionRollbackError {
  * The `tx` of a native transaction: a database bound to the transaction's
  * connection. It refuses every statement once its callback has settled.
  */
-export class CubridTransaction extends CubridDatabase {
+export class CubridTransaction<
+	TFullSchema extends Record<string, unknown> = Record<string, never>,
+	TSchema extends TablesRelationalConfig = ExtractTablesWithRelations<TFullSchema>,
+> extends CubridDatabase<TFullSchema, TSchema> {
 	static override readonly [entityKind]: string = 'CubridNativeTransaction';
 
 	/**
@@ -107,13 +152,16 @@ export class CubridTransaction extends CubridDatabase {
 	 * work in place. The error is rethrown, so catch it to go on. It takes no
 	 * config: the isolation level belongs to the outermost transaction.
 	 */
-	override transaction<T>(transaction: (tx: CubridTransaction) => Promise<T>, config?: never): Promise<T> {
+	override transaction<T>(
+		transaction: (tx: CubridTransaction<TFullSchema, TSchema>) => Promise<T>,
+		config?: never,
+	): Promise<T> {
 		if (config !== undefined) {
 			return Promise.reject(
 				new Error('A nested transaction takes no config; set isolationLevel on the outermost transaction'),
 			);
 		}
-		return this.session.savepoint((session) => transaction(new CubridTransaction(session)));
+		return this.session.savepoint((session) => transaction(new CubridTransaction(session, this.schema)));
 	}
 
 	/** Rolls back this transaction (or nested transaction) by throwing `CubridTransactionRollbackError`. */
@@ -123,15 +171,30 @@ export class CubridTransaction extends CubridDatabase {
 	}
 }
 
+/** The relational config of `schema`, refusing tables that are not native. */
+function relationalSchema<TSchema extends TablesRelationalConfig>(
+	schema: Record<string, unknown>,
+): RelationalSchemaConfig<TSchema> {
+	for (const [key, value] of Object.entries(schema)) {
+		if (is(value, Table) && !(value instanceof CubridTable)) {
+			throw new TypeError(`schema.${key} is not a drizzle-cubrid/native table`);
+		}
+	}
+	const tables = extractTablesRelationalConfig<TSchema>(schema, createTableRelationsHelpers);
+	return { fullSchema: schema, schema: tables.tables, tableNamesMap: tables.tableNamesMap };
+}
+
 /**
  * A native database over a cubrid-client client or pool (experimental).
  * With the default `binding: 'prepared'` the client needs `queryPrepared()`.
+ * `config.schema` (tables and `relations()`) enables `db.query`.
  */
-export function drizzle<TClient extends CubridNativeClient>(
-	client: TClient,
-	config: CubridDrizzleConfig = {},
-): CubridDatabase & { $client: TClient } {
+export function drizzle<
+	TClient extends CubridNativeClient,
+	TSchema extends Record<string, unknown> = Record<string, never>,
+>(client: TClient, config: CubridDrizzleConfig<TSchema> = {}): CubridDatabase<TSchema> & { $client: TClient } {
 	const logger = config.logger === true ? new DefaultLogger() : config.logger || undefined;
-	const db = new CubridDatabase(new CubridSession(client, { logger, binding: config.binding }));
+	const schema = config.schema ? relationalSchema<ExtractTablesWithRelations<TSchema>>(config.schema) : undefined;
+	const db = new CubridDatabase<TSchema>(new CubridSession(client, { logger, binding: config.binding }), schema);
 	return Object.assign(db, { $client: client });
 }

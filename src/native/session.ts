@@ -362,6 +362,23 @@ export class CubridSession {
 	}
 
 	/**
+	 * Runs the statements of one relational query (`run`) on one connection
+	 * with one snapshot: inside a transaction, on its connection, at its
+	 * isolation level; otherwise in a `'repeatable read'` transaction of its
+	 * own, under which CUBRID 11.4 reads every statement from the snapshot of
+	 * the first one. A client whose `transaction()` takes no options, or that
+	 * has none, runs them as separate statements, each reading what was
+	 * committed when it ran.
+	 */
+	consistentRead<T>(run: (session: CubridSession) => Promise<T>): Promise<T> {
+		const transaction = this.client.transaction;
+		if (this.options.scope !== undefined || typeof transaction !== 'function' || transaction.length < 2) {
+			return run(this);
+		}
+		return this.transaction(run, { isolationLevel: 'repeatable read' });
+	}
+
+	/**
 	 * Runs `run` inside `SAVEPOINT "spN"` on this transaction's connection.
 	 * When it rejects, the work since the savepoint is undone with
 	 * `ROLLBACK TO SAVEPOINT` and the error rethrown (a failed rollback is
