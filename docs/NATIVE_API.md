@@ -196,6 +196,15 @@ table's `.primaryKey()` columns that have `.autoIncrement()` or `$defaultFn()`
   2^53; an `integer()` key that does not fit throws). If the row was inserted
   but the server still reports no key, `$returningId()` throws, saying the
   row was inserted, so do not retry it.
+- **Known limit, concurrent inserts on a pool:** with cubrid-client 1.4.0,
+  generated keys are sometimes missing when many inserts run at once on a
+  pool, mostly on newly created tables. In one run, about 6 to 8 of 60
+  concurrent inserts on new tables reported no key
+  ([cubrid-client#297](https://github.com/cubrid-lab/cubrid-client/issues/297)).
+  No reported key has been wrong. The row is inserted and `$returningId()`
+  throws the "do not retry" error above. If a key you get back is all you
+  need, read it back by a unique column when that error occurs, or call
+  `$returningId()` from one connection at a time until #297 is fixed.
 - **Tables with an INSERT trigger:** CUBRID 11.0–11.4 rejects a generated-keys
   INSERT on a table with an INSERT trigger (-983) before inserting anything
   (verified on 11.4, also inside `client.transaction()`). Use `insert()`
