@@ -1,9 +1,18 @@
-import type { CasingCache } from 'drizzle-orm/casing';
+import { CasingCache } from 'drizzle-orm/casing';
 import { Column } from 'drizzle-orm/column';
 import { entityKind, is } from 'drizzle-orm/entity';
 import { MySqlDialect } from 'drizzle-orm/mysql-core/dialect';
 import type { BuildRelationalQueryResult } from 'drizzle-orm/relations';
-import { type Query, type SQL, sql as sqlTag } from 'drizzle-orm/sql/sql';
+import {
+	type BuildQueryConfig,
+	Param,
+	Placeholder,
+	type Query,
+	SQL,
+	type SQLChunk,
+	StringChunk,
+	sql as sqlTag,
+} from 'drizzle-orm/sql/sql';
 
 type RelationalQueryArgs = Parameters<MySqlDialect['buildRelationalQuery']>[0];
 type SelectConfig = Parameters<MySqlDialect['buildSelectQuery']>[0];
@@ -123,7 +132,23 @@ function recordFields<T extends BuildRelationalQueryResult>(args: RelationalQuer
 	return result;
 }
 
+// charParamSql(), the encoder tracking in sqlToQuery() and
+// PlaceholderListsExpanded mirror src/native (columns/string.ts and
+// internal.ts) rather than import them: the drizzle-cubrid and
+// drizzle-cubrid/native entries share no module (tsup.config.ts), native code
+// may not import this MySQL-based one (scripts/check-dialect-boundary.mjs),
+// and this file goes when the 0.x API does (ADR 0003). Only the CHAR column
+// test differs (MySqlChar's SQL type here, CubridChar there); fix both.
+
 const utf8 = new TextEncoder();
+
+/** `n` for a `char(n)` column (1 for `char()`), undefined for anything else. */
+function charLength(encoder: unknown): number | undefined {
+	if (!is(encoder, Column)) return undefined;
+	const type = /^char(?:\((\d+)\))?$/i.exec(encoder.getSQLType().trim());
+	// CUBRID reads CHAR without a length as CHAR(1).
+	return type ? Number(type[1] ?? 1) : undefined;
+}
 
 /**
  * The placeholder for a value bound to a column: `cast(? as CHAR(m))` for a
@@ -138,12 +163,49 @@ const utf8 = new TextEncoder();
  * is at least its length in characters in any database charset.
  */
 function charParamSql(encoder: unknown, value: unknown): string {
-	if (!is(encoder, Column) || typeof value !== 'string') return '?';
-	const type = /^char(?:\((\d+)\))?$/i.exec(encoder.getSQLType().trim());
-	if (!type) return '?';
-	// CUBRID reads CHAR without a length as CHAR(1).
-	const length = Number(type[1] ?? 1);
+	const length = charLength(encoder);
+	if (length === undefined || typeof value !== 'string') return '?';
 	return `cast(? as CHAR(${Math.max(length, utf8.encode(value).length)}))`;
+}
+
+/**
+ * A statement whose `inArray()`/`notInArray()` lists of two or more elements,
+ * one of them a `sql.placeholder()`, on a `char()` column render as
+ * `(c = a or c = b …)` and `(c <> a and c <> b …)`: the SQL definition of
+ * `IN` and `NOT IN`, nulls included. A placeholder has no column, so
+ * charParamSql() cannot type it, and CUBRID 11.4 compares a CHAR column
+ * unpadded with an `IN` list none of whose elements is typed, matching no
+ * row; each `= ?` compares padded (#239).
+ *
+ * drizzle-orm/sql/sql.js renders through `this.buildQueryFromSourceParams()`,
+ * recursively on the same `this`, and inArray() builds the chunks
+ * `column, ' in ' | ' not in ', [elements]`, a placeholder element being the
+ * `Placeholder` itself. Checked against drizzle-orm 0.44.1 and 0.45.4.
+ */
+class PlaceholderListsExpanded extends SQL {
+	override buildQueryFromSourceParams(chunks: SQLChunk[], config: BuildQueryConfig): Query {
+		let expanded: SQLChunk[] | undefined;
+		for (let i = 0; i < chunks.length; i++) {
+			const [column, keyword, list] = [chunks[i], chunks[i + 1], chunks[i + 2]];
+			const text = is(keyword, StringChunk) ? keyword.value.join('') : undefined;
+			const negate = text === ' not in ' ? true : text === ' in ' ? false : undefined;
+			if (
+				negate !== undefined &&
+				charLength(column) !== undefined &&
+				Array.isArray(list) &&
+				list.length > 1 &&
+				list.some((e) => is(e, Placeholder) || (is(e, Param) && is(e.value, Placeholder)))
+			) {
+				expanded ??= chunks.slice(0, i);
+				const terms = list.map((e) => (negate ? sqlTag`${column} <> ${e}` : sqlTag`${column} = ${e}`));
+				expanded.push(sqlTag`(${sqlTag.join(terms, sqlTag.raw(negate ? ' and ' : ' or '))})`);
+				i += 2;
+			} else {
+				expanded?.push(chunks[i] as SQLChunk);
+			}
+		}
+		return super.buildQueryFromSourceParams(expanded ?? chunks, config);
+	}
 }
 
 /** Drizzle's MySQL dialect with the relational-query limits of CUBRID enforced. */
@@ -193,14 +255,21 @@ export class CubridDialect extends MySqlDialect {
 	}
 
 	override sqlToQuery(sql: SQL, invokeSource?: 'indexes'): ReturnType<MySqlDialect['sqlToQuery']> {
-		// MySqlDialect#sqlToQuery() with the CHAR casts of charParamSql(): it passes
-		// no prepareTyping, through which Drizzle hands over each parameter's
-		// column. Drizzle calls prepareTyping(encoder) and then escapeParam() for
-		// each bound value, and only escapeParam() for a placeholder; `casing` is
-		// internal to MySqlDialect. Checked against drizzle-orm 0.44.1 and 0.45.4.
+		// MySqlDialect#sqlToQuery() with the CHAR casts of charParamSql() and the
+		// lists of PlaceholderListsExpanded: it passes no prepareTyping, through
+		// which Drizzle hands over each parameter's column. Drizzle calls
+		// prepareTyping(encoder) and then escapeParam() for each bound value, and
+		// only escapeParam() for a placeholder; `casing` is internal to
+		// MySqlDialect. Checked against drizzle-orm 0.44.1 and 0.45.4.
+		const casing = (this as unknown as { casing?: unknown }).casing;
+		if (!is(casing, CasingCache)) {
+			throw new Error(
+				'drizzle-cubrid: unsupported drizzle-orm version: MySqlDialect has no `casing` CasingCache; use a drizzle-orm version within the peer range (>=0.44.1 <0.46.0)',
+			);
+		}
 		let encoder: unknown;
-		const query = sql.toQuery({
-			casing: (this as unknown as { casing: CasingCache }).casing,
+		const query = new PlaceholderListsExpanded([sql]).toQuery({
+			casing,
 			escapeName: this.escapeName,
 			escapeParam: (_num, value) => {
 				const current = encoder;

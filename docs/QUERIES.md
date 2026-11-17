@@ -484,12 +484,24 @@ the bound values of an `IN` list of two or more as `VARCHAR` and compares a
 `CHAR` column with `VARCHAR` values without space padding, so with typed binds
 `inArray()` matched no row and `notInArray()` every row; typed `CHAR`, they
 compare padded, as `eq()` always did. A value longer than the column is cast
-to its own length, so it never matches by truncation. `sql.placeholder()`
-values are not cast (their value is not known when the SQL is built): with
-typed binds, an `inArray()` of two or more placeholders on a `char()` column
-still matches nothing; pass the values, or write
-`` sql`cast(${sql.placeholder('a')} as CHAR(10))` `` for values that fit the
-column ([#237](https://github.com/cubrid-lab/drizzle-cubrid/issues/237)).
+to its own length, so it never matches by truncation
+([#237](https://github.com/cubrid-lab/drizzle-cubrid/issues/237)).
+
+`sql.placeholder()` values are not cast (their value is not known when the SQL
+is built). An `inArray()` or `notInArray()` list of two or more elements, one
+of them a placeholder, on a `char()` column is sent as
+`` (`code` = ? or `code` = ?) `` and `` (`code` <> ? and `code` <> ?) ``
+instead: the SQL definition of `IN` and `NOT IN`, nulls included, where each
+`= ?` compares padded. A value longer than the column matches nothing, under
+both bindings. `eq()` with a placeholder and a one-element list need nothing.
+In a `sql` template, write such a comparison the same way rather than
+`` sql`${t.code} in (${a}, ${b})` ``, which is sent as written
+([#239](https://github.com/cubrid-lab/drizzle-cubrid/issues/239)).
+
+Any other `VARCHAR` operand also compares with a `CHAR` column without space
+padding, under both bindings: `` eq(t.code, sql`concat(…)`) `` and
+`` inArray(t.code, sql`(select varcharCol …)`) `` match no row. Cast such an
+expression or subquery column to `CHAR` (`` sql`cast(concat(…) as CHAR(10))` ``).
 
 `binary()` and `varbinary()` encode their value as a string, which a CUBRID
 `BIT VARYING` column accepts only from a literal: use `binding: "literal"` for

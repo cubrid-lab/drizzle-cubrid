@@ -23,9 +23,14 @@ import { getTableName, Table } from 'drizzle-orm/table';
 import { getTableColumns } from 'drizzle-orm/utils';
 import { CubridCollection } from './columns/collections.js';
 import { describeValue } from './columns/common.js';
-import { charParamSql } from './columns/string.js';
+import { CubridChar, charParamSql } from './columns/string.js';
 import { CubridTemporalDate, CubridTemporalString } from './columns/temporal.js';
-import { escapeParamWithEncoder, getAliasedTableOriginalName, getSqlDecoder } from './internal.js';
+import {
+	escapeParamWithEncoder,
+	expandPlaceholderLists,
+	getAliasedTableOriginalName,
+	getSqlDecoder,
+} from './internal.js';
 
 /**
  * A double-quoted identifier, with an embedded `"` doubled (`a"b` → `"a""b"`).
@@ -476,12 +481,16 @@ export class CubridDialect {
 
 	/**
 	 * SQL text with `?` for each parameter, and the parameters. A string bound
-	 * to a CHAR column is `cast(? as CHAR(n))` (see `charParamSql()`, #237).
+	 * to a CHAR column is `cast(? as CHAR(n))` (see `charParamSql()`, #237);
+	 * an `inArray()`/`notInArray()` list with a `sql.placeholder()` on a CHAR
+	 * column is `(c = ? or c = ?)`/`(c <> ? and c <> ?)` (see
+	 * `expandPlaceholderLists()`, #239).
 	 */
 	sqlToQuery(query: SQLWrapper): Query {
 		const statement = query.getSQL();
 		refuseCollectionParams(statement.queryChunks);
-		const { sql: text, params } = statement.toQuery({
+		const expanded = expandPlaceholderLists(statement, (column) => is(column, CubridChar));
+		const { sql: text, params } = expanded.toQuery({
 			casing: this.casing,
 			escapeName: quoteIdentifier,
 			...escapeParamWithEncoder(charParamSql),

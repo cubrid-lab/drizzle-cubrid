@@ -6,8 +6,19 @@
 // any cast through `unknown`, `any` or `never`; scripts/check-dialect-boundary.mjs
 // enforces that.
 
-import type { Column } from 'drizzle-orm/column';
-import type { BuildQueryConfig, DriverValueDecoder, SQL } from 'drizzle-orm/sql/sql';
+import { Column } from 'drizzle-orm/column';
+import { is } from 'drizzle-orm/entity';
+import {
+	type BuildQueryConfig,
+	type DriverValueDecoder,
+	Param,
+	Placeholder,
+	type Query,
+	SQL,
+	type SQLChunk,
+	StringChunk,
+	sql,
+} from 'drizzle-orm/sql/sql';
 import type { Table } from 'drizzle-orm/table';
 
 // drizzle-orm/table.js: `Table.Symbol.Columns` and `Table.Symbol.ExtraConfigColumns`
@@ -72,7 +83,8 @@ export function getAliasedTableOriginalName(table: Table): string | undefined {
 /**
  * `toQuery()` callbacks with which `placeholder` sees the encoder (usually the
  * column) of each value it writes a placeholder for; undefined for a
- * `sql.placeholder()`.
+ * `sql.placeholder()`. src/dialect.ts inlines the same tracking for the 0.x
+ * API, which may not share a module with this entry; change both.
  */
 export function escapeParamWithEncoder(
 	placeholder: (encoder: unknown, value: unknown) => string,
@@ -89,4 +101,63 @@ export function escapeParamWithEncoder(
 			return placeholder(current, value);
 		},
 	};
+}
+
+// drizzle-orm/sql/sql.js: `SQL#toQuery()` renders through
+// `this.buildQueryFromSourceParams(chunks, config)`, which calls itself on the
+// same `this` for every nested SQL, array, subquery and SQLWrapper, so an
+// override on the outermost SQL sees every chunk list of the statement.
+// drizzle-orm/sql/expressions/conditions.js: `inArray(column, list)` and
+// `notInArray()` are `sql\`${column} in ${list}\`` and `... not in ...`, the
+// chunks `column, ' in ' | ' not in ', [elements]`, each element a `Param`
+// or, for `sql.placeholder()`, the `Placeholder` itself. Checked against
+// drizzle-orm 0.44.1 and 0.45.4.
+/**
+ * `statement`, rendering each `column in (a, b, …)` list of two or more
+ * elements, one of them a `sql.placeholder()`, on a column for which
+ * `expand(column)` is true as `(column = a or column = b …)`, and each
+ * `column not in (…)` as `(column <> a and column <> b …)`.
+ *
+ * Both are the SQL definition of `IN` and `NOT IN`, nulls included. CUBRID
+ * 11.4 types the host variables of an `IN` list as VARCHAR when none of its
+ * elements is typed, and compares a CHAR column with them unpadded, so such
+ * a list matched no row; each `= ?` compares padded (#239). src/dialect.ts
+ * has a copy for the 0.x API, as for `escapeParamWithEncoder()`; change both.
+ */
+export function expandPlaceholderLists(statement: SQL, expand: (column: Column) => boolean): SQL {
+	return new PlaceholderListsExpanded([statement], expand);
+}
+
+class PlaceholderListsExpanded extends SQL {
+	constructor(
+		chunks: SQLChunk[],
+		private readonly expand: (column: Column) => boolean,
+	) {
+		super(chunks);
+	}
+
+	override buildQueryFromSourceParams(chunks: SQLChunk[], config: BuildQueryConfig): Query {
+		let expanded: SQLChunk[] | undefined;
+		for (let i = 0; i < chunks.length; i++) {
+			const [column, keyword, list] = [chunks[i], chunks[i + 1], chunks[i + 2]];
+			const text = is(keyword, StringChunk) ? keyword.value.join('') : undefined;
+			const negate = text === ' not in ' ? true : text === ' in ' ? false : undefined;
+			if (
+				negate !== undefined &&
+				is(column, Column) &&
+				Array.isArray(list) &&
+				list.length > 1 &&
+				list.some((e) => is(e, Placeholder) || (is(e, Param) && is(e.value, Placeholder))) &&
+				this.expand(column)
+			) {
+				expanded ??= chunks.slice(0, i);
+				const terms = list.map((e) => (negate ? sql`${column} <> ${e}` : sql`${column} = ${e}`));
+				expanded.push(sql`(${sql.join(terms, sql.raw(negate ? ' and ' : ' or '))})`);
+				i += 2;
+			} else {
+				expanded?.push(chunks[i] as SQLChunk);
+			}
+		}
+		return super.buildQueryFromSourceParams(expanded ?? chunks, config);
+	}
 }

@@ -91,6 +91,9 @@ const utf8 = new TextEncoder();
  * `m` is `n`, or the value's UTF-8 byte length when that is larger, so a
  * longer value is never truncated into a match; that byte length is at least
  * its length in characters in any database charset.
+ *
+ * src/dialect.ts has a copy for the 0.x API, which this entry may not import
+ * (see the comment there); change both.
  */
 export function charParamSql(encoder: unknown, value: unknown): string {
 	if (!(encoder instanceof CubridChar) || typeof value !== 'string') return '?';

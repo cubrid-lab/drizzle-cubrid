@@ -329,6 +329,69 @@ describe('CHAR values are sent typed CHAR (#237)', () => {
 	});
 });
 
+describe('inArray() of placeholders on a CHAR column is expanded to = and <> (#239)', () => {
+	const codes = cubridTable('codes', {
+		id: integer().primaryKey(),
+		code: char({ length: 10 }),
+		name: varchar({ length: 10 }),
+	});
+	const a = sql.placeholder('a');
+	const b = sql.placeholder('b');
+	const where = (condition: ReturnType<typeof eq>) => db.select({ id: codes.id }).from(codes).where(condition).toSQL();
+	const prefix = 'select "codes"."id" from "codes" where ';
+	const c = '"codes"."code"';
+
+	it.each([
+		['inArray', inArray(codes.code, [a, b]), `(${c} = ? or ${c} = ?)`],
+		['notInArray', notInArray(codes.code, [a, b]), `(${c} <> ? and ${c} <> ?)`],
+		['a placeholder and a value', inArray(codes.code, [a, 'cd']), `(${c} = ? or ${c} = cast(? as CHAR(10)))`],
+		[
+			'notInArray, a placeholder and a value',
+			notInArray(codes.code, ['cd', a]),
+			`(${c} <> cast(? as CHAR(10)) and ${c} <> ?)`,
+		],
+		[
+			'sql.param() of a placeholder',
+			inArray(codes.code, [sql.param(a), b] as unknown as string[]),
+			`(${c} = ? or ${c} = ?)`,
+		],
+		['one placeholder', inArray(codes.code, [a]), `${c} in (?)`],
+		['values only', inArray(codes.code, ['ab', 'cd']), `${c} in (cast(? as CHAR(10)), cast(? as CHAR(10)))`],
+		['eq', eq(codes.code, a), `${c} = ?`],
+		['a VARCHAR column', inArray(codes.name, [a, b]), '"codes"."name" in (?, ?)'],
+		[
+			'inside and()',
+			and(eq(codes.id, 1), inArray(codes.code, [a, b])) as ReturnType<typeof eq>,
+			`("codes"."id" = ? and (${c} = ? or ${c} = ?))`,
+		],
+	])('%s', (_label, condition, text) => {
+		expect(where(condition).sql).toBe(prefix + text);
+	});
+
+	it('expands in subqueries, updates and deletes, and keeps the placeholders', () => {
+		const inner = db
+			.select({ id: codes.id })
+			.from(codes)
+			.where(inArray(codes.code, [a, b]));
+		const nested = where(inArray(codes.id, inner));
+		expect(nested.sql).toBe(`${prefix}"codes"."id" in (select "codes"."id" from "codes" where (${c} = ? or ${c} = ?))`);
+		expect(nested.params).toEqual([a, b]);
+		expect(
+			db
+				.update(codes)
+				.set({ code: sql.placeholder('to') })
+				.where(notInArray(codes.code, [a, b]))
+				.toSQL().sql,
+		).toBe(`update "codes" set "code" = ? where (${c} <> ? and ${c} <> ?)`);
+		expect(
+			db
+				.delete(codes)
+				.where(inArray(codes.code, [a, b]))
+				.toSQL().sql,
+		).toBe(`delete from "codes" where (${c} = ? or ${c} = ?)`);
+	});
+});
+
 describe('refusals', () => {
 	it('refuses offset() without limit()', () => {
 		expect(() => db.select().from(users).offset(5).toSQL()).toThrow(/CUBRID needs limit\(\) with offset\(\)/);
