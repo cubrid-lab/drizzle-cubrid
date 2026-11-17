@@ -2,10 +2,21 @@
 // findMany() sends (one per relation level and key chunk, never one per
 // parent), how rows are stitched and decoded, the consistency wrapper and the
 // refusals made before anything is sent.
+
+import { QueryError, SqlSyntaxError, TransactionError } from 'cubrid-client';
 import { desc, relations, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-
-import { bigint, cubridTable, drizzle, integer, set } from '../../src/native/index';
+import {
+	bigint,
+	type CubridNativeClient,
+	char,
+	cubridTable,
+	drizzle,
+	integer,
+	numeric,
+	set,
+	varchar,
+} from '../../src/native/index';
 import { RELATIONAL_KEY_CHUNK } from '../../src/native/relational';
 import * as schema from './relational-schema';
 
@@ -295,7 +306,7 @@ describe('findMany', () => {
 		]);
 	});
 
-	it('ranks rows per parent with row_number() for a nested limit and offset', async () => {
+	it('ranks rows per parent with row_number() for a nested limit', async () => {
 		const client = fakeClient([
 			[[1n], [2n]],
 			[
@@ -307,16 +318,15 @@ describe('findMany', () => {
 		const db = drizzle(client, { schema });
 		const rows = await db.query.users.findMany({
 			columns: { id: true },
-			// A nested offset is not in Drizzle's types, but its runtime takes it.
-			with: { posts: { columns: { id: true }, orderBy: desc(posts.id), limit: 2, offset: 1 } as never },
+			with: { posts: { columns: { id: true }, orderBy: desc(posts.id), limit: 2 } },
 		});
 		expect(rows).toEqual([
 			{ id: 1n, posts: [{ id: 11 }, { id: 12 }] },
 			{ id: 2n, posts: [{ id: 21 }] },
 		]);
 		expect(client.calls[2]).toMatchObject({
-			sql: 'select "__rq"."f0", "__rq"."f1" from (select "posts"."id" as "f0", "posts"."author_id" as "f1", row_number() over (partition by "posts"."author_id" order by "posts"."id" desc) as "__rn" from "posts" where "posts"."author_id" in (?, ?)) "__rq" where ("__rq"."__rn" > ? and "__rq"."__rn" <= ?) order by "__rq"."__rn"',
-			params: [1n, 2n, 1, 3],
+			sql: 'select "__rq"."f0", "__rq"."f1" from (select "posts"."id" as "f0", "posts"."author_id" as "f1", row_number() over (partition by "posts"."author_id" order by "posts"."id" desc) as "__rn" from "posts" where "posts"."author_id" in (?, ?)) "__rq" where "__rq"."__rn" <= ? order by "__rq"."__rn"',
+			params: [1n, 2n, 2],
 		});
 	});
 
@@ -335,7 +345,7 @@ describe('findMany', () => {
 		await db.query.users.findMany({
 			columns: { id: true },
 			offset: 0,
-			with: { posts: { columns: { id: true }, offset: 0 } as never },
+			with: { posts: { columns: { id: true } } },
 		});
 		expect(client.selects).toEqual([
 			'select "users"."id" from "users"',
@@ -408,9 +418,45 @@ describe('findMany', () => {
 		]);
 	});
 
-	it('runs the statements one by one on a client without transaction()', async () => {
+	it("refuses a client without transaction() unless relationalReads is 'separate'", async () => {
+		const client = clientWithoutTransactions([]);
+		await expect(drizzle(client, { schema }).query.users.findMany({ with: { posts: true } })).rejects.toThrow(
+			/relationalReads: 'separate'/,
+		);
+		await expect(
+			drizzle(client, { schema, relationalReads: 'client' }).query.users.findMany({ with: { posts: true } }),
+		).rejects.toThrow(/relationalReads: 'client' needs a client with transaction\(\)/);
+		const noOptions = {
+			...fakeClient(),
+			transaction: async <T>(callback: (tx: CubridNativeClient) => Promise<T>) => callback(fakeClient()),
+		};
+		await expect(drizzle(noOptions, { schema }).query.users.findMany({ with: { posts: true } })).rejects.toThrow(
+			/transaction\(callback, options\)/,
+		);
+		expect(client.calls).toEqual([]);
+		expect(noOptions.calls).toEqual([]);
+		expect(() => drizzle(client, { relationalReads: 'always' as never })).toThrow(
+			'Unknown relationalReads string "always"',
+		);
+	});
+
+	it("runs the statements in a transaction at the client's own level with relationalReads: 'client'", async () => {
+		const client = fakeClient([[[1n]], [[10, 1n]]]);
+		await drizzle(client, { schema, relationalReads: 'client' }).query.users.findMany({
+			columns: { id: true },
+			with: { posts: { columns: { id: true } } },
+		});
+		expect(client.calls.map(({ on, method, options }) => [`${on}:${method}`, options])).toEqual([
+			['tx:begin', undefined],
+			['tx:queryPrepared', { rowMode: 'array' }],
+			['tx:queryPrepared', { rowMode: 'array' }],
+			['tx:commit', undefined],
+		]);
+	});
+
+	it("runs the statements one by one with relationalReads: 'separate'", async () => {
 		const client = clientWithoutTransactions([[[1n]], [[10, 1n]]]);
-		const db = drizzle(client, { schema });
+		const db = drizzle(client, { schema, relationalReads: 'separate' });
 		const rows = await db.query.users.findMany({ columns: { id: true }, with: { posts: { columns: { id: true } } } });
 		expect(rows).toEqual([{ id: 1n, posts: [{ id: 10 }] }]);
 		expect(client.calls.map(({ on, method }) => `${on}:${method}`)).toEqual([
@@ -457,16 +503,98 @@ describe('keys and config edge cases', () => {
 	};
 
 	it('encodes parent keys with the parent column, so a BIGINT key matches an INTEGER reference', async () => {
-		const client = fakeClient([[[1n], [2n]], [[10, 1, null]]]);
+		const client = fakeClient([[[1n], [2n]], [[10, 1, null, 1n]]]);
 		const rows = await drizzle(client, { schema: local }).query.accounts.findMany({ with: { scores: true } });
 		expect(rows).toEqual([
 			{ id: 1n, scores: [{ id: 10, accountId: 1, tags: null }] },
 			{ id: 2n, scores: [] },
 		]);
 		expect(client.calls[2]).toMatchObject({
-			sql: 'select "scores"."id", "scores"."account_id", "scores"."tags" from "scores" where "scores"."account_id" in (?, ?)',
+			sql: 'select "scores"."id", "scores"."account_id", "scores"."tags", cast("scores"."account_id" as BIGINT) from "scores" where "scores"."account_id" in (?, ?)',
 			params: [1n, 2n],
 		});
+	});
+
+	it('matches CHAR keys of other lengths and NUMERIC keys of other scales on the cast parent type', async () => {
+		const codes = cubridTable('codes', {
+			code: char({ length: 5 }).primaryKey(),
+			amount: numeric({ precision: 10, scale: 2 }),
+		});
+		const items = cubridTable('items', {
+			id: integer().primaryKey(),
+			code: char({ length: 10 }),
+			amount: numeric({ precision: 10, scale: 3 }),
+		});
+		const keyed = {
+			codes,
+			items,
+			codesRelations: relations(codes, ({ many }) => ({
+				byCode: many(items, { relationName: 'code' }),
+				byAmount: many(items, { relationName: 'amount' }),
+			})),
+			itemsRelations: relations(items, ({ one }) => ({
+				code: one(codes, { fields: [items.code], references: [codes.code], relationName: 'code' }),
+				amount: one(codes, { fields: [items.amount], references: [codes.amount], relationName: 'amount' }),
+			})),
+		};
+		const client = fakeClient([
+			[['ab   ', '1.50']],
+			[[10, 'ab        ', '1.500', 'ab   ']],
+			[[10, 'ab        ', '1.500', '1.50']],
+		]);
+		const rows = await drizzle(client, { schema: keyed }).query.codes.findMany({
+			with: { byCode: true, byAmount: true },
+		});
+		const item = { id: 10, code: 'ab        ', amount: '1.500' };
+		expect(rows).toEqual([{ code: 'ab   ', amount: '1.50', byCode: [item], byAmount: [item] }]);
+		expect(client.selects.slice(1)).toEqual([
+			'select "items"."id", "items"."code", "items"."amount", cast("items"."code" as CHAR(5)) from "items" where "items"."code" in (cast(? as CHAR(5)))',
+			'select "items"."id", "items"."code", "items"."amount", cast("items"."amount" as NUMERIC(10,2)) from "items" where "items"."amount" in (?)',
+		]);
+	});
+
+	it('refuses key columns of types that cannot be matched reliably', async () => {
+		const parents = cubridTable('kp', { code: char({ length: 5 }).primaryKey() });
+		const children = cubridTable('kc', { id: integer().primaryKey(), code: varchar({ length: 5 }) });
+		const mixed = {
+			parents,
+			children,
+			parentsRelations: relations(parents, ({ many }) => ({ children: many(children) })),
+			childrenRelations: relations(children, ({ one }) => ({
+				parent: one(parents, { fields: [children.code], references: [parents.code] }),
+			})),
+		};
+		const client = fakeClient();
+		await expect(
+			drizzle(client, { schema: mixed }).query.parents.findMany({ with: { children: true } }),
+		).rejects.toThrow(
+			'parents.children: key code (CHAR(5)) and code (VARCHAR(5)) have types that cannot be matched reliably',
+		);
+		expect(client.calls).toEqual([]);
+	});
+
+	it('rejects a failed statement of its own transaction with the QueryError class it has outside one', async () => {
+		const cause = new Error('Failed to execute CUBRID query.');
+		const failure = Object.assign(new TransactionError('Transaction query failed.', { cause }), {
+			code: -494,
+			kind: 'syntax',
+			origin: 'server',
+		});
+		const client = fakeClient([[[1n, 'Ann', null]], failure as never]);
+		const error = await drizzle(client, { schema })
+			.query.users.findMany({ with: { posts: true } })
+			.catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(SqlSyntaxError);
+		expect(error).toBeInstanceOf(QueryError);
+		expect(error).toMatchObject({ message: 'Query failed.', code: -494, kind: 'syntax', origin: 'server', cause });
+		expect((error as { transactionError?: unknown }).transactionError).toBe(failure);
+		const plain = Object.assign(new TransactionError('Transaction query failed.', { cause }), { kind: 'other' });
+		const second = fakeClient([[[1n, 'Ann', null]], plain as never]);
+		const other = await drizzle(second, { schema })
+			.query.users.findMany({ with: { posts: true } })
+			.catch((e: unknown) => e);
+		expect(other).toBeInstanceOf(QueryError);
+		expect(other).not.toBeInstanceOf(SqlSyntaxError);
 	});
 
 	it('refuses a collection column as a relation key before sending anything', async () => {
@@ -544,7 +672,17 @@ describe('refusals before anything is sent', () => {
 		[
 			'a nested limit on a one relation',
 			(db) => db.query.posts.findMany({ with: { author: { limit: 1 } as never } }),
-			/posts\.author: a one relation takes no limit or offset/,
+			/posts\.author: a one relation takes no limit, as in Drizzle's types/,
+		],
+		[
+			'where or orderBy on a one relation',
+			(db) => db.query.posts.findMany({ with: { author: { where: sql`1 = 1`, orderBy: posts.id } as never } }),
+			/posts\.author: a one relation takes no where or orderBy/,
+		],
+		[
+			'a nested offset',
+			(db) => db.query.users.findMany({ with: { posts: { limit: 1, offset: 1 } as never } }),
+			/users\.posts: a nested many relation takes no offset/,
 		],
 		[
 			'an unknown relation',

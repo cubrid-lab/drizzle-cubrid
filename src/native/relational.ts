@@ -55,6 +55,12 @@ interface RelationPlan {
 	fields: Column[];
 	/** Columns of the related table that `fields` match, in the same order. */
 	references: Column[];
+	/**
+	 * Per reference, what the related rows are matched on in JavaScript: the
+	 * column itself, or (when the parent column has another SQL type or codec)
+	 * the column cast to the parent column's SQL type, decoded by its codec.
+	 */
+	stitch: (Column | SQL)[];
 	plan: LevelPlan;
 }
 
@@ -65,11 +71,12 @@ interface LevelPlan {
 	fields: (Column | SQL)[];
 	/** Result keys with their position in `fields`. */
 	shown: { key: string; index: number }[];
-	/** The position of each key column in `fields`. */
-	keyIndex: Map<Column, number>;
+	/** The position of each key column and stitch key in `fields`. */
+	keyIndex: Map<Column | SQL, number>;
 	where?: SQL;
 	orderBy: CubridOrderByItem[];
 	limit?: number;
+	/** Only at the root: Drizzle's types take no nested offset. */
 	offset?: number;
 	relations: RelationPlan[];
 }
@@ -113,14 +120,50 @@ function orderByItems(value: unknown, path: string): CubridOrderByItem[] {
 	});
 }
 
+/** A SQL type without its length, precision and scale (`CHAR(5)` → `CHAR`). */
+function baseType(column: Column): string {
+	return column.getSQLType().replace(/\(.*$/, '').trim().toUpperCase();
+}
+
+/**
+ * Key types whose values CUBRID 11.4 compares by value and casts without
+ * changing a matching value: exact numbers with each other, CHAR(n) with
+ * CHAR(m) (both space-padded), and VARCHAR/STRING with each other.
+ * CHAR against VARCHAR is not one: the server matched a VARCHAR value
+ * against CHAR column values but not a CHAR value against VARCHAR ones.
+ */
+const KEY_FAMILIES: readonly ReadonlySet<string>[] = [
+	new Set(['SMALLINT', 'INTEGER', 'BIGINT', 'NUMERIC']),
+	new Set(['CHAR']),
+	new Set(['VARCHAR', 'STRING']),
+];
+
+/**
+ * What the related rows are matched on for one key column pair: the
+ * reference itself when both columns have the same SQL type and codec,
+ * otherwise `cast(reference as <parent type>)` read by the parent's codec, so
+ * both sides decode alike (`CHAR(10)` → `CHAR(5)`, `NUMERIC(10,3)` →
+ * `NUMERIC(10,2)`, `INTEGER` → `BIGINT`). Other pairs are refused.
+ */
+function stitchKey(field: Column, reference: Column, path: string): Column | SQL {
+	const type = field.getSQLType();
+	if (type === reference.getSQLType() && field.constructor === reference.constructor) return reference;
+	const [left, right] = [baseType(field), baseType(reference)];
+	if (!KEY_FAMILIES.some((family) => family.has(left) && family.has(right))) {
+		throw new Error(
+			`${path}: key ${field.name} (${type}) and ${reference.name} (${reference.getSQLType()}) have types that cannot be matched reliably; give both columns the same type`,
+		);
+	}
+	return sql`cast(${reference} as ${sql.raw(type)})`.mapWith(field);
+}
+
 /** Builds the plan of a level, refusing what cannot be loaded before any statement is sent. */
 function planLevel(
 	schema: RelationalSchemaConfig<TablesRelationalConfig>,
 	tableConfig: TableRelationalConfig,
 	config: unknown,
 	path: string,
-	incoming: Column[],
-	isRoot: boolean,
+	incoming: (Column | SQL)[],
 ): LevelPlan {
 	const table = schema.fullSchema[tableConfig.tsName];
 	if (!(table instanceof CubridTable)) {
@@ -189,22 +232,31 @@ function planLevel(
 		}
 		const one = is(relation, One);
 		const child = new Map(value === true ? [] : entriesOf(value, 'with', childPath));
-		if (one && (child.get('limit') !== undefined || child.get('offset') !== undefined)) {
-			throw new Error(`${childPath}: a one relation takes no limit or offset`);
+		// Only what Drizzle's types allow: a one relation takes no where,
+		// orderBy, limit or offset, and a nested many relation no offset.
+		const refused = (one ? ['where', 'orderBy', 'limit', 'offset'] : ['offset']).filter(
+			(option) => child.get(option) !== undefined,
+		);
+		if (refused.length > 0) {
+			throw new Error(
+				`${childPath}: a ${one ? 'one' : 'nested many'} relation takes no ${refused.join(' or ')}, as in Drizzle's types`,
+			);
 		}
+		const stitch = normalized.fields.map((field, i) => stitchKey(field, normalized.references[i] as Column, childPath));
 		relations.push({
 			key,
 			one,
 			fields: normalized.fields,
 			references: normalized.references,
-			plan: planLevel(schema, target, value, childPath, normalized.references, false),
+			stitch,
+			plan: planLevel(schema, target, value, childPath, stitch),
 		});
 	}
 
 	if (fields.length === 0 && relations.length === 0) {
 		throw new Error(`${path}: no fields selected for ${tableConfig.tsName}`);
 	}
-	const keyIndex = new Map<Column, number>();
+	const keyIndex = new Map<Column | SQL, number>();
 	for (const column of [...incoming, ...relations.flatMap((relation) => relation.fields)]) {
 		if (keyIndex.has(column)) continue;
 		const index = fields.indexOf(column);
@@ -223,7 +275,7 @@ function planLevel(
 	const limit = limitValue(query.get('limit'), 'limit', path);
 	// An offset of 0 changes nothing, and alone it would need a limit.
 	const offset = limitValue(query.get('offset'), 'offset', path) || undefined;
-	if (isRoot && offset !== undefined && limit === undefined) {
+	if (offset !== undefined && limit === undefined) {
 		throw new Error(`${path}: CUBRID needs a limit with offset; add limit or remove offset`);
 	}
 	return { table, fields, shown, keyIndex, where, orderBy, limit, offset, relations };
@@ -235,7 +287,8 @@ function keyString(values: readonly unknown[]): string {
 		values.map((value) => {
 			if (typeof value === 'bigint' || typeof value === 'number') return `n${value}`;
 			if (value instanceof Date) return `d${value.getTime()}`;
-			return `${typeof value}:${String(value)}`;
+			if (typeof value === 'string' || typeof value === 'boolean') return `${typeof value}:${value}`;
+			throw new TypeError(`A relation key decoded to ${describeValue(value)}, which cannot be matched`);
 		}),
 	);
 }
@@ -244,13 +297,20 @@ function keyString(values: readonly unknown[]): string {
  * `"t"."a" in (?, ?)`, or `("t"."a", "t"."b") in ((?, ?), (?, ?))` for a
  * composite key. Each value is encoded by the parent column it was read from
  * (a BIGINT key may be referenced by an INTEGER column); the server compares
- * across numeric types.
+ * across numeric types. A CHAR key is sent as `cast(? as CHAR(n))`.
  */
 function keyFilter(relation: RelationPlan, keys: readonly unknown[][]): SQL {
 	const { fields, references } = relation;
 	const params = (key: readonly unknown[]) =>
 		sql.join(
-			key.map((value, i) => sql.param(value, fields[i])),
+			key.map((value, i) => {
+				const field = fields[i] as Column;
+				const param = sql.param(value, field);
+				// CUBRID 11.4 compares a CHAR column with an IN list of more than one
+				// bound value exactly, without space padding ('ab   ' against a
+				// CHAR(10) 'ab'), unless the values are typed CHAR.
+				return baseType(field) === 'CHAR' ? sql`cast(${param} as ${sql.raw(field.getSQLType())})` : param;
+			}),
 			sql`, `,
 		);
 	if (references.length === 1) {
@@ -265,7 +325,7 @@ function fieldMap(fields: readonly (Column | SQL)[]): Record<string, Column | SQ
 }
 
 /**
- * The SELECT of one level. A many relation with a limit or offset is ranked
+ * The SELECT of one level. A many relation with a limit is ranked
  * per parent with `row_number() over (partition by <references> order by …)`
  * in a derived table and filtered on the rank.
  */
@@ -281,7 +341,7 @@ function buildLevelQuery(
 			{ distinct: false, source: plan.table, joins: [], groupBy: [], orderBy: [], forUpdate: false, ...config },
 			names,
 		);
-	const ranked = references.length > 0 && (plan.limit !== undefined || plan.offset !== undefined);
+	const ranked = references.length > 0 && plan.limit !== undefined;
 	if (!ranked) {
 		return select({
 			fields: fieldMap(plan.fields),
@@ -296,14 +356,11 @@ function buildLevelQuery(
 	const inner = select({ fields: { ...fieldMap(plan.fields), __rn: rank }, where }, true);
 	const alias = sql.identifier('__rq');
 	const rn = sql`${alias}.${sql.identifier('__rn')}`;
-	const conditions: SQL[] = [];
-	if (plan.offset) conditions.push(sql`${rn} > ${plan.offset}`);
-	if (plan.limit !== undefined) conditions.push(sql`${rn} <= ${(plan.offset ?? 0) + plan.limit}`);
 	const list = sql.join(
 		plan.fields.map((_, index) => sql`${alias}.${sql.identifier(`f${index}`)}`),
 		sql`, `,
 	);
-	return sql`select ${list} from (${inner}) ${alias} where ${and(...conditions)} order by ${rn}`;
+	return sql`select ${list} from (${inner}) ${alias} where ${rn} <= ${plan.limit} order by ${rn}`;
 }
 
 async function loadLevel(
@@ -349,9 +406,7 @@ async function loadRelations(
 		await loadRelations(session, dialect, relation.plan, children);
 		const groups = new Map<string, LoadedRow[]>();
 		for (const child of children) {
-			const key = keyString(
-				relation.references.map((column) => child.values[relation.plan.keyIndex.get(column) as number]),
-			);
+			const key = keyString(relation.stitch.map((key) => child.values[relation.plan.keyIndex.get(key) as number]));
 			const group = groups.get(key);
 			if (group) group.push(child);
 			else groups.set(key, [child]);
@@ -409,7 +464,7 @@ export class CubridRelationalQuery<TResult> extends QueryPromise<TResult> {
 	override async execute(): Promise<TResult> {
 		const root = this.tableConfig.tsName;
 		const config = this.mode === 'first' ? { ...this.config, limit: 1 } : this.config;
-		const plan = planLevel(this.schema, this.tableConfig, config, root, [], true);
+		const plan = planLevel(this.schema, this.tableConfig, config, root, []);
 		const run = async (session: CubridSession) => {
 			const rows = await loadLevel(session, this.dialect, plan, undefined, []);
 			await loadRelations(session, this.dialect, plan, rows);

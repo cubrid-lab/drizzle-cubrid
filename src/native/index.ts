@@ -123,6 +123,7 @@ export {
 	type CubridDmlResult,
 	type CubridIsolationLevel,
 	type CubridNativeClient,
+	type CubridRelationalReads,
 	CubridSession,
 	type CubridTransactionConfig,
 	CubridTransactionScope,

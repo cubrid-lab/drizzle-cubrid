@@ -6,7 +6,14 @@
 // CUBRID_TEST_PASSWORD (empty). Without CUBRID_TEST_HOST the run fails instead
 // of skipping, so a missing database can never look like a pass.
 // CUBRID_TEST_EXPECT_VERSION, when set, must prefix the server version.
-import { type CubridClient, type CubridPool, createClient, createPool } from 'cubrid-client';
+import {
+	TransactionError as ClientTransactionError,
+	type CubridClient,
+	type CubridPool,
+	createClient,
+	createPool,
+	QueryError,
+} from 'cubrid-client';
 import {
 	aliasedTable,
 	and,
@@ -2518,6 +2525,20 @@ describe('drizzle-cubrid/native relational queries (#158)', () => {
 		id: native.integer().primaryKey(),
 		userId: native.integer('user_id').notNull(),
 	});
+	// Key columns of the same family with another length or scale, and a VARCHAR against a CHAR.
+	const keyParents = native.cubridTable(tableName('nrkeyp'), {
+		code: native.char({ length: 5 }).primaryKey(),
+		amount: native.numeric({ precision: 10, scale: 2 }).notNull(),
+	});
+	const keyChildren = native.cubridTable(tableName('nrkeyc'), {
+		id: native.integer().primaryKey(),
+		code: native.char({ length: 10 }).notNull(),
+		amount: native.numeric({ precision: 10, scale: 3 }).notNull(),
+	});
+	const keyVarchars = native.cubridTable(tableName('nrkeyv'), {
+		id: native.integer().primaryKey(),
+		code: native.varchar({ length: 10 }).notNull(),
+	});
 	const parents = native.cubridTable(tableName('nrparents'), { id: native.integer().primaryKey() });
 	const kids = native.cubridTable(tableName('nrkids'), {
 		id: native.integer().primaryKey(),
@@ -2535,6 +2556,25 @@ describe('drizzle-cubrid/native relational queries (#158)', () => {
 		parents,
 		kids,
 		scores,
+		keyParents,
+		keyChildren,
+		keyVarchars,
+		keyParentsRelations: relations(keyParents, ({ many }) => ({
+			byCode: many(keyChildren, { relationName: 'code' }),
+			byAmount: many(keyChildren, { relationName: 'amount' }),
+			byVarchar: many(keyVarchars),
+		})),
+		keyChildrenRelations: relations(keyChildren, ({ one }) => ({
+			code: one(keyParents, { fields: [keyChildren.code], references: [keyParents.code], relationName: 'code' }),
+			amount: one(keyParents, {
+				fields: [keyChildren.amount],
+				references: [keyParents.amount],
+				relationName: 'amount',
+			}),
+		})),
+		keyVarcharsRelations: relations(keyVarchars, ({ one }) => ({
+			parent: one(keyParents, { fields: [keyVarchars.code], references: [keyParents.code] }),
+		})),
 		usersRelations: relations(users, ({ one, many }) => ({
 			posts: many(posts),
 			scores: many(scores),
@@ -2575,7 +2615,22 @@ describe('drizzle-cubrid/native relational queries (#158)', () => {
 	const db = () => native.drizzle(client, { schema, logger: { logQuery: (query) => statements.push(query) } });
 
 	beforeAll(async () => {
-		for (const table of [users, posts, comments, profiles, groups, members, orders, lines, parents, kids, scores]) {
+		for (const table of [
+			users,
+			posts,
+			comments,
+			profiles,
+			groups,
+			members,
+			orders,
+			lines,
+			parents,
+			kids,
+			scores,
+			keyParents,
+			keyChildren,
+			keyVarchars,
+		]) {
 			await client.query(createTableSql(table));
 			created.push(`"${native.getTableConfig(table).name}"`);
 		}
@@ -2625,6 +2680,16 @@ describe('drizzle-cubrid/native relational queries (#158)', () => {
 			{ id: 2, userId: 3 },
 			{ id: 3, userId: 3 },
 		]);
+		await setup.insert(keyParents).values([
+			{ code: 'ab', amount: '1.5' },
+			{ code: 'cd', amount: '2' },
+		]);
+		await setup.insert(keyChildren).values([
+			{ id: 10, code: 'ab', amount: '1.5' },
+			{ id: 11, code: 'cd', amount: '2' },
+			{ id: 12, code: 'ab', amount: '1.505' },
+		]);
+		await setup.insert(keyVarchars).values({ id: 1, code: 'ab' });
 		const p = native.getTableConfig(parents).name;
 		const k = native.getTableConfig(kids).name;
 		await client.query(`INSERT INTO "${p}" ("id") SELECT ROWNUM FROM db_root CONNECT BY LEVEL <= ${fanOut}`);
@@ -2804,7 +2869,44 @@ describe('drizzle-cubrid/native relational queries (#158)', () => {
 		]);
 	});
 
-	it('applies a nested limit and offset per parent with row_number()', async () => {
+	it('matches CHAR keys of other lengths and NUMERIC keys of other scales, as the server compares them', async () => {
+		statements = [];
+		const rows = await db().query.keyParents.findMany({
+			orderBy: (k) => k.code,
+			with: {
+				byCode: { columns: { id: true }, orderBy: (c) => c.id },
+				byAmount: { columns: { id: true }, orderBy: (c) => c.id },
+			},
+		});
+		expect(rows).toEqual([
+			{ code: 'ab   ', amount: '1.50', byCode: [{ id: 10 }, { id: 12 }], byAmount: [{ id: 10 }] },
+			{ code: 'cd   ', amount: '2.00', byCode: [{ id: 11 }], byAmount: [{ id: 11 }] },
+		]);
+		expect(selects()[1]).toContain('cast(');
+		const back = await db().query.keyChildren.findMany({
+			columns: { id: true },
+			orderBy: (c) => c.id,
+			with: { code: { columns: { amount: true } }, amount: { columns: { code: true } } },
+		});
+		expect(back).toEqual([
+			{ id: 10, code: { amount: '1.50' }, amount: { code: 'ab   ' } },
+			{ id: 11, code: { amount: '2.00' }, amount: { code: 'cd   ' } },
+			{ id: 12, code: { amount: '1.50' }, amount: null },
+		]);
+	});
+
+	it('refuses a VARCHAR key against a CHAR key before sending anything', async () => {
+		statements = [];
+		await expect(db().query.keyParents.findMany({ with: { byVarchar: true } })).rejects.toThrow(
+			'keyParents.byVarchar: key code (CHAR(5)) and code (VARCHAR(10)) have types that cannot be matched reliably',
+		);
+		await expect(db().query.keyVarchars.findMany({ with: { parent: true } })).rejects.toThrow(
+			'cannot be matched reliably',
+		);
+		expect(statements).toEqual([]);
+	});
+
+	it('applies a nested limit per parent with row_number(), and refuses a nested offset', async () => {
 		statements = [];
 		const rows = await db().query.users.findMany({
 			columns: { id: true },
@@ -2812,8 +2914,7 @@ describe('drizzle-cubrid/native relational queries (#158)', () => {
 			limit: 2,
 			with: {
 				posts: { columns: { id: true }, orderBy: (p, { desc }) => desc(p.id), limit: 2 },
-				// A nested offset is not in Drizzle's types, but its runtime takes it.
-				reports: { columns: { name: true }, orderBy: users.name, limit: 1, offset: 1 } as never,
+				reports: { columns: { name: true }, orderBy: (u, { desc }) => desc(u.name), limit: 1 },
 			},
 		});
 		expect(rows).toEqual([
@@ -2828,6 +2929,11 @@ describe('drizzle-cubrid/native relational queries (#158)', () => {
 			offset: 1,
 		});
 		expect(page).toEqual([{ name: 'Cy' }, { name: 'Dee' }]);
+		statements = [];
+		await expect(db().query.users.findMany({ with: { posts: { limit: 1, offset: 1 } as never } })).rejects.toThrow(
+			'a nested many relation takes no offset',
+		);
+		expect(statements).toEqual([]);
 	});
 
 	it('selects extras at every level, and columns include and exclude', async () => {
@@ -2921,15 +3027,17 @@ describe('drizzle-cubrid/native relational queries (#158)', () => {
 		}
 	});
 
-	it('reads every statement of a relational query from one snapshot outside a transaction', async () => {
-		// A pool whose transaction client commits a new comment on another
-		// connection right after the first statement (the posts) returns.
+	/**
+	 * A client over `source` whose transaction client commits a new comment
+	 * on another connection right after the first statement (the posts) returns.
+	 */
+	const racingClient = (source: CubridPool): native.CubridNativeClient => {
 		const c = native.getTableConfig(comments).name;
-		const racing: native.CubridNativeClient = {
-			query: (text, params) => pool.query(text, params as unknown[], { rowMode: 'array' }),
-			queryPrepared: (text, params) => pool.queryPrepared(text, params as unknown[], { rowMode: 'array' }),
+		return {
+			query: (text, params) => source.query(text, params as unknown[], { rowMode: 'array' }),
+			queryPrepared: (text, params) => source.queryPrepared(text, params as unknown[], { rowMode: 'array' }),
 			transaction: (callback, options) =>
-				pool.transaction(async (tx) => {
+				source.transaction(async (tx) => {
 					let first = true;
 					const run = async (text: string, params?: readonly unknown[]) => {
 						const rows = await tx.queryPrepared(text, params as unknown[], { rowMode: 'array' });
@@ -2942,18 +3050,100 @@ describe('drizzle-cubrid/native relational queries (#158)', () => {
 					return callback({ query: run, queryPrepared: run });
 				}, options),
 		};
+	};
+
+	for (const [label, isolationLevel, relationalReads] of [
+		['the default snapshot mode on a default pool', undefined, undefined],
+		["relationalReads: 'client' on a serializable pool", 'serializable', 'client'],
+		["relationalReads: 'client' on a repeatable read pool", 'repeatable read', 'client'],
+	] as const) {
+		it(`reads every statement of a relational query from one snapshot outside a transaction (${label})`, async () => {
+			const c = native.getTableConfig(comments).name;
+			const source = createPool({ ...config, timezone: 'utc', max: 1, isolationLevel });
+			try {
+				const rows = await native.drizzle(racingClient(source), { schema, relationalReads }).query.posts.findMany({
+					columns: { id: true },
+					where: (p, { eq }) => eq(p.id, 12),
+					with: { comments: { columns: { body: true } } },
+				});
+				expect(rows).toEqual([{ id: 12, comments: [] }]);
+				// The comment was committed before the comments were read.
+				expect(await client.query(`SELECT body FROM "${c}" WHERE id = 901`)).toEqual([{ body: 'raced' }]);
+			} finally {
+				await client.query(`DELETE FROM "${c}" WHERE id = 901`);
+				await source.close();
+			}
+		});
+	}
+
+	it("sees a row committed between the statements with relationalReads: 'client' on a read committed pool", async () => {
+		const c = native.getTableConfig(comments).name;
+		const source = createPool({ ...config, timezone: 'utc', max: 1, isolationLevel: 'read committed' });
 		try {
-			const rows = await native.drizzle(racing, { schema }).query.posts.findMany({
-				columns: { id: true },
-				where: (p, { eq }) => eq(p.id, 12),
-				with: { comments: { columns: { body: true } } },
-			});
-			expect(rows).toEqual([{ id: 12, comments: [] }]);
-			// The comment was committed before the comments were read.
-			expect(await client.query(`SELECT body FROM "${c}" WHERE id = 901`)).toEqual([{ body: 'raced' }]);
+			const rows = await native
+				.drizzle(racingClient(source), { schema, relationalReads: 'client' })
+				.query.posts.findMany({
+					columns: { id: true },
+					where: (p, { eq }) => eq(p.id, 12),
+					with: { comments: { columns: { body: true } } },
+				});
+			expect(rows).toEqual([{ id: 12, comments: [{ body: 'raced' }] }]);
 		} finally {
 			await client.query(`DELETE FROM "${c}" WHERE id = 901`);
+			await source.close();
 		}
+	});
+
+	it('keeps the pooled connection on a repeatable read pool, and on any pool with relationalReads: client', async () => {
+		const query = (rdb: Pick<ReturnType<typeof db>, 'query'>) =>
+			rdb.query.users.findMany({ columns: { id: true }, with: { posts: { columns: { id: true } } } });
+		const opened: Record<string, number[]> = {};
+		for (const [label, isolationLevel, relationalReads] of [
+			['repeatable read pool', 'repeatable read', undefined],
+			['serializable pool, client', 'serializable', 'client'],
+			['default pool, client', undefined, 'client'],
+			['default pool, snapshot', undefined, undefined],
+		] as const) {
+			const source = createPool({ ...config, timezone: 'utc', max: 1, isolationLevel });
+			try {
+				await source.query('SELECT 1');
+				const rdb = native.drizzle(source, { schema, relationalReads });
+				const totals = [source.stats().total];
+				for (let i = 0; i < 3; i++) {
+					await query(rdb);
+					totals.push(source.stats().total);
+				}
+				opened[label] = totals;
+			} finally {
+				await source.close();
+			}
+		}
+		expect(opened).toEqual({
+			'repeatable read pool': [1, 1, 1, 1],
+			'serializable pool, client': [1, 1, 1, 1],
+			'default pool, client': [1, 1, 1, 1],
+			// cubrid-client closes a connection whose transaction ran at another
+			// level than the pool's, as documented.
+			'default pool, snapshot': [1, 0, 0, 0],
+		});
+	});
+
+	it('rejects a failed statement with the same error class with and without with', async () => {
+		const bad = { where: sql`no_such_column = 1` };
+		const without = await db()
+			.query.posts.findMany(bad)
+			.catch((e: unknown) => e);
+		const withRelations = await db()
+			.query.posts.findMany({ ...bad, with: { comments: true } })
+			.catch((e: unknown) => e);
+		expect(without).toBeInstanceOf(QueryError);
+		expect(withRelations).toBeInstanceOf(QueryError);
+		expect((withRelations as Error).constructor).toBe((without as Error).constructor);
+		expect(withRelations).toMatchObject({
+			code: (without as { code: number }).code,
+			kind: (without as { kind: string }).kind,
+		});
+		expect((withRelations as { transactionError?: unknown }).transactionError).toBeInstanceOf(ClientTransactionError);
 	});
 
 	it('refuses prepare() and a placeholder limit before sending anything', async () => {

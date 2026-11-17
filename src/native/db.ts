@@ -20,7 +20,13 @@ import { CubridSelectBuilder, type CubridSelectedFields } from './select.js';
 
 export type { CubridSelectedFields };
 
-import { type CubridBinding, type CubridNativeClient, CubridSession, type CubridTransactionConfig } from './session.js';
+import {
+	type CubridBinding,
+	type CubridNativeClient,
+	type CubridRelationalReads,
+	CubridSession,
+	type CubridTransactionConfig,
+} from './session.js';
 import { CubridTable } from './table.js';
 
 function assertTable(table: unknown, method: string): asserts table is CubridTable {
@@ -34,6 +40,12 @@ export interface CubridDrizzleConfig<TSchema extends Record<string, unknown> = R
 	binding?: CubridBinding;
 	/** Native tables and Drizzle `relations()`, for `db.query` (relational queries). */
 	schema?: TSchema;
+	/**
+	 * How a relational query with `with` runs its statements outside
+	 * `db.transaction()`: `'snapshot'` (default), `'client'` or `'separate'`;
+	 * see docs/NATIVE_API.md.
+	 */
+	relationalReads?: CubridRelationalReads;
 }
 
 /** `db.query`: a relational query builder per table of the schema given to `drizzle()`. */
@@ -195,6 +207,9 @@ export function drizzle<
 >(client: TClient, config: CubridDrizzleConfig<TSchema> = {}): CubridDatabase<TSchema> & { $client: TClient } {
 	const logger = config.logger === true ? new DefaultLogger() : config.logger || undefined;
 	const schema = config.schema ? relationalSchema<ExtractTablesWithRelations<TSchema>>(config.schema) : undefined;
-	const db = new CubridDatabase<TSchema>(new CubridSession(client, { logger, binding: config.binding }), schema);
+	const db = new CubridDatabase<TSchema>(
+		new CubridSession(client, { logger, binding: config.binding, relationalReads: config.relationalReads }),
+		schema,
+	);
 	return Object.assign(db, { $client: client });
 }

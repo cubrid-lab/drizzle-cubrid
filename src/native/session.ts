@@ -1,5 +1,13 @@
 // The native session: how statements reach cubrid-client (#160).
 
+import {
+	ConstraintError,
+	DeadlockError,
+	LockTimeoutError,
+	QueryError,
+	SqlSyntaxError,
+	TransactionError,
+} from 'cubrid-client';
 import type { Logger } from 'drizzle-orm';
 import { describeValue } from './columns/common.js';
 import { quoteIdentifier } from './dialect.js';
@@ -14,6 +22,60 @@ import { assertUtcDecoding } from './timezone.js';
  *   escaped literal (`query()`), one round trip fewer per statement.
  */
 export type CubridBinding = 'prepared' | 'literal';
+
+/**
+ * How a relational query that loads relations (`with`) runs its statements
+ * outside `db.transaction()`:
+ *
+ * - `'snapshot'` (default): in cubrid-client's `transaction(callback,
+ *   { isolationLevel: 'repeatable read' })`, so they read one snapshot on one
+ *   connection. A pool whose own `isolationLevel` is not `'repeatable read'`
+ *   closes that connection afterwards instead of reusing it.
+ * - `'client'`: in `transaction(callback)` at the client's own isolation
+ *   level: one connection, and one snapshot when that level is
+ *   `'repeatable read'` or `'serializable'`.
+ * - `'separate'`: as separate statements, each reading what was committed
+ *   when it ran.
+ */
+export type CubridRelationalReads = 'snapshot' | 'client' | 'separate';
+
+const RELATIONAL_READS: ReadonlySet<unknown> = new Set(['snapshot', 'client', 'separate']);
+
+/**
+ * cubrid-client reports a failed statement of a transaction client as a
+ * `TransactionError`, and the same statement outside one as a `QueryError`
+ * (or its subclass for the error kind, as its `createQueryError()` picks).
+ * A relational query runs in a transaction only for consistency, so its
+ * statement errors are given the class they have outside one; cubrid-client's
+ * error stays reachable as `transactionError`.
+ */
+function asQueryError(error: unknown): unknown {
+	if (!(error instanceof TransactionError)) return error;
+	const details: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(error)) {
+		if (key !== 'transactionError' && key !== 'rollbackError') details[key] = value;
+	}
+	const options = { ...details, cause: error.cause };
+	const kind = details.kind;
+	const converted =
+		kind === 'unique-violation' || kind === 'not-null-violation' || kind === 'foreign-key-violation'
+			? new ConstraintError('Query failed.', options)
+			: kind === 'syntax'
+				? new SqlSyntaxError('Query failed.', options)
+				: kind === 'deadlock'
+					? new DeadlockError('Query failed.', options)
+					: kind === 'lock-timeout'
+						? new LockTimeoutError('Query failed.', options)
+						: new QueryError('Query failed.', options);
+	Object.assign(converted, details);
+	Object.defineProperty(converted, 'transactionError', {
+		value: error,
+		configurable: true,
+		enumerable: true,
+		writable: true,
+	});
+	return converted;
+}
 
 /** Statement options this session passes: positional rows for SELECTs. */
 export interface CubridArrayRowOptions {
@@ -211,6 +273,8 @@ export interface CubridSessionOptions {
 	zoneClient?: CubridNativeClient;
 	/** The transaction level this session belongs to; its statements are refused once it ended. */
 	scope?: CubridTransactionScope;
+	/** See {@link CubridRelationalReads}. */
+	relationalReads?: CubridRelationalReads;
 }
 
 export class CubridSession {
@@ -226,6 +290,11 @@ export class CubridSession {
 		}
 		if (typeof client?.query !== 'function') {
 			throw new TypeError('drizzle-cubrid/native needs a cubrid-client client or pool, with query()');
+		}
+		if (options.relationalReads !== undefined && !RELATIONAL_READS.has(options.relationalReads)) {
+			throw new Error(
+				`Unknown relationalReads ${describeValue(options.relationalReads)}; use 'snapshot', 'client' or 'separate'`,
+			);
 		}
 		if (binding === 'prepared' && typeof client.queryPrepared !== 'function') {
 			throw new Error(
@@ -362,20 +431,39 @@ export class CubridSession {
 	}
 
 	/**
-	 * Runs the statements of one relational query (`run`) on one connection
-	 * with one snapshot: inside a transaction, on its connection, at its
-	 * isolation level; otherwise in a `'repeatable read'` transaction of its
-	 * own, under which CUBRID 11.4 reads every statement from the snapshot of
-	 * the first one. A client whose `transaction()` takes no options, or that
-	 * has none, runs them as separate statements, each reading what was
-	 * committed when it ran.
+	 * Runs the statements of one relational query (`run`): inside a
+	 * transaction, on its connection at its isolation level; otherwise as
+	 * `relationalReads` says (see {@link CubridRelationalReads}). The
+	 * transactional modes need a client with `transaction()` (`'snapshot'`: one
+	 * that declares an options parameter) and are refused otherwise, before
+	 * anything is sent. A failed statement rejects with the error class it has
+	 * outside a transaction (see asQueryError).
 	 */
-	consistentRead<T>(run: (session: CubridSession) => Promise<T>): Promise<T> {
+	async consistentRead<T>(run: (session: CubridSession) => Promise<T>): Promise<T> {
+		const mode = this.options.relationalReads ?? 'snapshot';
+		if (this.options.scope !== undefined || mode === 'separate') return run(this);
 		const transaction = this.client.transaction;
-		if (this.options.scope !== undefined || typeof transaction !== 'function' || transaction.length < 2) {
-			return run(this);
+		if (typeof transaction !== 'function' || (mode === 'snapshot' && transaction.length < 2)) {
+			throw new Error(
+				mode === 'snapshot'
+					? "A relational query with 'with' reads one snapshot through the client's transaction(callback, options) (cubrid-client 1.3.0 or later), which this client lacks; pass relationalReads: 'separate' to drizzle() to run its statements separately"
+					: "relationalReads: 'client' needs a client with transaction(); pass relationalReads: 'separate' to run the statements separately",
+			);
 		}
-		return this.transaction(run, { isolationLevel: 'repeatable read' });
+		// Only a statement's own error is converted: a failed commit keeps its class.
+		let failed: { error: unknown } | undefined;
+		const statements = (session: CubridSession) =>
+			run(session).catch((error: unknown) => {
+				failed = { error };
+				throw error;
+			});
+		try {
+			return await (mode === 'snapshot'
+				? this.transaction(statements, { isolationLevel: 'repeatable read' })
+				: this.transaction(statements));
+		} catch (error) {
+			throw failed && error === failed.error ? asQueryError(error) : error;
+		}
 	}
 
 	/**
