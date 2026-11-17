@@ -177,6 +177,7 @@ describe('db.transaction()', () => {
 		[{ withConsistentSnapshot: true }, 'CUBRID transactions do not support withConsistentSnapshot'],
 		[{ lockTimeout: 5 }, "Unknown transaction option 'lockTimeout'"],
 		[null, 'The transaction config must be an object'],
+		[[], 'The transaction config must be an object'],
 		[{ isolationLevel: 4 }, 'CUBRID does not support isolation level number'],
 	])('refuses %j before anything is sent', async (config, message) => {
 		const client = fakeClient();
@@ -189,6 +190,13 @@ describe('db.transaction()', () => {
 		await expect(pending).rejects.toThrow(message);
 		expect(ran).toBe(false);
 		expect(client.calls).toEqual([]);
+	});
+
+	it('reads only an own isolationLevel', async () => {
+		const client = fakeClient();
+		const inherited = Object.create({ isolationLevel: 'serializable' }) as CubridTransactionConfig;
+		await drizzle(client).transaction(async () => undefined, inherited);
+		expect(client.transactions).toEqual([undefined]);
 	});
 
 	it('refuses a client without transaction() instead of BEGIN/COMMIT on a shared connection', async () => {
@@ -372,19 +380,66 @@ describe('nested transactions', () => {
 		]);
 	});
 
-	it('attach a failed ROLLBACK TO SAVEPOINT as rollbackError and keep the error', async () => {
+	it('attach a failed ROLLBACK TO SAVEPOINT as rollbackError, and never commit the enclosing level', async () => {
 		const rollbackError = new Error('-550');
 		const client = fakeClient({ failing: { 'rollback to savepoint "sp1"': rollbackError } });
 		const failure = new Error('inner');
+		const outer = await drizzle(client)
+			.transaction(async (tx) => {
+				const error = await tx
+					.transaction(async (nested) => {
+						await nested.execute('INSERT 2');
+						throw failure;
+					})
+					.catch((e: unknown) => e);
+				expect(error).toBe(failure);
+				expect((error as { rollbackError: Error }).rollbackError).toBe(rollbackError);
+				// The enclosing level can only roll back now.
+				const refused = await tx.execute('INSERT 3').catch((e: unknown) => e);
+				expect((refused as Error).message).toMatch(/can only roll back/);
+				expect((refused as Error).cause).toBe(failure);
+				await expect(tx.transaction(async () => undefined)).rejects.toThrow(/can only roll back/);
+				return 'swallowed';
+			})
+			.catch((e: unknown) => e);
+		// The callback resolved, but the transaction rolls back with the nested error.
+		expect(outer).toBe(failure);
+		expect(sqlOf(client.calls)).toEqual([
+			'tx1: BEGIN',
+			'tx1: savepoint "sp1"',
+			'tx1: INSERT 2',
+			'tx1: rollback to savepoint "sp1"',
+			'tx1: ROLLBACK',
+		]);
+	});
+
+	it('make a failed ROLLBACK TO SAVEPOINT roll back an enclosing nested level too', async () => {
+		const rollbackError = new Error('-550');
+		const client = fakeClient({ failing: { 'rollback to savepoint "sp2"': rollbackError } });
+		const failure = new Error('inner');
 		await drizzle(client).transaction(async (tx) => {
+			await tx.execute('INSERT 1');
 			const error = await tx
-				.transaction(async () => {
-					throw failure;
+				.transaction(async (one) => {
+					await one
+						.transaction(async () => {
+							throw failure;
+						})
+						.catch(() => undefined);
+					return 'one';
 				})
 				.catch((e: unknown) => e);
 			expect(error).toBe(failure);
-			expect((error as { rollbackError: Error }).rollbackError).toBe(rollbackError);
 		});
+		expect(sqlOf(client.calls)).toEqual([
+			'tx1: BEGIN',
+			'tx1: INSERT 1',
+			'tx1: savepoint "sp1"',
+			'tx1: savepoint "sp2"',
+			'tx1: rollback to savepoint "sp2"',
+			'tx1: rollback to savepoint "sp1"',
+			'tx1: COMMIT',
+		]);
 	});
 
 	it('reject when SAVEPOINT fails, without running the callback', async () => {
@@ -412,6 +467,7 @@ describe('nested transactions', () => {
 	it('refuse a config', async () => {
 		const client = fakeClient();
 		await drizzle(client).transaction(async (tx) => {
+			// @ts-expect-error: a nested transaction takes no config.
 			await expect(tx.transaction(async () => undefined, { isolationLevel: 'serializable' })).rejects.toThrow(
 				/nested transaction takes no config/,
 			);
@@ -427,7 +483,7 @@ describe('nested transactions', () => {
 				release = resolve;
 			});
 			const first = tx.transaction(() => gate);
-			await expect(tx.transaction(async () => undefined)).rejects.toThrow(/cannot run at the same time/);
+			await expect(tx.transaction(async () => undefined)).rejects.toThrow(/await the nested transaction first/);
 			release();
 			await first;
 			await tx.transaction(async () => undefined);
@@ -478,14 +534,16 @@ describe('use after the callback settled', () => {
 			release = resolve;
 		});
 		let pending!: Promise<unknown>;
-		await drizzle(client).transaction(async (tx) => {
-			pending = tx
-				.transaction(async (nested) => {
-					await gate;
-					await nested.execute('SELECT late');
-				})
-				.catch((e: unknown) => e);
-		});
+		await expect(
+			drizzle(client).transaction(async (tx) => {
+				pending = tx
+					.transaction(async (nested) => {
+						await gate;
+						await nested.execute('SELECT late');
+					})
+					.catch((e: unknown) => e);
+			}),
+		).rejects.toThrow(/still running when the callback of this transaction returned/);
 		release();
 		const error = await pending;
 		expect(error).toBeInstanceOf(Error);
@@ -493,6 +551,110 @@ describe('use after the callback settled', () => {
 		// Its ROLLBACK TO SAVEPOINT was refused too, and attached.
 		expect((error as { rollbackError: Error }).rollbackError.message).toMatch(/This transaction has ended/);
 		expect(client.calls.some((c) => c.sql === 'SELECT late')).toBe(false);
+	});
+});
+
+describe('statements of a level while a nested transaction runs in it', () => {
+	const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+	it('are refused, so rolling back the savepoint cannot undo them', async () => {
+		const client = fakeClient();
+		await drizzle(client).transaction(async (tx) => {
+			await tx.execute('INSERT 1');
+			const [nested, parent] = await Promise.allSettled([
+				tx.transaction(async (n) => {
+					await n.execute('INSERT 10');
+					await sleep(20);
+					throw new Error('nested');
+				}),
+				(async () => {
+					await sleep(5);
+					return tx.execute('INSERT 20');
+				})(),
+			]);
+			expect(nested.status).toBe('rejected');
+			expect(parent).toMatchObject({ status: 'rejected' });
+			expect((parent as PromiseRejectedResult).reason.message).toMatch(
+				/nested transaction \(savepoint sp1\) is running in this transaction; await the nested transaction first/,
+			);
+			// Free again once the nested transaction settled.
+			await tx.execute('INSERT 30');
+		});
+		expect(sqlOf(client.calls)).toEqual([
+			'tx1: BEGIN',
+			'tx1: INSERT 1',
+			'tx1: savepoint "sp1"',
+			'tx1: INSERT 10',
+			'tx1: rollback to savepoint "sp1"',
+			'tx1: INSERT 30',
+			'tx1: COMMIT',
+		]);
+	});
+
+	it('are refused when the nested callback uses the captured outer tx', async () => {
+		const client = fakeClient();
+		await drizzle(client).transaction(async (tx) => {
+			await expect(
+				tx.transaction(async () => {
+					await tx.execute('INSERT 20');
+				}),
+			).rejects.toThrow(/await the nested transaction first/);
+			await expect(
+				tx.transaction(async () => {
+					await tx.select({ id: t.id }).from(t);
+				}),
+			).rejects.toThrow(/await the nested transaction first/);
+		});
+		expect(client.calls.some((c) => c.sql === 'INSERT 20')).toBe(false);
+	});
+
+	it('a nested transaction still running when the outer callback returns rolls the transaction back', async () => {
+		const client = fakeClient();
+		let pending!: Promise<unknown>;
+		const error = await drizzle(client)
+			.transaction(async (tx) => {
+				await tx.execute('INSERT 1');
+				pending = tx.transaction(async (n) => {
+					await n.execute('INSERT 2');
+					await sleep(20);
+					throw new Error('late');
+				});
+				pending.catch(() => undefined);
+				await sleep(5);
+			})
+			.catch((e: unknown) => e);
+		expect((error as Error).message).toMatch(/nested transaction \(savepoint sp1\) was still running/);
+		await expect(pending).rejects.toThrow('late');
+		expect(sqlOf(client.calls)).toEqual([
+			'tx1: BEGIN',
+			'tx1: INSERT 1',
+			'tx1: savepoint "sp1"',
+			'tx1: INSERT 2',
+			'tx1: ROLLBACK',
+		]);
+	});
+
+	it('a grandchild still running when a nested callback returns rolls that level back to its savepoint', async () => {
+		const client = fakeClient();
+		await drizzle(client).transaction(async (tx) => {
+			const error = await tx
+				.transaction(async (one) => {
+					one.transaction(() => sleep(20)).catch(() => undefined);
+					await sleep(5);
+				})
+				.catch((e: unknown) => e);
+			expect((error as Error).message).toMatch(
+				/savepoint sp2\) was still running when the callback of this nested transaction \(savepoint sp1\) returned/,
+			);
+			await sleep(30);
+		});
+		expect(sqlOf(client.calls)).toEqual([
+			'tx1: BEGIN',
+			'tx1: savepoint "sp1"',
+			'tx1: savepoint "sp2"',
+			'tx1: rollback to savepoint "sp1"',
+			'tx1: COMMIT',
+		]);
 	});
 });
 

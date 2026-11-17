@@ -1998,6 +1998,61 @@ describe('drizzle-cubrid/native transactions (#161)', () => {
 		});
 	}
 
+	it('refuses a statement of the enclosing level while a nested transaction runs, so its rollback cannot undo it', async () => {
+		await client.query(`DELETE FROM ${table()}`);
+		const db = native.drizzle(client);
+		const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+		const settled = await db.transaction(async (tx) => {
+			await tx.insert(items).values({ id: 1 });
+			const results = await Promise.allSettled([
+				tx.transaction(async (n) => {
+					await n.insert(items).values({ id: 10 });
+					await sleep(50);
+					throw new Error('nested');
+				}),
+				(async () => {
+					await sleep(10);
+					return tx.insert(items).values({ id: 20 });
+				})(),
+			]);
+			// The nested callback using the captured outer tx is refused too.
+			const captured = await tx
+				.transaction(async () => {
+					await tx.insert(items).values({ id: 30 });
+				})
+				.catch((e: Error) => e.message);
+			return [...results.map((r) => (r.status === 'rejected' ? (r.reason as Error).message : 'fulfilled')), captured];
+		});
+		expect(settled).toEqual([
+			'nested',
+			expect.stringMatching(/await the nested transaction first/),
+			expect.stringMatching(/await the nested transaction first/),
+		]);
+		expect(await itemIds()).toEqual([1]);
+	});
+
+	it('rolls back instead of committing when a nested transaction is still running as the callback returns', async () => {
+		await client.query(`DELETE FROM ${table()}`);
+		const db = native.drizzle(client);
+		const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+		let pending!: Promise<unknown>;
+		const error = await db
+			.transaction(async (tx) => {
+				await tx.insert(items).values({ id: 1 });
+				pending = tx.transaction(async (n) => {
+					await n.insert(items).values({ id: 2 });
+					await sleep(30);
+					throw new Error('late');
+				});
+				pending.catch(() => undefined);
+				await sleep(5);
+			})
+			.catch((e: Error) => e.message);
+		expect(error).toMatch(/was still running/);
+		await expect(pending).rejects.toThrow('late');
+		expect(await itemIds()).toEqual([]);
+	});
+
 	it('runs statements started together in one transaction, all on its connection', async () => {
 		await client.query(`DELETE FROM ${table()}`);
 		const db = native.drizzle(pool);

@@ -83,16 +83,18 @@ function transactionOptions(
 	config: CubridTransactionConfig | undefined,
 ): { isolationLevel: CubridIsolationLevel } | undefined {
 	if (config === undefined) return undefined;
-	if (typeof config !== 'object' || config === null) {
+	if (typeof config !== 'object' || config === null || Array.isArray(config)) {
 		throw new TypeError(`The transaction config must be an object, not ${describeValue(config)}`);
 	}
-	const { isolationLevel, ...rest } = config;
-	for (const key of Object.keys(rest)) {
+	for (const key of Object.keys(config)) {
+		if (key === 'isolationLevel') continue;
 		if (key === 'accessMode' || key === 'withConsistentSnapshot') {
 			throw new Error(`CUBRID transactions do not support ${key}`);
 		}
 		throw new Error(`Unknown transaction option '${key}'; drizzle-cubrid/native accepts only isolationLevel`);
 	}
+	// Only an own property: an inherited one would be a surprise.
+	const isolationLevel = Object.hasOwn(config, 'isolationLevel') ? config.isolationLevel : undefined;
 	if (isolationLevel === undefined) return undefined;
 	if (!ISOLATION_LEVELS.has(isolationLevel)) {
 		const shown = typeof isolationLevel === 'string' ? `'${isolationLevel}'` : describeValue(isolationLevel);
@@ -117,12 +119,15 @@ function attachDiagnostic(primary: unknown, key: 'rollbackError' | 'transactionE
 /**
  * One transaction level: the outermost transaction or a savepoint in it. It
  * ends when its callback settles, and a level inside one that ended has
- * ended too.
+ * ended too. While a nested transaction runs inside it, or after rolling one
+ * back to its savepoint failed, it refuses statements of its own.
  */
 export class CubridTransactionScope {
 	private ended = false;
 	/** The nested transaction running directly inside this level, if any. */
 	child: CubridTransactionScope | undefined;
+	/** The error of a nested transaction whose rollback to its savepoint failed. */
+	private failure: { error: unknown } | undefined;
 
 	constructor(
 		/** 0 for the outermost transaction, N for savepoint `spN`. */
@@ -139,13 +144,57 @@ export class CubridTransactionScope {
 		if (this.parent?.child === this) this.parent.child = undefined;
 	}
 
-	/** Refuses a statement of a level whose callback has settled, before it is sent. */
-	assertActive(): void {
-		if (this.active) return;
-		const level = this.depth === 0 ? 'transaction' : `nested transaction (savepoint sp${this.depth})`;
-		throw new Error(
-			`This ${level} has ended: its callback has settled, so its tx can no longer run statements or transactions`,
-		);
+	private get level(): string {
+		return this.depth === 0 ? 'transaction' : `nested transaction (savepoint sp${this.depth})`;
+	}
+
+	/**
+	 * Marks this level as one that can only roll back: rolling back a nested
+	 * transaction to its savepoint failed, so the nested work may still be in it.
+	 */
+	fail(error: unknown): void {
+		this.failure ??= { error };
+	}
+
+	/**
+	 * Refuses a statement of this level, before it is sent, when its callback
+	 * has settled, when a nested transaction runs inside it (unless
+	 * `forNested`, for the nested transaction's own savepoint statements), or
+	 * when it can only roll back.
+	 */
+	assertActive(forNested = false): void {
+		if (!this.active) {
+			throw new Error(
+				`This ${this.level} has ended: its callback has settled, so its tx can no longer run statements or transactions`,
+			);
+		}
+		if (this.failure) {
+			throw new Error(
+				`This ${this.level} can only roll back: rolling back a nested transaction to its savepoint failed, so its work may still be part of it`,
+				{ cause: this.failure.error },
+			);
+		}
+		if (!forNested && this.child !== undefined) {
+			// Rolling the nested transaction back to its savepoint would also undo
+			// this statement.
+			throw new Error(
+				`A nested transaction (savepoint sp${this.child.depth}) is running in this ${this.level}; await the nested transaction first`,
+			);
+		}
+	}
+
+	/**
+	 * Checks a level whose callback resolved before it commits or keeps its
+	 * savepoint: a nested transaction still running could fail after that, and
+	 * a failed rollback to a savepoint leaves work that must not be committed.
+	 */
+	assertSettled(): void {
+		if (this.child !== undefined) {
+			throw new Error(
+				`A nested transaction (savepoint sp${this.child.depth}) was still running when the callback of this ${this.level} returned; await every nested transaction before returning`,
+			);
+		}
+		if (this.failure) throw this.failure.error;
 	}
 }
 
@@ -192,8 +241,8 @@ export class CubridSession {
 	}
 
 	/** Refuses a statement of an ended transaction or an array parameter, then logs the statement. */
-	private send(sql: string, params: unknown[]): void {
-		this.assertActive();
+	private send(sql: string, params: unknown[], forNested = false): void {
+		this.options.scope?.assertActive(forNested);
 		const index = params.findIndex(Array.isArray);
 		if (index >= 0) {
 			// cubrid-client cannot bind an array; a collection value is written as
@@ -206,9 +255,9 @@ export class CubridSession {
 		this.options.logger?.logQuery(sql, params);
 	}
 
-	private run(sql: string, params: unknown[], options?: CubridArrayRowOptions): Promise<unknown[]> {
+	private run(sql: string, params: unknown[], options?: CubridArrayRowOptions, forNested = false): Promise<unknown[]> {
 		try {
-			this.send(sql, params);
+			this.send(sql, params, forNested);
 		} catch (error) {
 			return Promise.reject(error);
 		}
@@ -285,7 +334,9 @@ export class CubridSession {
 		const callback = async (txClient: CubridNativeClient): Promise<T> => {
 			const scope = new CubridTransactionScope(0);
 			try {
-				return await run(new CubridSession(txClient, { ...this.options, zoneClient, scope }));
+				const result = await run(new CubridSession(txClient, { ...this.options, zoneClient, scope }));
+				scope.assertSettled();
+				return result;
 			} catch (error) {
 				failure = { error };
 				throw error;
@@ -320,33 +371,33 @@ export class CubridSession {
 	async savepoint<T>(run: (session: CubridSession) => Promise<T>): Promise<T> {
 		const parent = this.options.scope;
 		if (parent === undefined) throw new Error('A savepoint needs a transaction');
+		// Also refuses a second nested transaction while one runs: both would
+		// roll back to the same point of one connection's work.
 		parent.assertActive();
-		if (parent.child !== undefined) {
-			// Both would roll back to the same point of one connection's work.
-			throw new Error('Nested transactions of one transaction cannot run at the same time; await the first one');
-		}
 		const scope = new CubridTransactionScope(parent.depth + 1, parent);
 		const name = quoteIdentifier(`sp${scope.depth}`);
 		parent.child = scope;
 		try {
-			await this.run(`savepoint ${name}`, []);
+			await this.run(`savepoint ${name}`, [], undefined, true);
 		} catch (error) {
 			scope.end();
 			throw error;
 		}
-		let result: T;
 		try {
-			result = await run(new CubridSession(this.client, { ...this.options, scope }));
+			const result = await run(new CubridSession(this.client, { ...this.options, scope }));
+			scope.assertSettled();
+			scope.end();
+			return result;
 		} catch (error) {
 			scope.end();
 			try {
 				await this.run(`rollback to savepoint ${name}`, []);
 			} catch (rollbackError) {
 				attachDiagnostic(error, 'rollbackError', rollbackError);
+				// The nested work may still be in the transaction: never commit it.
+				parent.fail(error);
 			}
 			throw error;
 		}
-		scope.end();
-		return result;
 	}
 }

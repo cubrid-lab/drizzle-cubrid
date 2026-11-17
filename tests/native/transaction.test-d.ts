@@ -55,6 +55,14 @@ describe('transaction', () => {
 		>();
 	});
 
+	it('takes no config for a nested transaction', () => {
+		drizzle(client).transaction(async (tx) => {
+			await tx.transaction(async () => undefined);
+			// @ts-expect-error: the isolation level belongs to the outermost transaction.
+			await tx.transaction(async () => undefined, { isolationLevel: 'serializable' });
+		});
+	});
+
 	it('requires a callback that returns a promise', () => {
 		const db = drizzle(client);
 		// @ts-expect-error: the callback must be async.

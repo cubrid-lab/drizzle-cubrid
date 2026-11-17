@@ -108,10 +108,7 @@ export class CubridTransaction extends CubridDatabase {
 	 * work in place. The error is rethrown, so catch it to go on. It takes no
 	 * config: the isolation level belongs to the outermost transaction.
 	 */
-	override transaction<T>(
-		transaction: (tx: CubridTransaction) => Promise<T>,
-		config?: CubridTransactionConfig,
-	): Promise<T> {
+	override transaction<T>(transaction: (tx: CubridTransaction) => Promise<T>, config?: never): Promise<T> {
 		if (config !== undefined) {
 			return Promise.reject(
 				new Error('A nested transaction takes no config; set isolationLevel on the outermost transaction'),

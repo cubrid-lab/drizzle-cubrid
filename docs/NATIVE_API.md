@@ -299,7 +299,10 @@ bound to that connection, with the same `select`, `insert`, `update`,
 `delete`, `execute`, binding and logger as `db`. Every statement of `tx`
 belongs to the transaction, and statements of `db` (even on the same client
 while the transaction runs) never do. Date and time reads in `tx` are checked
-against the time zone of the client or pool that started it.
+against the time zone of the client or pool that started it: `CubridClient`
+and `CubridPool` declare their zone and are never probed, and for a custom
+client that declares none the zone probe runs on that outer client or pool,
+not inside the transaction.
 
 | Behavior | Details |
 | --- | --- |
@@ -308,9 +311,12 @@ against the time zone of the client or pool that started it.
 | A statement of `tx` fails | It rejects with cubrid-client's error unchanged; for a transaction client that is a `TransactionError` carrying the server's `code` and `kind` (`'unique-violation'`, …). Uncaught, it rolls the transaction back as above |
 | Commit fails | Rejects with cubrid-client's error unchanged; check its `outcomeUnknown` (the commit may have happened) before retrying |
 | `tx.rollback()` | Throws `CubridTransactionRollbackError` (a subclass of Drizzle's `TransactionRollbackError`), so the level it was called in rolls back and its `transaction()` rejects with that error |
-| `tx.transaction(cb)` | `savepoint "spN"` (N is the depth) before `cb`, and `rollback to savepoint "spN"` when `cb` rejects; the error is rethrown, so the outer transaction goes on if you catch it, and rolls back if you do not. CUBRID has no `RELEASE SAVEPOINT`, so a savepoint stays until the transaction ends. It takes no config |
+| `tx.transaction(cb)` | `savepoint "spN"` (N is the depth) before `cb`, and `rollback to savepoint "spN"` when `cb` rejects; the error is rethrown, so the outer transaction goes on if you catch it, and rolls back if you do not. CUBRID has no `RELEASE SAVEPOINT`, so a savepoint stays until the transaction ends. It takes no config (typed `never`) |
+| While a nested transaction runs | Statements and new nested transactions of the enclosing level (also through the outer `tx` captured inside the nested callback) throw `… await the nested transaction first` before anything is sent: rolling back to the savepoint would undo them too |
+| Rolling back to a savepoint fails | The nested error is rethrown with `rollbackError`, and the enclosing level can only roll back: its statements throw `… can only roll back` (with the nested error as `cause`), and when its callback resolves anyway it rejects with the nested error, so the transaction (or the enclosing savepoint) rolls back instead of committing the nested work |
 | `config.isolationLevel` | `'read committed'`, `'repeatable read'` or `'serializable'`, applied by cubrid-client before the transaction starts (verified on 11.4: under `'repeatable read'` and `'serializable'` a row committed meanwhile by another connection stays invisible) |
-| Parallel statements in one `tx` | Allowed (`Promise.all`); cubrid-client runs them one at a time on the transaction's connection. Await them all before the callback returns |
+| Parallel statements in one `tx` | Allowed (`Promise.all`) while no nested transaction is open in that level; cubrid-client runs them one at a time on the transaction's connection. Await them all before the callback returns, and await every nested transaction too: one still running when the callback returns makes the level reject (`… was still running …`) and roll back instead of committing |
+| `db` inside the callback | Runs outside the transaction on another connection. On a pool whose connections are all held (for example `max: 1`, held by this transaction) it waits for one and rejects with cubrid-client's `ConnectionError` after `acquireTimeoutMs` (30 s by default); uncaught, that rolls the transaction back. Use `tx` for work that belongs to the transaction |
 | Using `tx` after its callback settled | Every statement, `transaction()` and `rollback()` of it (and of its nested transactions) throws `This transaction has ended …` before anything is sent; a nested `tx` ends when its own callback settles |
 
 Refused before a connection is taken:
@@ -322,6 +328,7 @@ Refused before a connection is taken:
 | A client without `transaction()` | `BEGIN`/`COMMIT` on a connection that other callers may share would let their statements join, commit or roll back the transaction (#185). Pass a cubrid-client 1.3+ client or pool |
 | `isolationLevel` with a `transaction()` that declares no options parameter | It would run at the server's default level |
 | Two nested transactions of one level at the same time | They would roll back to the same point of one connection |
+| A config that is not a plain object (`null`, an array); only an own `isolationLevel` is read | |
 
 ## Column builders
 
