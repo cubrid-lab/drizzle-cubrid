@@ -13,10 +13,13 @@ import {
 	count,
 	desc,
 	eq,
+	exists,
 	gt,
 	gte,
+	inArray,
 	like,
 	lt,
+	max,
 	relations,
 	sql,
 	sum,
@@ -1347,6 +1350,210 @@ describe('drizzle-cubrid/native select and session (#158, #160)', () => {
 		const error = await db.execute(sql`select * from ${sql.identifier(name('missing'))}`).catch((e: unknown) => e);
 		expect(error).toBeInstanceOf(Error);
 		expect(typeof (error as { code?: unknown }).code).toBe('number');
+	});
+});
+
+describe('drizzle-cubrid/native set operations and scalar subqueries (#158)', () => {
+	const left = native.cubridTable(name('nsetl'), {
+		id: native.integer().primaryKey(),
+		v: native.integer(),
+		s: native.varchar({ length: 10 }),
+		at: native.datetime(),
+	});
+	const right = native.cubridTable(name('nsetr'), {
+		id: native.integer().primaryKey(),
+		v: native.integer(),
+		s: native.varchar({ length: 10 }),
+		n: native.numeric({ precision: 10, scale: 2 }),
+	});
+	const at = new Date(Date.UTC(2024, 1, 29, 23, 59, 58, 123));
+	let db: ReturnType<typeof native.drizzle<CubridClient>>;
+	const codeOf = (error: unknown) => (error as { code?: unknown }).code;
+	const lv = () => db.select({ v: left.v }).from(left);
+	const rv = () => db.select({ v: right.v }).from(right);
+	const values = (rows: { v: number | null }[]) => rows.map((row) => row.v);
+
+	beforeAll(async () => {
+		db = native.drizzle(client);
+		for (const table of [left, right]) {
+			await client.query(createTableSql(table));
+			created.push(`"${native.getTableConfig(table).name}"`);
+		}
+		// left.v holds 1, 1, 2, 3, 3; right.v holds 1, 3, 4, 3.
+		await db.insert(left).values([
+			{ id: 1, v: 1, s: 'a', at },
+			{ id: 2, v: 1, s: 'b' },
+			{ id: 3, v: 2, s: 'c' },
+			{ id: 4, v: 3, s: 'd' },
+			{ id: 5, v: 3, s: 'e' },
+		]);
+		await db.insert(right).values([
+			{ id: 1, v: 1, s: 'x', n: '1.50' },
+			{ id: 2, v: 3, s: 'y', n: '2.50' },
+			{ id: 3, v: 4, s: 'z' },
+			{ id: 4, v: 3, s: 'w' },
+		]);
+	});
+
+	it('runs every set operator with its set or bag semantics', async () => {
+		expect(values(await lv().union(rv()).orderBy(left.v))).toEqual([1, 2, 3, 4]);
+		expect(values(await lv().unionAll(rv()).orderBy(left.v))).toEqual([1, 1, 1, 2, 3, 3, 3, 3, 4]);
+		expect(values(await lv().intersect(rv()).orderBy(left.v))).toEqual([1, 3]);
+		expect(values(await lv().intersectAll(rv()).orderBy(left.v))).toEqual([1, 3, 3]);
+		expect(values(await lv().except(rv()).orderBy(left.v))).toEqual([2]);
+		expect(values(await lv().exceptAll(rv()).orderBy(left.v))).toEqual([1, 2]);
+		expect(values(await native.unionAll(lv(), rv(), lv()).orderBy(desc(left.v)).limit(2))).toEqual([4, 3]);
+	});
+
+	it('evaluates chained operators left to right, and a set operation as an operand', async () => {
+		expect(values(await lv().union(rv()).intersect(rv()).orderBy(left.v))).toEqual([1, 3, 4]);
+		expect(values(await lv().union(rv().intersect(lv())).orderBy(left.v))).toEqual([1, 2, 3]);
+		// Raw SQL without parentheses gives the same: CUBRID gives the operators one precedence.
+		const l = native.getTableConfig(left).name;
+		const r = native.getTableConfig(right).name;
+		const raw = await client.query<{ v: number }>(
+			`select v from "${l}" union select v from "${r}" intersect select v from "${r}" order by 1`,
+		);
+		expect(raw.map((row) => row.v)).toEqual([1, 3, 4]);
+	});
+
+	it('applies operand and result order by, limit and offset, with placeholders across operands', async () => {
+		const prepared = db
+			.select({ v: left.v, s: left.s })
+			.from(left)
+			.where(gt(left.v, sql.placeholder('min')))
+			.orderBy(desc(left.s))
+			.limit(sql.placeholder('n'))
+			.unionAll(
+				db
+					.select({ v: right.v, s: right.s })
+					.from(right)
+					.where(eq(right.v, sql.placeholder('eq'))),
+			)
+			.orderBy(({ s }) => desc(s))
+			.limit(sql.placeholder('total'))
+			.offset(sql.placeholder('skip'))
+			.prepare();
+		// left: v > 1 ordered by s desc, first 2 → e, d; right: v = 3 → y, w; all by s desc → y, w, e, d; skip 1, take 2.
+		expect(await prepared.execute({ min: 1, n: 2, eq: 3, total: 2, skip: 1 })).toEqual([
+			{ v: 3, s: 'w' },
+			{ v: 3, s: 'e' },
+		]);
+		const ordered = lv().union(rv()).orderBy(desc(left.v)).limit(2);
+		expect(values(await ordered.unionAll(lv().where(eq(left.v, 2))).orderBy(left.v))).toEqual([2, 3, 4]);
+	});
+
+	it('maps the result by position with the first select codecs, and reads it as a subquery', async () => {
+		const rows = await db
+			.select({ id: left.id, at: left.at })
+			.from(left)
+			.where(eq(left.id, 1))
+			.union(
+				db
+					.select({ id: right.id, at: sql<Date | null>`null`.mapWith(left.at) })
+					.from(right)
+					.where(eq(right.id, 2)),
+			)
+			.orderBy(left.id);
+		expect(rows).toEqual([
+			{ id: 1, at },
+			{ id: 2, at: null },
+		]);
+		const sq = lv().union(rv()).as('sq');
+		expect(values(await db.select().from(sq).where(gt(sq.v, 2)).orderBy(sq.v))).toEqual([3, 4]);
+		const ids = await db
+			.select({ id: left.id })
+			.from(left)
+			.where(inArray(left.v, rv().except(lv().where(eq(left.v, 1)))))
+			.orderBy(left.id);
+		expect(ids).toEqual([{ id: 4 }, { id: 5 }]);
+	});
+
+	it('passes server type errors through and refuses a widened value the first codec cannot read', async () => {
+		const mismatch = await db
+			.select({ v: left.v })
+			.from(left)
+			.union(db.select({ v: sql<number>`${right.s}` }).from(right))
+			.catch((e: unknown) => e);
+		expect(codeOf(mismatch)).toBe(-181);
+		// INTEGER ∪ NUMERIC is NUMERIC on the server; the INTEGER codec refuses '1.50' instead of rounding it.
+		await expect(lv().union(db.select({ v: sql<number>`${right.n}` }).from(right))).rejects.toThrow(
+			/INTEGER value from the driver must be an integer/,
+		);
+	});
+
+	it('the forms refused before sending fail on the server', async () => {
+		const l = native.getTableConfig(left).name;
+		const r = native.getTableConfig(right).name;
+		const failing = [
+			[`(select v from "${l}") union (select v from "${r}") for update`, -493],
+			[`(select v from "${l}" for update) union (select v from "${r}")`, -494],
+			[`select v, s from "${l}" union select v from "${r}"`, -493],
+			[`select "${l}".id, (select "${r}".v, "${r}".s from "${r}" where "${r}".id = "${l}".id) from "${l}"`, -493],
+		] as const;
+		for (const [statement, code] of failing) {
+			expect(codeOf(await client.query(statement).catch((e: unknown) => e))).toBe(code);
+		}
+	});
+
+	it('selects correlated scalar subqueries decoded by their field', async () => {
+		const n = db
+			.select({ n: count().as('n') })
+			.from(right)
+			.where(eq(right.v, left.v))
+			.as('n');
+		const first = db
+			.select({ s: right.s })
+			.from(right)
+			.where(eq(right.v, left.v))
+			.orderBy(right.s)
+			.limit(1)
+			.as('first');
+		const latest = db
+			.select({ at: max(left.at).mapWith(left.at).as('at') })
+			.from(left)
+			.as('latest');
+		const rows = await db.select({ id: left.id, n, first, latest }).from(left).orderBy(left.id);
+		expect(rows).toEqual([
+			{ id: 1, n: 1, first: 'x', latest: at },
+			{ id: 2, n: 1, first: 'x', latest: at },
+			{ id: 3, n: 0, first: null, latest: at },
+			{ id: 4, n: 2, first: 'w', latest: at },
+			{ id: 5, n: 2, first: 'w', latest: at },
+		]);
+	});
+
+	it('passes the server error through for a scalar subquery of several rows', async () => {
+		const many = db.select({ s: right.s }).from(right).where(eq(right.v, left.v)).as('many');
+		const error = await db
+			.select({ id: left.id, many })
+			.from(left)
+			.catch((e: unknown) => e);
+		expect(codeOf(error)).toBe(-459);
+	});
+
+	it('uses subqueries in where with exists(), inArray() and a comparison', async () => {
+		const matched = await db
+			.select({ id: left.id })
+			.from(left)
+			.where(exists(db.select({ one: sql`1` }).from(right).where(eq(right.v, left.v))))
+			.orderBy(left.id);
+		expect(matched).toEqual([{ id: 1 }, { id: 2 }, { id: 4 }, { id: 5 }]);
+		const inRight = await db
+			.select({ id: left.id })
+			.from(left)
+			.where(inArray(left.v, db.select({ v: right.v }).from(right)))
+			.orderBy(left.id);
+		expect(inRight).toEqual(matched);
+		const lowest = await db
+			.select({ id: left.id, top: sql<number>`${db.select({ m: max(right.v) }).from(right)}`.mapWith(Number) })
+			.from(left)
+			.where(eq(left.v, sql`${db.select({ m: sql`min(${right.v})` }).from(right)}`))
+			.orderBy(left.id);
+		expect(lowest).toEqual([
+			{ id: 1, top: 4 },
+			{ id: 2, top: 4 },
+		]);
 	});
 });
 

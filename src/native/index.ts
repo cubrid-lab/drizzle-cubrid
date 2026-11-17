@@ -80,7 +80,7 @@ export {
 	CubridTransactionRollbackError,
 	drizzle,
 } from './db.js';
-export { CubridDialect, quoteIdentifier } from './dialect.js';
+export { CubridDialect, type CubridSetOperator, quoteIdentifier } from './dialect.js';
 export {
 	CubridDelete,
 	CubridInsert,
@@ -100,8 +100,20 @@ export {
 	CubridQueryBuilder,
 	CubridSelect,
 	CubridSelectBuilder,
+	type CubridSetOperand,
+	type CubridSetOperandRight,
+	CubridSetOperation,
+	CubridSetOperationSource,
+	type CubridSetOperatorFn,
+	type CubridSetOperators,
 	type CubridSource,
 	type CubridSubquery,
+	except,
+	exceptAll,
+	intersect,
+	intersectAll,
+	union,
+	unionAll,
 } from './select.js';
 export {
 	type CubridBinding,

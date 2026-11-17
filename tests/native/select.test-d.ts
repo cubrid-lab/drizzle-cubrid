@@ -1,9 +1,23 @@
 // Result types of the native select builder (#158), against Drizzle's neutral select types.
 import type { CubridClient, CubridPool } from 'cubrid-client';
-import { count, eq, sql, sum } from 'drizzle-orm';
+import { count, eq, exists, inArray, max, sql, sum } from 'drizzle-orm';
+import type { DrizzleTypeError } from 'drizzle-orm/utils';
 import { describe, expectTypeOf, it } from 'vitest';
 
-import { bigint, cubridTable, datetime, drizzle, integer, numeric, set, varchar } from '../../src/native/index';
+import {
+	bigint,
+	cubridTable,
+	datetime,
+	drizzle,
+	exceptAll,
+	integer,
+	intersect,
+	numeric,
+	set,
+	union,
+	unionAll,
+	varchar,
+} from '../../src/native/index';
 
 const users = cubridTable('users', {
 	id: bigint({ mode: 'bigint' }).primaryKey(),
@@ -118,15 +132,96 @@ describe('select shapes', () => {
 	});
 });
 
+describe('set operations', () => {
+	const names = () => db.select({ id: users.id, name: users.name }).from(users);
+	const titles = () => db.select({ id: sql<bigint>`${posts.authorId}`, name: posts.title }).from(posts);
+
+	it('keep the first select result type', async () => {
+		expectTypeOf(await names().union(titles())).toEqualTypeOf<{ id: bigint; name: string }[]>();
+		expectTypeOf(await names().unionAll(titles()).intersect(names()).except(titles())).toEqualTypeOf<
+			{ id: bigint; name: string }[]
+		>();
+		expectTypeOf(await names().intersectAll(titles()).exceptAll(names())).toEqualTypeOf<
+			{ id: bigint; name: string }[]
+		>();
+		expectTypeOf(await union(names(), titles(), names())).toEqualTypeOf<{ id: bigint; name: string }[]>();
+		expectTypeOf(await unionAll(names(), titles())).toEqualTypeOf<{ id: bigint; name: string }[]>();
+		expectTypeOf(await intersect(names(), titles())).toEqualTypeOf<{ id: bigint; name: string }[]>();
+		expectTypeOf(await exceptAll(names(), titles())).toEqualTypeOf<{ id: bigint; name: string }[]>();
+		expectTypeOf(await names().union(({ intersect }) => intersect(titles(), names()))).toEqualTypeOf<
+			{ id: bigint; name: string }[]
+		>();
+		expectTypeOf(await db.select().from(users).union(db.select().from(users))).toEqualTypeOf<User[]>();
+	});
+
+	it('order, limit, offset, prepare and subqueries of a set operation', async () => {
+		const q = names()
+			.union(titles())
+			.orderBy(({ name }) => name)
+			.limit(sql.placeholder('n'))
+			.offset(1);
+		expectTypeOf(await q.prepare().execute({ n: 1 })).toEqualTypeOf<{ id: bigint; name: string }[]>();
+		expectTypeOf(q.toSQL()).toEqualTypeOf<{ sql: string; params: unknown[] }>();
+		const sq = names().union(titles()).as('sq');
+		expectTypeOf(await db.select().from(sq)).toEqualTypeOf<{ id: bigint; name: string }[]>();
+		db.select()
+			.from(users)
+			.where(inArray(users.id, names().union(titles()).as('ids').id));
+	});
+
+	it('refuse operands of other fields or types', () => {
+		// @ts-expect-error a missing field
+		names().union(db.select({ id: users.id }).from(users));
+		// @ts-expect-error an extra field
+		names().union(db.select({ id: users.id, name: users.name, email: users.email }).from(users));
+		// @ts-expect-error a nullable field where the first select's is not
+		names().union(db.select({ id: users.id, name: users.email }).from(users));
+		// @ts-expect-error another type
+		union(names(), db.select({ id: users.id, name: posts.id }).from(posts));
+		// @ts-expect-error not a select
+		names().union(sql`select 1`);
+		// @ts-expect-error no for() on a set operation
+		names().union(titles()).for('update');
+	});
+});
+
+describe('scalar subqueries', () => {
+	it('select one field of a subquery as a value', async () => {
+		const n = db
+			.select({ n: count().as('n') })
+			.from(posts)
+			.where(eq(posts.authorId, users.id))
+			.as('n');
+		const last = db.select({ at: posts.at }).from(posts).limit(1).as('last');
+		const rows = await db.select({ id: users.id, n, last }).from(users);
+		expectTypeOf(rows).toEqualTypeOf<{ id: bigint; n: number; last: Date | null }[]>();
+		// Drizzle's select types allow a subquery field only at the top level.
+		expectTypeOf(await db.select({ info: { last } }).from(users)).toEqualTypeOf<{ info: never }[]>();
+	});
+
+	it('type a subquery of several fields as an error', async () => {
+		const two = db.select({ a: users.id, b: users.name }).from(users).as('two');
+		const [row] = await db.select({ two }).from(users);
+		expectTypeOf(row!.two).toEqualTypeOf<DrizzleTypeError<'You can only select one column in the subquery'>>();
+	});
+
+	it('use unaliased selects in sql and exists()', async () => {
+		const inner = db.select({ m: max(posts.id) }).from(posts);
+		const rows = await db
+			.select({ id: users.id, m: sql<number | null>`${inner}` })
+			.from(users)
+			.where(exists(inner));
+		expectTypeOf(rows).toEqualTypeOf<{ id: bigint; m: number | null }[]>();
+	});
+});
+
 describe('refusals at the type level', () => {
-	it('has no full join, lateral join or set operations, and only for update', () => {
+	it('has no full join or lateral join, and only for update', () => {
 		const q = db.select().from(users);
 		// @ts-expect-error CUBRID has no FULL JOIN
 		q.fullJoin(posts, eq(users.id, posts.authorId));
 		// @ts-expect-error no lateral joins
 		q.leftJoinLateral(posts, sql`true`);
-		// @ts-expect-error no set operations in this slice
-		q.union(db.select().from(users));
 		// @ts-expect-error CUBRID has no shared locks
 		q.for('share');
 		// @ts-expect-error no NOWAIT/SKIP LOCKED
