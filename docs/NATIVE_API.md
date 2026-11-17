@@ -257,16 +257,21 @@ typed binds `inArray()` matched no row and `notInArray()` every row; typed
 cast to its own length (UTF-8 bytes), so it never matches by truncation (#237).
 
 A `sql.placeholder()` has no column and its value is not known when the SQL
-is built, so it is not cast. An `inArray()` or `notInArray()` list of two or
-more elements, one of them a placeholder, on a `char()` column is sent as
-`("t"."code" = ? or "t"."code" = ?)` and `("t"."code" <> ? and "t"."code" <> ?)`
-instead, the SQL definition of `IN` and `NOT IN`, nulls included: each `= ?`
-compares padded, where an `IN` list of untyped placeholders matched no row with
-typed binds. A value longer than `n` matches nothing, under both bindings
-(#239). `eq(t.code, sql.placeholder('c'))` and a one-element list need
-nothing. In a `sql` template, write such a comparison the same way
-(`` sql`(${t.code} = ${a} or ${t.code} = ${b})` ``) rather than
-`` sql`${t.code} in (${a}, ${b})` ``, which is sent as written.
+is built, so it is not cast. With typed binds (the default), an `inArray()` or
+`notInArray()` list of two or more elements, one of them a placeholder, on a
+`char()` column is sent as `("t"."code" = ? or "t"."code" = ?)` and
+`("t"."code" <> ? and "t"."code" <> ?)` instead, in `where` and in selected
+fields: each `= ?` compares padded, where an `IN` list of untyped placeholders
+matched no row. On CUBRID 11.4 this gave the same rows and the same
+true/false/NULL values as `IN`/`NOT IN` in every case tested, NULL
+placeholder values and `not(...)` of the list included; a value longer than
+`n` matches nothing. Under `binding: 'literal'` the list is sent unchanged:
+literal lists compare padded already, and with literals CUBRID takes
+`code = NULL` inside `OR` as false rather than unknown, so the expanded form
+would differ under `not()` (#239). `eq(t.code, sql.placeholder('c'))` and a
+one-element list need nothing. Only the exact `inArray()` shape is expanded
+(also `` sql`${t.code} in ${[a, b]}` ``); in other `sql` templates write
+`` sql`(${t.code} = ${a} or ${t.code} = ${b})` `` yourself for typed binds.
 
 ### Identifier quoting
 

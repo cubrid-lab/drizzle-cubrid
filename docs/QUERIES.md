@@ -488,15 +488,19 @@ to its own length, so it never matches by truncation
 ([#237](https://github.com/cubrid-lab/drizzle-cubrid/issues/237)).
 
 `sql.placeholder()` values are not cast (their value is not known when the SQL
-is built). An `inArray()` or `notInArray()` list of two or more elements, one
-of them a placeholder, on a `char()` column is sent as
-`` (`code` = ? or `code` = ?) `` and `` (`code` <> ? and `code` <> ?) ``
-instead: the SQL definition of `IN` and `NOT IN`, nulls included, where each
-`= ?` compares padded. A value longer than the column matches nothing, under
-both bindings. `eq()` with a placeholder and a one-element list need nothing.
-In a `sql` template, write such a comparison the same way rather than
-`` sql`${t.code} in (${a}, ${b})` ``, which is sent as written
-([#239](https://github.com/cubrid-lab/drizzle-cubrid/issues/239)).
+is built). With typed binds (the default), an `inArray()` or `notInArray()`
+list of two or more elements, one of them a placeholder, on a `char()` column
+is sent as `` (`code` = ? or `code` = ?) `` and
+`` (`code` <> ? and `code` <> ?) `` instead, in `where` and in selected fields,
+where each `= ?` compares padded. On CUBRID 11.4 this gave the same rows and
+the same true/false/NULL values as `IN`/`NOT IN` in every case tested, NULL
+placeholder values and `not(...)` of the list included; a value longer than
+the column matches nothing. Under `binding: "literal"` the list is sent
+unchanged: literal lists compare padded already, and with literals CUBRID
+takes `code = NULL` inside `OR` as false rather than unknown. `eq()` with a
+placeholder and a one-element list need nothing. Only the exact `inArray()`
+shape is expanded; in other `sql` templates write the `=`/`or` form yourself
+for typed binds ([#239](https://github.com/cubrid-lab/drizzle-cubrid/issues/239)).
 
 Any other `VARCHAR` operand also compares with a `CHAR` column without space
 padding, under both bindings: `` eq(t.code, sql`concat(…)`) `` and

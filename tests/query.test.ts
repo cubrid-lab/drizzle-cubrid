@@ -226,6 +226,39 @@ describe('inArray() of placeholders on a CHAR column is expanded to = and <> (#2
 		).toContain(`where (${c} = ? or ${c} = ?)`);
 	});
 
+	it('expands a selected inArray(), also from a single table', () => {
+		expect(
+			db
+				.select({ m: inArray(codes.code, [a, b]) })
+				.from(codes)
+				.toSQL().sql,
+		).toBe(`select (${c} = ? or ${c} = ?) from \`codes\``);
+		expect(
+			db
+				.select({ m: notInArray(codes.code, [a, b]), n: sql`${inArray(codes.code, [a, b])}`.as('n') })
+				.from(codes)
+				.toSQL().sql,
+		).toBe(`select (${c} <> ? and ${c} <> ?), (${c} = ? or ${c} = ?) as \`n\` from \`codes\``);
+	});
+
+	it('expands only the exact inArray() shape', () => {
+		expect(where(sql`${codes.code} in ${[a, b]}`).sql).toBe(`${prefix}(${c} = ? or ${c} = ?)`);
+		expect(where(sql`${codes.name} || ${codes.code} in ${[a, b]}`).sql).toBe(
+			`${prefix}\`codes\`.\`name\` || ${c} in (?, ?)`,
+		);
+	});
+
+	it('leaves placeholder lists as they are under literal binding', () => {
+		const literal = drizzle(new MockClient(), { binding: 'literal' });
+		expect(
+			literal
+				.select({ id: codes.id, m: inArray(codes.code, [a, b]) })
+				.from(codes)
+				.where(notInArray(codes.code, [a, b]))
+				.toSQL().sql,
+		).toBe(`select \`id\`, \`code\` in (?, ?) from \`codes\` where ${c} not in (?, ?)`);
+	});
+
 	it('refuses a drizzle-orm whose MySqlDialect has no casing cache', () => {
 		const dialect = new CubridDialect();
 		Object.defineProperty(dialect, 'casing', { value: undefined });

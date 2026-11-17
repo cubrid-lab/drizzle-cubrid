@@ -29,6 +29,7 @@ import {
 	lt,
 	max,
 	ne,
+	not,
 	notInArray,
 	relations,
 	sql,
@@ -3274,7 +3275,9 @@ describe('CHAR columns compared with sql.placeholder() values (#239)', () => {
 	// A placeholder has no column, so #237's cast of bound values did not reach
 	// it: with typed binds, `IN (?, ?)` of placeholders on a CHAR column matched
 	// no row and `NOT IN` every row. Such a list is now sent as
-	// `(c = ? or c = ?)` / `(c <> ? and c <> ?)`, which compare padded.
+	// `(c = ? or c = ?)` / `(c <> ? and c <> ?)` under typed binds, which compare
+	// padded. Literal binding never had the problem and is sent unchanged: with
+	// literals CUBRID takes `code = NULL` inside OR as false, not unknown.
 	const table = name('char_ph');
 	const legacy = cubridTable(table, {
 		id: int('id').primaryKey(),
@@ -3297,6 +3300,10 @@ describe('CHAR columns compared with sql.placeholder() values (#239)', () => {
 		['notInArray', (c) => notInArray(c, [a, b]), { a: 'ab', b: 'cd' }, [3]],
 		['notInArray, a value longer than n', (c) => notInArray(c, [a, b]), { a: 'abcdefghijk', b: 'ab' }, [2, 3]],
 		['notInArray, a null', (c) => notInArray(c, [a, b]), { a: 'ab', b: null }, []],
+		['inArray, two nulls', (c) => inArray(c, [a, b]), { a: null, b: null }, []],
+		// IN with a NULL is unknown, not false, where nothing matches: not() keeps it.
+		['not(inArray), a null', (c) => not(inArray(c, [a, b])), { a: 'zz', b: null }, []],
+		['not(notInArray), a null', (c) => not(notInArray(c, [a, b])), { a: 'ab', b: null }, [1]],
 		['inArray, a placeholder and a value', (c) => inArray(c, [a, 'cd']), { a: 'ab' }, [1, 2]],
 		['notInArray, a placeholder and a value', (c) => notInArray(c, [a, 'cd']), { a: 'ab' }, [3]],
 		['inArray, one placeholder', (c) => inArray(c, [a]), { a: 'ab' }, [1]],
@@ -3399,6 +3406,34 @@ describe('CHAR columns compared with sql.placeholder() values (#239)', () => {
 				]);
 			} finally {
 				await client.query(`UPDATE ${table} SET code = CASE id WHEN 1 THEN 'ab' ELSE 'cd' END WHERE id IN (1, 2)`);
+			}
+		});
+
+		it(`a selected inArray() or notInArray() of placeholders is true, false or NULL as IN is (${binding})`, async () => {
+			const legacyDb = drizzle(client, { binding });
+			const nativeDb = native.drizzle(client, { binding });
+			for (const [values, list] of [
+				[{ a: 'ab', b: 'cd' }, "'ab', 'cd'"],
+				[{ a: 'zz', b: null }, "'zz', NULL"],
+				[{ a: 'ab', b: null }, "'ab', NULL"],
+			] as const) {
+				const truth = await client.query<{ m: number | null; n: number | null }>(
+					`SELECT (code IN (${list})) m, (code NOT IN (${list})) n FROM ${table} ORDER BY id`,
+				);
+				const legacyRows = await legacyDb
+					.select({ m: inArray(legacy.code, [a, b]), n: notInArray(legacy.code, [a, b]) })
+					.from(legacy)
+					.orderBy(legacy.id)
+					.prepare()
+					.execute(values);
+				const nativeRows = await nativeDb
+					.select({ m: inArray(nat.code, [a, b]), n: notInArray(nat.code, [a, b]) })
+					.from(nat)
+					.orderBy(nat.id)
+					.prepare()
+					.execute(values);
+				expect([list, legacyRows]).toEqual([list, truth]);
+				expect([list, nativeRows]).toEqual([list, truth]);
 			}
 		});
 	}

@@ -13,6 +13,9 @@ import {
 	StringChunk,
 	sql as sqlTag,
 } from 'drizzle-orm/sql/sql';
+import type { Casing } from 'drizzle-orm/utils';
+import * as drizzleUtils from 'drizzle-orm/utils';
+import type { CubridBinding } from './session.js';
 
 type RelationalQueryArgs = Parameters<MySqlDialect['buildRelationalQuery']>[0];
 type SelectConfig = Parameters<MySqlDialect['buildSelectQuery']>[0];
@@ -133,7 +136,7 @@ function recordFields<T extends BuildRelationalQueryResult>(args: RelationalQuer
 }
 
 // charParamSql(), the encoder tracking in sqlToQuery() and
-// PlaceholderListsExpanded mirror src/native (columns/string.ts and
+// expandedPlaceholderList() mirror src/native (columns/string.ts and
 // internal.ts) rather than import them: the drizzle-cubrid and
 // drizzle-cubrid/native entries share no module (tsup.config.ts), native code
 // may not import this MySQL-based one (scripts/check-dialect-boundary.mjs),
@@ -169,48 +172,94 @@ function charParamSql(encoder: unknown, value: unknown): string {
 }
 
 /**
- * A statement whose `inArray()`/`notInArray()` lists of two or more elements,
- * one of them a `sql.placeholder()`, on a `char()` column render as
- * `(c = a or c = b …)` and `(c <> a and c <> b …)`: the SQL definition of
- * `IN` and `NOT IN`, nulls included. A placeholder has no column, so
- * charParamSql() cannot type it, and CUBRID 11.4 compares a CHAR column
+ * `(c = a or c = b …)` for an SQL object that is exactly `c in (a, b, …)`, as
+ * `inArray()` builds it, with two or more elements, one of them a
+ * `sql.placeholder()`, on a `char()` column; `(c <> a and c <> b …)` for
+ * `c not in (…)`; undefined for anything else. A placeholder has no column,
+ * so charParamSql() cannot type it, and CUBRID 11.4 compares a CHAR column
  * unpadded with an `IN` list none of whose elements is typed, matching no
- * row; each `= ?` compares padded (#239).
+ * row with typed binds; each `= ?` compares padded (#239). For typed binds
+ * only: there the expanded form gave the same rows as `IN`/`NOT IN` in every
+ * case tested on CUBRID 11.4, NULL values included, but with SQL literals
+ * CUBRID takes `code = NULL` inside `OR` as false, not unknown, so `not (…)`
+ * of it differs, and literal lists never had the problem.
  *
- * drizzle-orm/sql/sql.js renders through `this.buildQueryFromSourceParams()`,
- * recursively on the same `this`, and inArray() builds the chunks
- * `column, ' in ' | ' not in ', [elements]`, a placeholder element being the
- * `Placeholder` itself. Checked against drizzle-orm 0.44.1 and 0.45.4.
+ * drizzle-orm/sql/expressions/conditions.js: inArray() and notInArray() are
+ * `sql\`${column} in ${list}\``, the chunks exactly `'', column, ' in ' |
+ * ' not in ', [elements], ''`, a placeholder element being the `Placeholder`
+ * itself. Checked against drizzle-orm 0.44.1 and 0.45.4.
  */
+function expandedPlaceholderList(chunks: readonly SQLChunk[]): SQL | undefined {
+	if (chunks.length !== 5) return undefined;
+	const [head, column, keyword, list, tail] = chunks;
+	const text = (chunk: SQLChunk | undefined) => (is(chunk, StringChunk) ? chunk.value.join('') : undefined);
+	const negate = text(keyword) === ' not in ' ? true : text(keyword) === ' in ' ? false : undefined;
+	if (
+		negate === undefined ||
+		text(head) !== '' ||
+		text(tail) !== '' ||
+		charLength(column) === undefined ||
+		!Array.isArray(list) ||
+		list.length < 2 ||
+		!list.some((e) => is(e, Placeholder) || (is(e, Param) && is(e.value, Placeholder)))
+	) {
+		return undefined;
+	}
+	const terms = list.map((e) => (negate ? sqlTag`${column} <> ${e}` : sqlTag`${column} = ${e}`));
+	return sqlTag`(${sqlTag.join(terms, sqlTag.raw(negate ? ' and ' : ' or '))})`;
+}
+
+/**
+ * A statement rendered with expandedPlaceholderList() applied to each of its
+ * SQL objects: drizzle-orm/sql/sql.js renders through
+ * `this.buildQueryFromSourceParams()`, called recursively on the same `this`
+ * with the chunks of each nested SQL object. Checked against drizzle-orm
+ * 0.44.1 and 0.45.4.
+ */
+// drizzle-orm/utils.js: orderSelectedFields() is not in utils.d.ts; MySqlDialect's
+// buildSelectQuery() calls it on `fields` when `fieldsFlat` is not given, as
+// the select builder leaves it. Checked against drizzle-orm 0.44.1 and 0.45.4.
+const orderSelectedFields = (
+	drizzleUtils as unknown as {
+		orderSelectedFields: (fields: SelectConfig['fields']) => NonNullable<SelectConfig['fieldsFlat']>;
+	}
+).orderSelectedFields;
+
 class PlaceholderListsExpanded extends SQL {
 	override buildQueryFromSourceParams(chunks: SQLChunk[], config: BuildQueryConfig): Query {
-		let expanded: SQLChunk[] | undefined;
-		for (let i = 0; i < chunks.length; i++) {
-			const [column, keyword, list] = [chunks[i], chunks[i + 1], chunks[i + 2]];
-			const text = is(keyword, StringChunk) ? keyword.value.join('') : undefined;
-			const negate = text === ' not in ' ? true : text === ' in ' ? false : undefined;
-			if (
-				negate !== undefined &&
-				charLength(column) !== undefined &&
-				Array.isArray(list) &&
-				list.length > 1 &&
-				list.some((e) => is(e, Placeholder) || (is(e, Param) && is(e.value, Placeholder)))
-			) {
-				expanded ??= chunks.slice(0, i);
-				const terms = list.map((e) => (negate ? sqlTag`${column} <> ${e}` : sqlTag`${column} = ${e}`));
-				expanded.push(sqlTag`(${sqlTag.join(terms, sqlTag.raw(negate ? ' and ' : ' or '))})`);
-				i += 2;
-			} else {
-				expanded?.push(chunks[i] as SQLChunk);
-			}
-		}
-		return super.buildQueryFromSourceParams(expanded ?? chunks, config);
+		const expanded = expandedPlaceholderList(chunks);
+		return super.buildQueryFromSourceParams(expanded ? [expanded] : chunks, config);
 	}
+}
+
+/**
+ * A selected field with expandedPlaceholderList() applied. MySqlDialect's
+ * buildSelection() replaces the columns among the top-level chunks of a
+ * selected SQL with bare names when the select reads one table, so an
+ * `inArray()` field reaches sqlToQuery() without its column; it is expanded
+ * here, before that.
+ */
+function expandSelectedField<T>(field: T): T {
+	if (is(field, SQL)) return (expandedPlaceholderList(field.queryChunks) ?? field) as T;
+	if (is(field, SQL.Aliased) && !(field as { isSelectionField?: boolean }).isSelectionField) {
+		const expanded = expandedPlaceholderList(field.sql.queryChunks);
+		return (expanded ? new SQL.Aliased(expanded, field.fieldAlias) : field) as T;
+	}
+	return field;
 }
 
 /** Drizzle's MySQL dialect with the relational-query limits of CUBRID enforced. */
 export class CubridDialect extends MySqlDialect {
 	static override readonly [entityKind]: string = 'CubridDialect';
+
+	/** Whether placeholder lists are expanded: for typed binds only (#239). */
+	private readonly expandPlaceholderLists: boolean;
+
+	/** `binding` is the session's (`'prepared'` by default). */
+	constructor(config: { casing?: Casing; binding?: CubridBinding } = {}) {
+		super({ casing: config.casing });
+		this.expandPlaceholderLists = (config.binding ?? 'prepared') === 'prepared';
+	}
 
 	override buildRelationalQuery(args: RelationalQueryArgs): ReturnType<MySqlDialect['buildRelationalQuery']> {
 		assertNoRelations(args.queryConfig);
@@ -226,7 +275,12 @@ export class CubridDialect extends MySqlDialect {
 
 	override buildSelectQuery(config: SelectConfig): ReturnType<MySqlDialect['buildSelectQuery']> {
 		assertSelectSupported(config);
-		return super.buildSelectQuery(config);
+		if (!this.expandPlaceholderLists) return super.buildSelectQuery(config);
+		const fieldsFlat = (config.fieldsFlat ?? orderSelectedFields(config.fields)).map((entry) => ({
+			...entry,
+			field: expandSelectedField(entry.field),
+		}));
+		return super.buildSelectQuery({ ...config, fieldsFlat });
 	}
 
 	override buildSetOperationQuery(args: SetOperationArgs): ReturnType<MySqlDialect['buildSetOperationQuery']> {
@@ -268,7 +322,7 @@ export class CubridDialect extends MySqlDialect {
 			);
 		}
 		let encoder: unknown;
-		const query = new PlaceholderListsExpanded([sql]).toQuery({
+		const query = (this.expandPlaceholderLists ? new PlaceholderListsExpanded([sql]) : sql).toQuery({
 			casing,
 			escapeName: this.escapeName,
 			escapeParam: (_num, value) => {

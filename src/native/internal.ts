@@ -105,24 +105,30 @@ export function escapeParamWithEncoder(
 
 // drizzle-orm/sql/sql.js: `SQL#toQuery()` renders through
 // `this.buildQueryFromSourceParams(chunks, config)`, which calls itself on the
-// same `this` for every nested SQL, array, subquery and SQLWrapper, so an
-// override on the outermost SQL sees every chunk list of the statement.
-// drizzle-orm/sql/expressions/conditions.js: `inArray(column, list)` and
-// `notInArray()` are `sql\`${column} in ${list}\`` and `... not in ...`, the
-// chunks `column, ' in ' | ' not in ', [elements]`, each element a `Param`
-// or, for `sql.placeholder()`, the `Placeholder` itself. Checked against
-// drizzle-orm 0.44.1 and 0.45.4.
+// same `this` with the chunks of every nested SQL, array, subquery and
+// SQLWrapper, so an override on the outermost SQL sees the chunks of each
+// SQL object of the statement. drizzle-orm/sql/expressions/conditions.js:
+// `inArray(column, list)` and `notInArray()` are `sql\`${column} in ${list}\``
+// and `... not in ...`, whose chunks are exactly `'', column, ' in ' |
+// ' not in ', [elements], ''`, each element a `Param` or, for
+// `sql.placeholder()`, the `Placeholder` itself. Checked against drizzle-orm
+// 0.44.1 and 0.45.4.
 /**
- * `statement`, rendering each `column in (a, b, …)` list of two or more
- * elements, one of them a `sql.placeholder()`, on a column for which
- * `expand(column)` is true as `(column = a or column = b …)`, and each
- * `column not in (…)` as `(column <> a and column <> b …)`.
+ * `statement`, rendering each SQL object that is exactly `column in (a, b, …)`
+ * (as `inArray()` builds it) with two or more elements, one of them a
+ * `sql.placeholder()`, on a column for which `expand(column)` is true as
+ * `(column = a or column = b …)`, and each `column not in (…)` as
+ * `(column <> a and column <> b …)`.
  *
- * Both are the SQL definition of `IN` and `NOT IN`, nulls included. CUBRID
- * 11.4 types the host variables of an `IN` list as VARCHAR when none of its
- * elements is typed, and compares a CHAR column with them unpadded, so such
- * a list matched no row; each `= ?` compares padded (#239). src/dialect.ts
- * has a copy for the 0.x API, as for `escapeParamWithEncoder()`; change both.
+ * CUBRID 11.4 types the host variables of an `IN` list as VARCHAR when none of
+ * its elements is typed, and compares a CHAR column with them unpadded, so
+ * such a list matched no row with typed binds; each `= ?` compares padded
+ * (#239). Use it for typed binds only: with typed binds the expanded form
+ * gave the same rows as `IN`/`NOT IN` in every case tested on CUBRID 11.4,
+ * NULL values included, but with SQL literals CUBRID takes `code = NULL`
+ * inside `OR` as false, not unknown, so `not (…)` of it differs, and literal
+ * lists never had the problem. src/dialect.ts has a copy for the 0.x API, as
+ * for `escapeParamWithEncoder()`; change both.
  */
 export function expandPlaceholderLists(statement: SQL, expand: (column: Column) => boolean): SQL {
 	return new PlaceholderListsExpanded([statement], expand);
@@ -137,27 +143,28 @@ class PlaceholderListsExpanded extends SQL {
 	}
 
 	override buildQueryFromSourceParams(chunks: SQLChunk[], config: BuildQueryConfig): Query {
-		let expanded: SQLChunk[] | undefined;
-		for (let i = 0; i < chunks.length; i++) {
-			const [column, keyword, list] = [chunks[i], chunks[i + 1], chunks[i + 2]];
-			const text = is(keyword, StringChunk) ? keyword.value.join('') : undefined;
-			const negate = text === ' not in ' ? true : text === ' in ' ? false : undefined;
-			if (
-				negate !== undefined &&
-				is(column, Column) &&
-				Array.isArray(list) &&
-				list.length > 1 &&
-				list.some((e) => is(e, Placeholder) || (is(e, Param) && is(e.value, Placeholder))) &&
-				this.expand(column)
-			) {
-				expanded ??= chunks.slice(0, i);
-				const terms = list.map((e) => (negate ? sql`${column} <> ${e}` : sql`${column} = ${e}`));
-				expanded.push(sql`(${sql.join(terms, sql.raw(negate ? ' and ' : ' or '))})`);
-				i += 2;
-			} else {
-				expanded?.push(chunks[i] as SQLChunk);
-			}
+		const expanded = this.expanded(chunks);
+		return super.buildQueryFromSourceParams(expanded ? [expanded] : chunks, config);
+	}
+
+	private expanded(chunks: SQLChunk[]): SQL | undefined {
+		if (chunks.length !== 5) return undefined;
+		const [head, column, keyword, list, tail] = chunks;
+		const text = (chunk: SQLChunk | undefined) => (is(chunk, StringChunk) ? chunk.value.join('') : undefined);
+		const negate = text(keyword) === ' not in ' ? true : text(keyword) === ' in ' ? false : undefined;
+		if (
+			negate === undefined ||
+			text(head) !== '' ||
+			text(tail) !== '' ||
+			!is(column, Column) ||
+			!Array.isArray(list) ||
+			list.length < 2 ||
+			!list.some((e) => is(e, Placeholder) || (is(e, Param) && is(e.value, Placeholder))) ||
+			!this.expand(column)
+		) {
+			return undefined;
 		}
-		return super.buildQueryFromSourceParams(expanded ?? chunks, config);
+		const terms = list.map((e) => (negate ? sql`${column} <> ${e}` : sql`${column} = ${e}`));
+		return sql`(${sql.join(terms, sql.raw(negate ? ' and ' : ' or '))})`;
 	}
 }

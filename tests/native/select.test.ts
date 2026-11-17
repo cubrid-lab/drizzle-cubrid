@@ -368,6 +368,30 @@ describe('inArray() of placeholders on a CHAR column is expanded to = and <> (#2
 		expect(where(condition).sql).toBe(prefix + text);
 	});
 
+	it('expands a selected inArray() and only the exact inArray() shape', () => {
+		expect(
+			db
+				.select({ m: inArray(codes.code, [a, b]) })
+				.from(codes)
+				.toSQL().sql,
+		).toBe(`select (${c} = ? or ${c} = ?) from "codes"`);
+		expect(where(sql`${codes.code} in ${[a, b]}`).sql).toBe(`${prefix}(${c} = ? or ${c} = ?)`);
+		expect(where(sql`${codes.name} || ${codes.code} in ${[a, b]}`).sql).toBe(
+			`${prefix}"codes"."name" || ${c} in (?, ?)`,
+		);
+	});
+
+	it('leaves placeholder lists as they are under literal binding', () => {
+		const literal = drizzle(fakeClient(), { binding: 'literal' });
+		expect(
+			literal
+				.select({ m: inArray(codes.code, [a, b]) })
+				.from(codes)
+				.where(notInArray(codes.code, [a, b]))
+				.toSQL().sql,
+		).toBe(`select ${c} in (?, ?) from "codes" where ${c} not in (?, ?)`);
+	});
+
 	it('expands in subqueries, updates and deletes, and keeps the placeholders', () => {
 		const inner = db
 			.select({ id: codes.id })

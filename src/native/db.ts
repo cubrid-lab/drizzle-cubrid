@@ -63,7 +63,7 @@ export class CubridDatabase<
 > {
 	static readonly [entityKind]: string = 'CubridNativeDatabase';
 
-	private readonly dialect = new CubridDialect();
+	private readonly dialect: CubridDialect;
 
 	/** Relational queries (`db.query.users.findMany({ with: … })`); needs `drizzle(client, { schema })`. */
 	readonly query: CubridRelationalQueries<TFullSchema, TSchema>;
@@ -72,6 +72,7 @@ export class CubridDatabase<
 		protected readonly session: CubridSession,
 		protected readonly schema?: RelationalSchemaConfig<TSchema>,
 	) {
+		this.dialect = new CubridDialect({ binding: session.binding });
 		const query: Record<string, CubridRelationalQueryBuilder<TSchema, TableRelationalConfig>> = {};
 		if (schema) {
 			for (const [key, tableConfig] of Object.entries(schema.schema)) {
