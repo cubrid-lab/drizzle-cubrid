@@ -8,6 +8,7 @@
 // CUBRID_TEST_EXPECT_VERSION, when set, must prefix the server version.
 import { type CubridClient, type CubridPool, createClient, createPool } from 'cubrid-client';
 import {
+	aliasedTable,
 	and,
 	asc,
 	count,
@@ -67,6 +68,13 @@ const run = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toStrin
 const name = (base: string) => `it_${base}_${run}`;
 const created: string[] = [];
 
+// A new CUBRID 11.4 database adds a second data volume once about 50 MB of the
+// first is used, and the statement that crosses that point stalls for about
+// 110 s. The global beforeAll fills and drops a scratch table so that happens
+// there, on a fresh container; every hook or test that creates tables still
+// gets this timeout in case the server grows a volume again.
+const DDL_TIMEOUT = 300_000;
+
 let client: CubridClient;
 let pool: CubridPool;
 
@@ -92,7 +100,19 @@ beforeAll(async () => {
 	if (expected && !version.startsWith(expected)) {
 		throw new Error(`CUBRID server version ${version} does not start with CUBRID_TEST_EXPECT_VERSION=${expected}`);
 	}
-});
+	// See DDL_TIMEOUT: about 80 MB of incompressible rows, then the table is dropped
+	// and its space reused. On a database that already has room this takes seconds.
+	const fill = name('volume_fill');
+	await client.query(`CREATE TABLE ${fill} (s VARCHAR(1100))`);
+	const row1k = `CONCAT(${Array.from({ length: 32 }, () => 'MD5(RANDOM())').join(', ')})`;
+	try {
+		for (let batch = 0; batch < 16; batch++) {
+			await client.query(`INSERT INTO ${fill} SELECT ${row1k} FROM db_root CONNECT BY LEVEL <= 5000`);
+		}
+	} finally {
+		await client.query(`DROP TABLE ${fill}`);
+	}
+}, DDL_TIMEOUT);
 
 // Each DROP TABLE took about 3 s on a fresh 11.4 container, so dropping every
 // table of a run can exceed the default 60 s hook timeout.
@@ -108,7 +128,7 @@ describe('transactions run on a driver-owned connection (#185)', () => {
 	const table = name('tx');
 	const t = cubridTable(table, { id: int('id').primaryKey() });
 
-	beforeAll(() => createTable(table, 'id INT PRIMARY KEY'));
+	beforeAll(() => createTable(table, 'id INT PRIMARY KEY'), DDL_TIMEOUT);
 
 	for (const [label, source] of [
 		['client', () => client],
@@ -178,7 +198,7 @@ describe('transaction semantics', () => {
 	const table = name('txsem');
 	const t = cubridTable(table, { id: int('id').primaryKey() });
 
-	beforeAll(() => createTable(table, 'id INT PRIMARY KEY'));
+	beforeAll(() => createTable(table, 'id INT PRIMARY KEY'), DDL_TIMEOUT);
 
 	it('rolls back to a savepoint and keeps the outer work', async () => {
 		await client.query(`DELETE FROM ${table}`);
@@ -237,7 +257,7 @@ describe('joined selects keep columns whose labels repeat (#183)', () => {
 		await createTable(postsName, 'id INT PRIMARY KEY, user_id INT, name VARCHAR(40)');
 		await client.query(`INSERT INTO ${usersName} VALUES (1, '앨리스'), (2, 'bob')`);
 		await client.query(`INSERT INTO ${postsName} VALUES (10, 1, '첫 글')`);
-	});
+	}, DDL_TIMEOUT);
 
 	it('maps a left join field by field', async () => {
 		const db = drizzle(client);
@@ -301,7 +321,7 @@ describe('relational queries without relations work; with is refused (#200)', ()
 		await createTable(postsName, 'id INT PRIMARY KEY, user_id INT');
 		await client.query(`INSERT INTO ${usersName} VALUES (1, '앨리스'), (2, 'bob')`);
 		await client.query(`INSERT INTO ${postsName} VALUES (10, 1)`);
-	});
+	}, DDL_TIMEOUT);
 
 	for (const mode of ['default', 'planetscale'] as const) {
 		it(`runs findMany and findFirst and refuses with in ${mode} mode`, async () => {
@@ -334,7 +354,7 @@ describe('writes report affected rows and generated keys (#182)', () => {
 	beforeAll(async () => {
 		await createTable(autoName, 'id INT AUTO_INCREMENT PRIMARY KEY, v VARCHAR(10) UNIQUE');
 		await createTable(wideName, 'id BIGINT AUTO_INCREMENT(9007199254740993, 1) PRIMARY KEY, v VARCHAR(10)');
-	});
+	}, DDL_TIMEOUT);
 
 	it('returns the key of a one-row insert and the stored row has it', async () => {
 		const db = drizzle(client);
@@ -408,8 +428,9 @@ describe('collection columns round-trip (#184)', () => {
 		q: cubridSequence('q', { element: varchar('e', { length: 20 }) }),
 	});
 
-	beforeAll(() =>
-		createTable(table, 'id INT PRIMARY KEY, s SET(VARCHAR(20)), m MULTISET(INTEGER), q SEQUENCE(VARCHAR(20))'),
+	beforeAll(
+		() => createTable(table, 'id INT PRIMARY KEY, s SET(VARCHAR(20)), m MULTISET(INTEGER), q SEQUENCE(VARCHAR(20))'),
+		DDL_TIMEOUT,
 	);
 
 	// SET and MULTISET define no order, so their elements are compared sorted.
@@ -458,7 +479,7 @@ describe('typed binding and literal binding store the same values (#191)', () =>
 		note: varchar('note', { length: 60 }),
 	});
 
-	beforeAll(() => createTable(table, 'id INT PRIMARY KEY, bal INT, big BIGINT, note VARCHAR(60)'));
+	beforeAll(() => createTable(table, 'id INT PRIMARY KEY, bal INT, big BIGINT, note VARCHAR(60)'), DDL_TIMEOUT);
 
 	for (const binding of ['prepared', 'literal'] as const) {
 		it(`keeps WHERE predicates and values intact with binding '${binding}'`, async () => {
@@ -503,11 +524,13 @@ describe('collection element types round-trip under both bindings (#191, #184)',
 	const instant = new Date(Date.UTC(2024, 1, 3, 4, 5, 6, 789));
 	const long = 'x'.repeat(150);
 
-	beforeAll(() =>
-		createTable(
-			table,
-			'id INT PRIMARY KEY, dt SEQUENCE(DATETIME), dbl SEQUENCE(DOUBLE), flag SEQUENCE(SMALLINT), big SEQUENCE(BIGINT), wide SET(VARCHAR(500))',
-		),
+	beforeAll(
+		() =>
+			createTable(
+				table,
+				'id INT PRIMARY KEY, dt SEQUENCE(DATETIME), dbl SEQUENCE(DOUBLE), flag SEQUENCE(SMALLINT), big SEQUENCE(BIGINT), wide SET(VARCHAR(500))',
+			),
+		DDL_TIMEOUT,
 	);
 
 	for (const [id, binding] of [
@@ -553,11 +576,13 @@ describe('CHAR, decimal and enum elements under both bindings (#191)', () => {
 		en: cubridSet('en', { element: mysqlEnum('e', Shade) }),
 	});
 
-	beforeAll(() =>
-		createTable(
-			table,
-			'id INT PRIMARY KEY, ch SET(CHAR(3)), dn SEQUENCE(DECIMAL(8,1)), db SEQUENCE(DECIMAL(20)), en SET(VARCHAR(10))',
-		),
+	beforeAll(
+		() =>
+			createTable(
+				table,
+				'id INT PRIMARY KEY, ch SET(CHAR(3)), dn SEQUENCE(DECIMAL(8,1)), db SEQUENCE(DECIMAL(20)), en SET(VARCHAR(10))',
+			),
+		DDL_TIMEOUT,
 	);
 
 	for (const [id, binding] of [
@@ -643,7 +668,7 @@ describe('DATETIME, TIMESTAMP, DATE and TIME columns round-trip (#207)', () => {
 		ats: null,
 	};
 
-	beforeAll(() => createTable(table, columns));
+	beforeAll(() => createTable(table, columns), DDL_TIMEOUT);
 
 	for (const [base, binding] of [
 		[10, 'prepared'],
@@ -738,7 +763,7 @@ describe('the forms suggested in place of refused SQL run on CUBRID (#189)', () 
 	beforeAll(async () => {
 		await createTable(table, 'id INT PRIMARY KEY, v VARCHAR(20)');
 		await client.query(`INSERT INTO ${table} VALUES (1, 'a'), (2, 'B'), (3, 'c'), (4, 'D')`);
-	});
+	}, DDL_TIMEOUT);
 
 	for (const binding of ['prepared', 'literal'] as const) {
 		it(`limit() with offset(), for('update'), delete limit() and like() on lower() (${binding})`, async () => {
@@ -774,7 +799,7 @@ describe('MONETARY columns read back as the declared string (#217)', () => {
 	const table = name('money');
 	const t = cubridTable(table, { id: int('id').primaryKey(), price: monetary('price') });
 
-	beforeAll(() => createTable(table, 'id INT PRIMARY KEY, price MONETARY'));
+	beforeAll(() => createTable(table, 'id INT PRIMARY KEY, price MONETARY'), DDL_TIMEOUT);
 
 	for (const [id, binding] of [
 		[1, 'prepared'],
@@ -901,7 +926,7 @@ describe('drizzle-cubrid/native column types round-trip through their codecs (#1
 	beforeAll(async () => {
 		await client.query(createTableSql(t));
 		created.push(`"${table}"`);
-	});
+	}, DDL_TIMEOUT);
 
 	it('creates the table from the declared CUBRID types', async () => {
 		const described = await client.getColumns(table);
@@ -950,36 +975,40 @@ describe('drizzle-cubrid/native column types round-trip through their codecs (#1
 		expect(() => t.active.mapFromDriverValue(raw?.[1])).toThrow(/0 or 1/);
 	});
 
-	it('writes NUMERIC numbers below 1e-6 and from 1e21 as plain decimals that round-trip', async () => {
-		const numbers = name('native_num');
-		const n = native.cubridTable(numbers, {
-			id: native.integer().primaryKey(),
-			exact: native.numeric({ precision: 38, scale: 10 }),
-			approx: native.numeric({ precision: 38, scale: 10, mode: 'number' }),
-		});
-		await client.query(createTableSql(n));
-		created.push(`"${numbers}"`);
-		const insert = `INSERT INTO "${numbers}" ("id", "exact", "approx") VALUES (?, ?, ?)`;
-		await client.executePrepared(insert, [
-			1,
-			n.exact.mapToDriverValue(1e-7),
-			n.approx.mapToDriverValue(1e21),
-		] as never[]);
-		await client.executePrepared(insert, [
-			2,
-			n.exact.mapToDriverValue(1e21),
-			n.approx.mapToDriverValue(1e-7),
-		] as never[]);
-		const rows = await client.query<unknown[]>(`SELECT "exact", "approx" FROM "${numbers}" ORDER BY "id"`, [], {
-			rowMode: 'array',
-		});
-		expect(
-			rows.map(([exact, approx]) => [n.exact.mapFromDriverValue(exact), n.approx.mapFromDriverValue(approx)]),
-		).toEqual([
-			['0.0000001000', 1e21],
-			['1000000000000000000000.0000000000', 1e-7],
-		]);
-	});
+	it(
+		'writes NUMERIC numbers below 1e-6 and from 1e21 as plain decimals that round-trip',
+		async () => {
+			const numbers = name('native_num');
+			const n = native.cubridTable(numbers, {
+				id: native.integer().primaryKey(),
+				exact: native.numeric({ precision: 38, scale: 10 }),
+				approx: native.numeric({ precision: 38, scale: 10, mode: 'number' }),
+			});
+			await client.query(createTableSql(n));
+			created.push(`"${numbers}"`);
+			const insert = `INSERT INTO "${numbers}" ("id", "exact", "approx") VALUES (?, ?, ?)`;
+			await client.executePrepared(insert, [
+				1,
+				n.exact.mapToDriverValue(1e-7),
+				n.approx.mapToDriverValue(1e21),
+			] as never[]);
+			await client.executePrepared(insert, [
+				2,
+				n.exact.mapToDriverValue(1e21),
+				n.approx.mapToDriverValue(1e-7),
+			] as never[]);
+			const rows = await client.query<unknown[]>(`SELECT "exact", "approx" FROM "${numbers}" ORDER BY "id"`, [], {
+				rowMode: 'array',
+			});
+			expect(
+				rows.map(([exact, approx]) => [n.exact.mapFromDriverValue(exact), n.approx.mapFromDriverValue(approx)]),
+			).toEqual([
+				['0.0000001000', 1e21],
+				['1000000000000000000000.0000000000', 1e-7],
+			]);
+		},
+		DDL_TIMEOUT,
+	);
 
 	it('refuses a fractional INTEGER and out-of-range dates before anything is sent', async () => {
 		const before = await client.query<{ n: number }>(`SELECT COUNT(*) AS n FROM "${table}"`);
@@ -1019,21 +1048,25 @@ describe('drizzle-cubrid/native column types round-trip through their codecs (#1
 		).rejects.toThrow();
 	});
 
-	it('accepts composite primary keys and unique constraints', async () => {
-		const pairs = name('native_pk');
-		const p = native.cubridTable(
-			pairs,
-			{ a: native.integer().notNull(), b: native.varchar({ length: 5 }).notNull(), c: native.integer().unique() },
-			(self) => [native.primaryKey({ columns: [self.a, self.b] }), native.unique().on(self.b, self.c)],
-		);
-		await client.query(createTableSql(p));
-		created.push(`"${pairs}"`);
-		await client.executePrepared(`INSERT INTO "${pairs}" ("a", "b", "c") VALUES (?, ?, ?)`, [1, 'x', 1]);
-		await expect(
-			client.executePrepared(`INSERT INTO "${pairs}" ("a", "b", "c") VALUES (?, ?, ?)`, [1, 'x', 2]),
-		).rejects.toThrow();
-		expect(await client.getPrimaryKey(pairs)).toMatchObject({ columns: ['a', 'b'] });
-	});
+	it(
+		'accepts composite primary keys and unique constraints',
+		async () => {
+			const pairs = name('native_pk');
+			const p = native.cubridTable(
+				pairs,
+				{ a: native.integer().notNull(), b: native.varchar({ length: 5 }).notNull(), c: native.integer().unique() },
+				(self) => [native.primaryKey({ columns: [self.a, self.b] }), native.unique().on(self.b, self.c)],
+			);
+			await client.query(createTableSql(p));
+			created.push(`"${pairs}"`);
+			await client.executePrepared(`INSERT INTO "${pairs}" ("a", "b", "c") VALUES (?, ?, ?)`, [1, 'x', 1]);
+			await expect(
+				client.executePrepared(`INSERT INTO "${pairs}" ("a", "b", "c") VALUES (?, ?, ?)`, [1, 'x', 2]),
+			).rejects.toThrow();
+			expect(await client.getPrimaryKey(pairs)).toMatchObject({ columns: ['a', 'b'] });
+		},
+		DDL_TIMEOUT,
+	);
 });
 
 describe('drizzle-cubrid/native select and session (#158, #160)', () => {
@@ -1103,7 +1136,7 @@ describe('drizzle-cubrid/native select and session (#158, #160)', () => {
 			[7],
 		);
 		db = native.drizzle(client);
-	});
+	}, DDL_TIMEOUT);
 
 	it('maps joins whose tables share column names by position, with NULLs for unmatched left joins', async () => {
 		const rows = await db
@@ -1359,6 +1392,11 @@ describe('drizzle-cubrid/native set operations and scalar subqueries (#158)', ()
 		v: native.integer(),
 		s: native.varchar({ length: 10 }),
 		at: native.datetime(),
+		day: native.date(),
+	});
+	const employees = native.cubridTable(name('nsetemp'), {
+		id: native.integer().primaryKey(),
+		boss: native.integer(),
 	});
 	const right = native.cubridTable(name('nsetr'), {
 		id: native.integer().primaryKey(),
@@ -1375,13 +1413,20 @@ describe('drizzle-cubrid/native set operations and scalar subqueries (#158)', ()
 
 	beforeAll(async () => {
 		db = native.drizzle(client);
-		for (const table of [left, right]) {
+		for (const table of [left, right, employees]) {
 			await client.query(createTableSql(table));
 			created.push(`"${native.getTableConfig(table).name}"`);
 		}
+		// 1 is the boss of 2 and 3, 2 of 4.
+		await db.insert(employees).values([
+			{ id: 1, boss: null },
+			{ id: 2, boss: 1 },
+			{ id: 3, boss: 1 },
+			{ id: 4, boss: 2 },
+		]);
 		// left.v holds 1, 1, 2, 3, 3; right.v holds 1, 3, 4, 3.
 		await db.insert(left).values([
-			{ id: 1, v: 1, s: 'a', at },
+			{ id: 1, v: 1, s: 'a', at, day: at },
 			{ id: 2, v: 1, s: 'b' },
 			{ id: 3, v: 2, s: 'c' },
 			{ id: 4, v: 3, s: 'd' },
@@ -1393,7 +1438,7 @@ describe('drizzle-cubrid/native set operations and scalar subqueries (#158)', ()
 			{ id: 3, v: 4, s: 'z' },
 			{ id: 4, v: 3, s: 'w' },
 		]);
-	});
+	}, DDL_TIMEOUT);
 
 	it('runs every set operator with its set or bag semantics', async () => {
 		expect(values(await lv().union(rv()).orderBy(left.v))).toEqual([1, 2, 3, 4]);
@@ -1482,6 +1527,49 @@ describe('drizzle-cubrid/native set operations and scalar subqueries (#158)', ()
 		);
 	});
 
+	it('refuses DATE with DATETIME before sending; the server would return the DATETIME the DATE codec truncates', async () => {
+		const logged: string[] = [];
+		const watched = native.drizzle(client, { logger: { logQuery: (query) => logged.push(query) } });
+		const day = () => watched.select({ x: left.day }).from(left).where(eq(left.id, 1));
+		const instant = () => watched.select({ x: left.at }).from(left).where(eq(left.id, 1));
+		expect(() => day().unionAll(instant())).toThrow(/field x is DATE in the first select but DATETIME in another/);
+		expect(() => instant().union(day())).toThrow(/DATETIME in the first select but DATE/);
+		expect(logged).toEqual([]);
+		// The server's result column is DATETIME: the full instant, which a DATE codec would cut to midnight.
+		const l = native.getTableConfig(left).name;
+		const [raw] = await client.query<unknown[]>(
+			`select "day" from "${l}" where "id" = 1 union all select "at" from "${l}" where "id" = 1 order by 1 desc`,
+			[],
+			{ rowMode: 'array' },
+		);
+		expect(raw).toEqual([at]);
+		// Cast to the first select's type and mapped with its column, it runs with DATE values throughout.
+		const rows = await day().unionAll(
+			watched
+				.select({ x: sql`cast(${left.at} as date)`.mapWith(left.day) })
+				.from(left)
+				.where(eq(left.id, 1)),
+		);
+		expect(rows).toEqual([{ x: new Date(Date.UTC(2024, 1, 29)) }, { x: new Date(Date.UTC(2024, 1, 29)) }]);
+	});
+
+	it('refuses an orderBy() expression on a set operation, which the server rejects', async () => {
+		expect(() =>
+			db
+				.select({ v: left.v, s: left.s })
+				.from(left)
+				.union(db.select({ v: right.v, s: right.s }).from(right))
+				.orderBy(sql`length(${left.s})`)
+				.toSQL(),
+		).toThrow(/orderBy\(\) of a set operation takes only fields of its first select/);
+		const l = native.getTableConfig(left).name;
+		const r = native.getTableConfig(right).name;
+		const error = await client
+			.query(`(select v, s from "${l}") union (select v, s from "${r}") order by length(2)`)
+			.catch((e: unknown) => e);
+		expect(codeOf(error)).toBe(-494);
+	});
+
 	it('the forms refused before sending fail on the server', async () => {
 		const l = native.getTableConfig(left).name;
 		const r = native.getTableConfig(right).name;
@@ -1509,9 +1597,11 @@ describe('drizzle-cubrid/native set operations and scalar subqueries (#158)', ()
 			.orderBy(right.s)
 			.limit(1)
 			.as('first');
+		// Over the outer query's own table even without correlation, so it reads an alias of it.
+		const every = aliasedTable(left, 'every');
 		const latest = db
-			.select({ at: max(left.at).mapWith(left.at).as('at') })
-			.from(left)
+			.select({ at: max(every.at).mapWith(every.at).as('at') })
+			.from(every)
 			.as('latest');
 		const rows = await db.select({ id: left.id, n, first, latest }).from(left).orderBy(left.id);
 		expect(rows).toEqual([
@@ -1520,6 +1610,45 @@ describe('drizzle-cubrid/native set operations and scalar subqueries (#158)', ()
 			{ id: 3, n: 0, first: null, latest: at },
 			{ id: 4, n: 2, first: 'w', latest: at },
 			{ id: 5, n: 2, first: 'w', latest: at },
+		]);
+	});
+
+	it('correlates a subquery over the same table through aliasedTable(), and refuses the shadowed form', async () => {
+		const shadowed = db
+			.select({ c: count().as('c') })
+			.from(employees)
+			.where(eq(employees.boss, employees.id))
+			.as('reports');
+		expect(() => db.select({ id: employees.id, reports: shadowed }).from(employees).toSQL()).toThrow(
+			/reads .*, which the outer query reads too/,
+		);
+		const staff = aliasedTable(employees, 'staff');
+		const reports = db
+			.select({ c: count().as('c') })
+			.from(staff)
+			.where(eq(staff.boss, employees.id))
+			.as('reports');
+		const rows = await db
+			.select({ id: employees.id, reports })
+			.from(employees)
+			.where(({ reports }) => gt(reports, 0))
+			.orderBy(({ reports }) => desc(reports));
+		expect(rows).toEqual([
+			{ id: 1, reports: 2 },
+			{ id: 2, reports: 1 },
+		]);
+		const all = await db.select({ id: employees.id, reports }).from(employees).orderBy(employees.id);
+		expect(all.map((row) => row.reports)).toEqual([2, 1, 0, 0]);
+		// An aliased table in a join.
+		const bosses = await db
+			.select({ id: employees.id, boss: staff.id })
+			.from(employees)
+			.innerJoin(staff, eq(employees.boss, staff.id))
+			.orderBy(employees.id);
+		expect(bosses).toEqual([
+			{ id: 2, boss: 1 },
+			{ id: 3, boss: 1 },
+			{ id: 4, boss: 2 },
 		]);
 	});
 
@@ -1558,10 +1687,6 @@ describe('drizzle-cubrid/native set operations and scalar subqueries (#158)', ()
 });
 
 describe('drizzle-cubrid/native insert, update and delete (#159)', () => {
-	// These tests create tables. On a new CUBRID database the server adds a
-	// volume once the first one fills, which stalled a CREATE TABLE for about
-	// 100 s in a fresh 11.4 container; the default 30 s timeout is too short then.
-	const DDL_TIMEOUT = 180_000;
 	const big = 9007199254740993n; // 2^53 + 1
 	let nextDoc = 0;
 	const people = native.cubridTable(name('npeople'), {
@@ -1609,7 +1734,7 @@ describe('drizzle-cubrid/native insert, update and delete (#159)', () => {
 			created.push(quoted(table));
 		}
 		db = native.drizzle(client);
-	});
+	}, DDL_TIMEOUT);
 
 	it('inserts one and several rows, with NULL and DEFAULT, and reads them back', async () => {
 		expect(await db.insert(people).values({ name: 'Ann', score: null, active: true, at })).toEqual({
@@ -1960,9 +2085,6 @@ describe('drizzle-cubrid/native insert, update and delete (#159)', () => {
 });
 
 describe('drizzle-cubrid/native transactions (#161)', () => {
-	// Creates tables; see the DDL_TIMEOUT note above (a fresh database can
-	// stall CREATE TABLE for about 100 s while it adds a volume).
-	const DDL_TIMEOUT = 180_000;
 	const items = native.cubridTable(name('ntx'), { id: native.integer().primaryKey() });
 	const events = native.cubridTable(name('ntxev'), {
 		id: native.integer().primaryKey().autoIncrement(),

@@ -46,3 +46,20 @@ export function getSqlDecoder(query: SQL): DriverValueDecoder<unknown, any> | un
 		? (decoder as DriverValueDecoder<unknown, unknown>)
 		: undefined;
 }
+
+// drizzle-orm/table.js and alias.js: `Table.Symbol.IsAlias` and
+// `Table.Symbol.OriginalName` are `Symbol.for('drizzle:IsAlias')` and
+// `Symbol.for('drizzle:OriginalName')`, `@internal` and not in table.d.ts.
+// Drizzle's public `aliasedTable(table, alias)` returns a proxy whose IsAlias
+// is true, whose name is the alias and whose OriginalName stays the table's
+// name; Drizzle's own dialects read both to write `"table" "alias"` in FROM.
+// Checked against drizzle-orm 0.44.1 and 0.45.4.
+const TableIsAlias = Symbol.for('drizzle:IsAlias');
+const TableOriginalName = Symbol.for('drizzle:OriginalName');
+
+/** The real table name of a table made with `aliasedTable()`, or undefined for a table that is not an alias. */
+export function getAliasedTableOriginalName(table: Table): string | undefined {
+	const slots = table as unknown as Record<symbol, unknown>;
+	const original = slots[TableOriginalName];
+	return slots[TableIsAlias] === true && typeof original === 'string' ? original : undefined;
+}

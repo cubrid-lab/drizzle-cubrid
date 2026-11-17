@@ -33,6 +33,7 @@ import type { Assume, DrizzleTypeError, Simplify, ValidateShape } from 'drizzle-
 import { getTableColumns } from 'drizzle-orm/utils';
 import type { CubridColumn } from './columns/common.js';
 import {
+	assertSetOperandCodecs,
 	type CubridCompoundConfig,
 	type CubridDialect,
 	type CubridJoinType,
@@ -44,6 +45,7 @@ import {
 	compoundSelects,
 	mapRow,
 	markSubqueryField,
+	markSubquerySources,
 	type OrderedField,
 	orderSelectedFields,
 	outputName,
@@ -179,13 +181,20 @@ function orderItems<TSelection>(items: OrderItems<TSelection>, fields: TSelectio
 	return items as CubridOrderByItem[];
 }
 
-/** A subquery over `fields`, whose SQL names every field (see `outputName`). */
-function subqueryOf(fields: Record<string, unknown>, alias: string, query: SQL): Subquery & Record<string, unknown> {
+/** A subquery of a select or set operation, whose SQL names every field (see `outputName`). */
+function subqueryOf(
+	config: CubridSelectConfig | CubridCompoundConfig,
+	fields: Record<string, unknown>,
+	alias: string,
+	query: SQL,
+): Subquery & Record<string, unknown> {
 	for (const key of Object.keys(fields)) {
 		if (key === '_' || key === 'getSQL') throw new Error(`A subquery field cannot be named ${key}`);
 	}
 	const aliased = aliasFields(fields, alias);
-	return Object.assign(new Subquery(query, aliased, alias), aliased);
+	const subquery = new Subquery(query, aliased, alias);
+	markSubquerySources(subquery, config);
+	return Object.assign(subquery, aliased);
 }
 
 type SubqueryOf<
@@ -274,13 +283,15 @@ function setOperation<
 	const { session, dialect, config } = operandOf(left, name);
 	const resolved = typeof right === 'function' ? right(setOperators) : right;
 	const other = operandOf(resolved, name);
-	const keys = (part: Operand['config']) => compoundFields(part).map(({ path }) => path.join('.'));
-	const [leftKeys, rightKeys] = [keys(config), keys(other.config)];
+	const [leftFields, rightFields] = [compoundFields(config), compoundFields(other.config)];
+	const keys = (fields: OrderedField[]) => fields.map(({ path }) => path.join('.'));
+	const [leftKeys, rightKeys] = [keys(leftFields), keys(rightFields)];
 	if (leftKeys.join(',') !== rightKeys.join(',')) {
 		throw new Error(
 			`${name}: the selects have different fields (${leftKeys.join(', ')} and ${rightKeys.join(', ')}); every select of a set operation needs the same keys in the same order`,
 		);
 	}
+	assertSetOperandCodecs(leftFields, rightFields, name);
 	const operation = { operator, all, right: other.config };
 	const compound: CubridCompoundConfig =
 		'operations' in config && config.orderBy.length === 0 && config.limit === undefined && config.offset === undefined
@@ -602,11 +613,12 @@ export class CubridSelect<
 
 	/** This query as a subquery for `from()`, a join or another query's condition. */
 	as<TAlias extends string>(alias: TAlias): SubqueryOf<TSelection, TNullabilityMap, TAlias> {
-		return subqueryOf(this.config.fields, alias, this.dialect.buildSelectQuery(this.config, true)) as SubqueryOf<
-			TSelection,
-			TNullabilityMap,
-			TAlias
-		>;
+		return subqueryOf(
+			this.config,
+			this.config.fields,
+			alias,
+			this.dialect.buildSelectQuery(this.config, true),
+		) as SubqueryOf<TSelection, TNullabilityMap, TAlias>;
 	}
 
 	/** Builds the SQL once; `execute()` takes the values of `sql.placeholder()`s. */
@@ -678,6 +690,7 @@ export class CubridSetOperation<
 	/** This set operation as a subquery; its fields are the first select's. */
 	as<TAlias extends string>(alias: TAlias): SubqueryOf<TSelection, TNullabilityMap, TAlias> {
 		return subqueryOf(
+			this.config,
 			firstSelect(this.config).fields,
 			alias,
 			this.dialect.buildCompoundQuery(this.config, true),

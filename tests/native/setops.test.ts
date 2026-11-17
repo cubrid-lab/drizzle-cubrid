@@ -1,11 +1,13 @@
 // Native set operations and scalar subqueries (#158) with a fake client:
 // golden SQL, refusals before sending and row mapping of the compound result.
-import { asc, count, desc, eq, exists, gt, inArray, max, sql } from 'drizzle-orm';
+import { aliasedTable, asc, count, desc, eq, exists, gt, inArray, max, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-
 import {
 	bigint,
+	type CubridSelectedFields,
+	char,
 	cubridTable,
+	date,
 	datetime,
 	drizzle,
 	except,
@@ -14,6 +16,7 @@ import {
 	intersect,
 	intersectAll,
 	numeric,
+	timestamp,
 	union,
 	unionAll,
 	varchar,
@@ -73,7 +76,7 @@ describe('set operations: golden SQL', () => {
 	});
 
 	it('orders the result by the position of the first select fields, with limit and offset', () => {
-		const query = u().union(p()).orderBy(desc(users.name), users.id, asc(sql`1`)).limit(10).offset(5);
+		const query = u().union(p()).orderBy(desc(users.name), users.id, asc(users.id)).limit(10).offset(5);
 		expect(query.toSQL()).toEqual({
 			sql: `(${U}) union (${P}) order by 2 desc, 1, 1 asc limit ? offset ?`,
 			params: [10, 5],
@@ -182,11 +185,43 @@ describe('set operations: refusals before sending', () => {
 
 	it('refuses offset() without limit() and ordering by a field not selected first', () => {
 		expect(() => u().union(p()).offset(1).toSQL()).toThrow(/CUBRID needs limit\(\) with offset\(\)/);
-		expect(() => u().union(p()).orderBy(posts.title).toSQL()).toThrow(
-			/orderBy\(\) of a set operation can use only the fields of its first select; title is not one/,
+		const refused =
+			/orderBy\(\) of a set operation takes only fields of its first select, bare or in asc\(\)\/desc\(\)/;
+		expect(() => u().union(p()).orderBy(posts.title).toSQL()).toThrow(refused);
+		expect(() => u().union(p()).orderBy(desc(posts.id)).toSQL()).toThrow(refused);
+		// A selected column inside an expression cannot become a position: `length(2)` would be sent.
+		expect(() => u().union(p()).orderBy(sql`length(${users.name})`).toSQL()).toThrow(refused);
+		expect(() => u().union(p()).orderBy(sql`${users.id} + 1`).toSQL()).toThrow(refused);
+		expect(() => u().union(p()).orderBy(sql`1`).toSQL()).toThrow(refused);
+	});
+
+	it('refuses an operand whose field the first select codec would not read as sent (date and datetime)', () => {
+		const events = cubridTable('events', {
+			id: integer().primaryKey(),
+			day: date(),
+			at: datetime(),
+			stamp: timestamp(),
+			n: numeric({ precision: 38, scale: 10 }),
+			count: integer(),
+			label: char({ length: 5 }),
+		});
+		const field = (value: CubridSelectedFields[string]) => db.select({ x: value }).from(events);
+		const refused = /field x is DATE in the first select but DATETIME in another/;
+		expect(() => field(events.day).unionAll(field(events.at))).toThrow(refused);
+		expect(() => field(events.day).unionAll(field(events.stamp))).toThrow(/DATE in the first select but TIMESTAMP/);
+		expect(() => field(events.at).union(field(events.day))).toThrow(/DATETIME in the first select but DATE/);
+		expect(() => field(events.count).union(field(events.n))).toThrow(/INTEGER in the first select but NUMERIC/);
+		expect(() => field(events.day).union(field(sql`now()`))).toThrow(
+			/DATE in the first select but a sql value without a column codec/,
 		);
-		expect(() => u().union(p()).orderBy(sql`${users.id} + 1`).toSQL()).not.toThrow();
-		expect(() => u().union(p()).orderBy(desc(posts.id)).toSQL()).toThrow(/id is not one/);
+		expect(() => union(field(events.day), field(events.day), field(events.at))).toThrow(refused);
+		// The same SQL type with another length, precision or mode, CHAR with VARCHAR, a sql value mapped with
+		// the first select's column, and a value without a codec under a codec that is not a date or time one.
+		expect(() => field(events.n).union(field(posts.price))).not.toThrow();
+		expect(() => field(events.label).union(field(posts.title))).not.toThrow();
+		expect(() => field(events.day).union(field(sql`cast(${events.at} as date)`.mapWith(events.day)))).not.toThrow();
+		expect(() => field(events.count).union(field(sql`1`))).not.toThrow();
+		expect(() => field(sql`now()`).union(field(events.day))).not.toThrow();
 	});
 });
 
@@ -320,6 +355,92 @@ describe('scalar subqueries', () => {
 			/Selected field o.one is a subquery inside an object/,
 		);
 		expect(() => db.select({ one }).from(users).as('outer')).toThrow(/Subquery field one is a scalar subquery/);
+	});
+
+	it('refuses a subquery field reading a table of the outer query, and correlates through aliasedTable()', () => {
+		const employees = cubridTable('employees', { id: integer().primaryKey(), boss: integer() });
+		const shadowed = db
+			.select({ c: count().as('c') })
+			.from(employees)
+			.where(eq(employees.boss, employees.id))
+			.as('reports');
+		expect(() => db.select({ id: employees.id, reports: shadowed }).from(employees).toSQL()).toThrow(
+			/Selected field reports is a subquery that reads employees, which the outer query reads too.*aliasedTable/,
+		);
+		const staff = aliasedTable(employees, 'staff');
+		const reports = db
+			.select({ c: count().as('c') })
+			.from(staff)
+			.where(eq(staff.boss, employees.id))
+			.as('reports');
+		expect(db.select({ id: employees.id, reports }).from(employees).toSQL().sql).toBe(
+			'select "employees"."id", (select count(*) as "c" from "employees" "staff" where "staff"."boss" = "employees"."id") from "employees"',
+		);
+		// Names that differ only in case are the same table to CUBRID.
+		const upper = cubridTable('EMPLOYEES', { id: integer().primaryKey(), boss: integer() });
+		const other = db
+			.select({ c: count().as('c') })
+			.from(upper)
+			.as('other');
+		expect(() => db.select({ id: employees.id, other }).from(employees).toSQL()).toThrow(/reads EMPLOYEES/);
+		// A join source counts too.
+		expect(() =>
+			db
+				.select({
+					id: users.id,
+					n: db
+						.select({ c: count().as('c') })
+						.from(posts)
+						.as('n'),
+				})
+				.from(users)
+				.innerJoin(posts, eq(users.id, posts.authorId))
+				.toSQL(),
+		).toThrow(/reads posts, which the outer query reads too/);
+	});
+
+	it('writes aliasedTable() sources as "table" "alias" in from() and joins', () => {
+		const author = aliasedTable(users, 'author');
+		expect(
+			db
+				.select({ id: author.id, title: posts.title })
+				.from(posts)
+				.innerJoin(author, eq(author.id, posts.authorId))
+				.toSQL().sql,
+		).toBe(
+			'select "author"."id", "posts"."title" from "posts" inner join "users" "author" on "author"."id" = "posts"."author_id"',
+		);
+		expect(db.select({ id: author.id }).from(author).toSQL().sql).toBe('select "author"."id" from "users" "author"');
+	});
+
+	it('writes a subquery field used in orderBy, where and having as its (select ...)', () => {
+		const n = db
+			.select({ n: count().as('n') })
+			.from(posts)
+			.where(eq(posts.authorId, users.id))
+			.as('n');
+		const inner = 'select count(*) as "n" from "posts" where "posts"."author_id" = "users"."id"';
+		expect(
+			db
+				.select({ id: users.id, n })
+				.from(users)
+				.where(({ n }) => gt(n, 1))
+				.orderBy(({ n }) => desc(n))
+				.toSQL(),
+		).toEqual({
+			sql: `select "users"."id", (${inner}) from "users" where (${inner}) > ? order by (${inner}) desc`,
+			params: [1],
+		});
+		expect(db.select({ id: users.id, n }).from(users).groupBy(users.id, sql`${n}`).having(gt(n, 0)).toSQL().sql).toBe(
+			`select "users"."id", (${inner}) from "users" group by "users"."id", (${inner}) having (${inner}) > ?`,
+		);
+		// In a set operation it orders by position.
+		const ordered = db
+			.select({ id: users.id, n })
+			.from(users)
+			.union(db.select({ id: users.id, n }).from(users))
+			.orderBy(({ n }) => desc(n));
+		expect(ordered.toSQL().sql).toMatch(/ order by 2 desc$/);
 	});
 
 	it('uses unaliased selects in sql, exists() and comparisons', () => {
