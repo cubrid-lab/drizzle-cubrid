@@ -93,7 +93,7 @@ function construct<TSchema extends Record<string, unknown>, TClient extends Cubr
 	client: TClient,
 	config: CubridConstructConfig<TSchema> = {},
 ): DrizzleWithClient<TSchema, TClient> {
-	const dialect = new CubridDialect({ casing: config.casing });
+	const dialect = new CubridDialect({ casing: config.casing, binding: config.binding });
 
 	let logger: Logger | undefined;
 	if (config.logger === true) {

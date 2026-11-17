@@ -254,10 +254,24 @@ types the bound values of an `IN` list of two or more as `VARCHAR` and
 compares a `CHAR` column with `VARCHAR` values without space padding, so with
 typed binds `inArray()` matched no row and `notInArray()` every row; typed
 `CHAR`, they compare padded, as `eq()` always did. A value longer than `n` is
-cast to its own length (UTF-8 bytes), so it never matches by truncation.
-Placeholders are not cast: with typed binds, an `inArray()` of two or more
-`sql.placeholder()` values on a `char()` column still matches nothing; pass
-the values instead (#237).
+cast to its own length (UTF-8 bytes), so it never matches by truncation (#237).
+
+A `sql.placeholder()` has no column and its value is not known when the SQL
+is built, so it is not cast. With typed binds (the default), an `inArray()` or
+`notInArray()` list of two or more elements, one of them a placeholder, on a
+`char()` column is sent as `("t"."code" = ? or "t"."code" = ?)` and
+`("t"."code" <> ? and "t"."code" <> ?)` instead, in `where` and in selected
+fields: each `= ?` compares padded, where an `IN` list of untyped placeholders
+matched no row. On CUBRID 11.4 this gave the same rows and the same
+true/false/NULL values as `IN`/`NOT IN` in every case tested, NULL
+placeholder values and `not(...)` of the list included; a value longer than
+`n` matches nothing. Under `binding: 'literal'` the list is sent unchanged:
+literal lists compare padded already, and with literals CUBRID takes
+`code = NULL` inside `OR` as false rather than unknown, so the expanded form
+would differ under `not()` (#239). `eq(t.code, sql.placeholder('c'))` and a
+one-element list need nothing. Only the exact `inArray()` shape is expanded
+(also `` sql`${t.code} in ${[a, b]}` ``); in other `sql` templates write
+`` sql`(${t.code} = ${a} or ${t.code} = ${b})` `` yourself for typed binds.
 
 ### Identifier quoting
 
@@ -760,9 +774,14 @@ are not in `drizzle-cubrid/native`:
 ## Known CUBRID behaviors
 
 - `CHAR(n)` values come back padded with spaces to `n`.
-- A `CHAR` column compared with an `IN` list of two or more `VARCHAR` values,
-  which is how CUBRID types untyped bound values there, compares without space
-  padding; the dialect sends `CHAR` values typed `CHAR` (see [Binding](#binding)).
+- A `CHAR` column compared with a `VARCHAR` operand compares without space
+  padding, so `'ab'` stored in `CHAR(10)` does not equal it. That covers an
+  `IN` list of two or more untyped bound values, which CUBRID types `VARCHAR`
+  (the dialect sends `CHAR` values typed `CHAR` and expands placeholder lists;
+  see [Binding](#binding)), but also any `VARCHAR` expression or subquery:
+  `` eq(t.code, sql`concat(…)`) `` and `` inArray(t.code, sql`(select varcharCol …)`) ``
+  match no row. Cast such an expression or subquery column to `CHAR` when
+  comparing it with a `CHAR` column (`` sql`cast(concat(…) as CHAR(10))` ``).
 - `FLOAT` is 32-bit; use `double()` for JavaScript-exact numbers.
 - `MONETARY` is stored as a double: amounts have double precision, not exact
   decimal precision. Use `numeric({ precision, scale })` for exact money.

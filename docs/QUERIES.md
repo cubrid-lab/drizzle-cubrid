@@ -484,12 +484,31 @@ the bound values of an `IN` list of two or more as `VARCHAR` and compares a
 `CHAR` column with `VARCHAR` values without space padding, so with typed binds
 `inArray()` matched no row and `notInArray()` every row; typed `CHAR`, they
 compare padded, as `eq()` always did. A value longer than the column is cast
-to its own length, so it never matches by truncation. `sql.placeholder()`
-values are not cast (their value is not known when the SQL is built): with
-typed binds, an `inArray()` of two or more placeholders on a `char()` column
-still matches nothing; pass the values, or write
-`` sql`cast(${sql.placeholder('a')} as CHAR(10))` `` for values that fit the
-column ([#237](https://github.com/cubrid-lab/drizzle-cubrid/issues/237)).
+to its own length, so it never matches by truncation
+([#237](https://github.com/cubrid-lab/drizzle-cubrid/issues/237)).
+
+`sql.placeholder()` values are not cast (their value is not known when the SQL
+is built). With typed binds (the default), an `inArray()` or `notInArray()`
+list of two or more elements, one of them a placeholder, on a `char()` column
+is sent as `` (`t`.`code` = ? or `t`.`code` = ?) `` and
+`` (`t`.`code` <> ? and `t`.`code` <> ?) `` instead, in `where` and in selected fields,
+where each `= ?` compares padded. On CUBRID 11.4 this gave the same rows and
+the same true/false/NULL values as `IN`/`NOT IN` in every case tested, NULL
+placeholder values and `not(...)` of the list included; a value longer than
+the column matches nothing. Under `binding: "literal"` the list is sent
+unchanged: literal lists compare padded already, and with literals CUBRID
+takes `code = NULL` inside `OR` as false rather than unknown. `eq()` with a
+placeholder and a one-element list need nothing. Only the exact `inArray()`
+shape is expanded; in other `sql` templates write the `=`/`or` form yourself
+for typed binds ([#239](https://github.com/cubrid-lab/drizzle-cubrid/issues/239)).
+A selected field is expanded by the `drizzle()` instance that builds the
+select, so a subquery built by one instance and used in another with a
+different `binding` keeps the first one's form for its selected fields.
+
+Any other `VARCHAR` operand also compares with a `CHAR` column without space
+padding, under both bindings: `` eq(t.code, sql`concat(…)`) `` and
+`` inArray(t.code, sql`(select varcharCol …)`) `` match no row. Cast such an
+expression or subquery column to `CHAR` (`` sql`cast(concat(…) as CHAR(10))` ``).
 
 `binary()` and `varbinary()` encode their value as a string, which a CUBRID
 `BIT VARYING` column accepts only from a literal: use `binding: "literal"` for

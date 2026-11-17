@@ -23,9 +23,15 @@ import { getTableName, Table } from 'drizzle-orm/table';
 import { getTableColumns } from 'drizzle-orm/utils';
 import { CubridCollection } from './columns/collections.js';
 import { describeValue } from './columns/common.js';
-import { charParamSql } from './columns/string.js';
+import { CubridChar, charParamSql } from './columns/string.js';
 import { CubridTemporalDate, CubridTemporalString } from './columns/temporal.js';
-import { escapeParamWithEncoder, getAliasedTableOriginalName, getSqlDecoder } from './internal.js';
+import {
+	escapeParamWithEncoder,
+	expandPlaceholderLists,
+	getAliasedTableOriginalName,
+	getSqlDecoder,
+} from './internal.js';
+import type { CubridBinding } from './session.js';
 
 /**
  * A double-quoted identifier, with an embedded `"` doubled (`a"b` → `"a""b"`).
@@ -473,15 +479,27 @@ function updateSetSql(table: Table, set: Record<string, unknown>, statement: str
 
 export class CubridDialect {
 	private readonly casing = new CasingCache();
+	private readonly expandPlaceholderLists: boolean;
+
+	/** `binding` is the session's; placeholder lists are expanded for typed binds only (#239). */
+	constructor(options: { binding?: CubridBinding } = {}) {
+		this.expandPlaceholderLists = (options.binding ?? 'prepared') === 'prepared';
+	}
 
 	/**
 	 * SQL text with `?` for each parameter, and the parameters. A string bound
-	 * to a CHAR column is `cast(? as CHAR(n))` (see `charParamSql()`, #237).
+	 * to a CHAR column is `cast(? as CHAR(n))` (see `charParamSql()`, #237);
+	 * with typed binds, an `inArray()`/`notInArray()` list with a
+	 * `sql.placeholder()` on a CHAR column is `(c = ? or c = ?)`/
+	 * `(c <> ? and c <> ?)` (see `expandPlaceholderLists()`, #239).
 	 */
 	sqlToQuery(query: SQLWrapper): Query {
 		const statement = query.getSQL();
 		refuseCollectionParams(statement.queryChunks);
-		const { sql: text, params } = statement.toQuery({
+		const rendered = this.expandPlaceholderLists
+			? expandPlaceholderLists(statement, (column) => is(column, CubridChar))
+			: statement;
+		const { sql: text, params } = rendered.toQuery({
 			casing: this.casing,
 			escapeName: quoteIdentifier,
 			...escapeParamWithEncoder(charParamSql),
