@@ -7,7 +7,7 @@
 // enforces that.
 
 import type { Column } from 'drizzle-orm/column';
-import type { DriverValueDecoder, SQL } from 'drizzle-orm/sql/sql';
+import type { BuildQueryConfig, DriverValueDecoder, SQL } from 'drizzle-orm/sql/sql';
 import type { Table } from 'drizzle-orm/table';
 
 // drizzle-orm/table.js: `Table.Symbol.Columns` and `Table.Symbol.ExtraConfigColumns`
@@ -62,4 +62,31 @@ export function getAliasedTableOriginalName(table: Table): string | undefined {
 	const slots = table as unknown as Record<symbol, unknown>;
 	const original = slots[TableOriginalName];
 	return slots[TableIsAlias] === true && typeof original === 'string' ? original : undefined;
+}
+
+// drizzle-orm/sql/sql.js: for each bound `Param`, `SQL#buildQueryFromSourceParams()`
+// calls `prepareTyping(param.encoder)` (when given) and then, in the same
+// step, `escapeParam(index, mappedValue)`. It calls only `escapeParam` for a
+// placeholder and neither for an inlined value. Checked against drizzle-orm
+// 0.44.1 and 0.45.4.
+/**
+ * `toQuery()` callbacks with which `placeholder` sees the encoder (usually the
+ * column) of each value it writes a placeholder for; undefined for a
+ * `sql.placeholder()`.
+ */
+export function escapeParamWithEncoder(
+	placeholder: (encoder: unknown, value: unknown) => string,
+): Pick<BuildQueryConfig, 'escapeParam' | 'prepareTyping'> {
+	let encoder: unknown;
+	return {
+		prepareTyping: (next) => {
+			encoder = next;
+			return 'none';
+		},
+		escapeParam: (_num, value) => {
+			const current = encoder;
+			encoder = undefined;
+			return placeholder(current, value);
+		},
+	};
 }

@@ -1,6 +1,6 @@
-import { asc, desc, eq } from 'drizzle-orm';
+import { asc, desc, eq, inArray, like, ne, notInArray, sql } from 'drizzle-orm';
 
-import { int, varchar } from '../src/columns';
+import { char, int, varchar } from '../src/columns';
 import { drizzle } from '../src/driver';
 import type { CubridQueryable } from '../src/session';
 import { cubridTable } from '../src/table';
@@ -96,5 +96,65 @@ describe('query building', () => {
 		expect(query.sql).toContain('`users`');
 		expect(query.sql).toContain('`posts`');
 		expect(query.params).toEqual([]);
+	});
+});
+
+describe('CHAR values are sent typed CHAR (#237)', () => {
+	const codes = cubridTable('codes', {
+		id: int('id').primaryKey(),
+		code: char('code', { length: 10 }),
+		flag: char('flag'),
+		name: varchar('name', { length: 10 }),
+	});
+	const db = drizzle(new MockClient());
+	const where = (condition: ReturnType<typeof eq>) => db.select({ id: codes.id }).from(codes).where(condition).toSQL();
+	const prefix = 'select `id` from `codes` where ';
+
+	it.each([
+		[
+			'inArray',
+			inArray(codes.code, ['ab', 'cd']),
+			'`codes`.`code` in (cast(? as CHAR(10)), cast(? as CHAR(10)))',
+			['ab', 'cd'],
+		],
+		[
+			'notInArray',
+			notInArray(codes.code, ['ab', 'cd']),
+			'`codes`.`code` not in (cast(? as CHAR(10)), cast(? as CHAR(10)))',
+			['ab', 'cd'],
+		],
+		['eq', eq(codes.code, 'ab'), '`codes`.`code` = cast(? as CHAR(10))', ['ab']],
+		['ne', ne(codes.code, 'ab'), '`codes`.`code` <> cast(? as CHAR(10))', ['ab']],
+		[
+			'a longer value',
+			inArray(codes.code, ['abcdefghijk', 'ab']),
+			'`codes`.`code` in (cast(? as CHAR(11)), cast(? as CHAR(10)))',
+			['abcdefghijk', 'ab'],
+		],
+		['a multi-byte value', eq(codes.code, '가나다라'), '`codes`.`code` = cast(? as CHAR(12))', ['가나다라']],
+		[
+			'char() without a length',
+			inArray(codes.flag, ['a', 'b']),
+			'`codes`.`flag` in (cast(? as CHAR(1)), cast(? as CHAR(1)))',
+			['a', 'b'],
+		],
+		[
+			'null',
+			inArray(codes.code, ['ab', null as unknown as string]),
+			'`codes`.`code` in (cast(? as CHAR(10)), ?)',
+			['ab', null],
+		],
+		['a VARCHAR column', inArray(codes.name, ['ab', 'cd']), '`codes`.`name` in (?, ?)', ['ab', 'cd']],
+		['like()', like(codes.code, 'a%'), '`codes`.`code` like ?', ['a%']],
+	])('%s', (_label, condition, text, params) => {
+		expect(where(condition)).toEqual({ sql: prefix + text, params });
+	});
+
+	it('casts in inserts and updates; leaves placeholders as ?', () => {
+		expect(db.insert(codes).values({ id: 1, code: 'ab' }).toSQL().sql).toBe(
+			'insert into `codes` (`id`, `code`, `flag`, `name`) values (?, cast(? as CHAR(10)), default, default)',
+		);
+		expect(db.update(codes).set({ code: 'ab' }).toSQL().sql).toBe('update `codes` set `code` = cast(? as CHAR(10))');
+		expect(where(eq(codes.code, sql.placeholder('c'))).sql).toBe(`${prefix}\`codes\`.\`code\` = ?`);
 	});
 });

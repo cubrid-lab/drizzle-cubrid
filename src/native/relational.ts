@@ -297,20 +297,13 @@ function keyString(values: readonly unknown[]): string {
  * `"t"."a" in (?, ?)`, or `("t"."a", "t"."b") in ((?, ?), (?, ?))` for a
  * composite key. Each value is encoded by the parent column it was read from
  * (a BIGINT key may be referenced by an INTEGER column); the server compares
- * across numeric types. A CHAR key is sent as `cast(? as CHAR(n))`.
+ * across numeric types. A CHAR key is sent as `cast(? as CHAR(n))` by the dialect.
  */
 function keyFilter(relation: RelationPlan, keys: readonly unknown[][]): SQL {
 	const { fields, references } = relation;
 	const params = (key: readonly unknown[]) =>
 		sql.join(
-			key.map((value, i) => {
-				const field = fields[i] as Column;
-				const param = sql.param(value, field);
-				// CUBRID 11.4 compares a CHAR column with an IN list of more than one
-				// bound value exactly, without space padding ('ab   ' against a
-				// CHAR(10) 'ab'), unless the values are typed CHAR.
-				return baseType(field) === 'CHAR' ? sql`cast(${param} as ${sql.raw(field.getSQLType())})` : param;
-			}),
+			key.map((value, i) => sql.param(value, fields[i] as Column)),
 			sql`, `,
 		);
 	if (references.length === 1) {

@@ -1,7 +1,7 @@
 // Native SELECT (#158) and session (#160) with a fake client: golden SQL for
 // every builder method and refusal, row mapping by position, binding,
 // placeholders, error passthrough and the UTC-decoding guard.
-import { and, asc, count, desc, eq, gt, inArray, sql, sum } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, like, ne, notInArray, sql, sum } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 
 import { orderSelectedFields } from '../../src/native/dialect';
@@ -9,6 +9,7 @@ import {
 	bigint,
 	boolean,
 	type CubridSelectedFields,
+	char,
 	cubridTable,
 	date,
 	datetime,
@@ -263,6 +264,68 @@ describe('golden SQL', () => {
 		expect(db.select({ id: users.id }).from(users).where(undefined).toSQL().sql).toBe(
 			'select "users"."id" from "users"',
 		);
+	});
+});
+
+describe('CHAR values are sent typed CHAR (#237)', () => {
+	const codes = cubridTable('codes', {
+		id: integer().primaryKey(),
+		code: char({ length: 10 }),
+		name: varchar({ length: 10 }),
+	});
+	const where = (condition: ReturnType<typeof eq>) => db.select({ id: codes.id }).from(codes).where(condition).toSQL();
+	const prefix = 'select "codes"."id" from "codes" where ';
+
+	it.each([
+		[
+			'inArray',
+			inArray(codes.code, ['ab', 'cd']),
+			'"codes"."code" in (cast(? as CHAR(10)), cast(? as CHAR(10)))',
+			['ab', 'cd'],
+		],
+		[
+			'notInArray',
+			notInArray(codes.code, ['ab', 'cd']),
+			'"codes"."code" not in (cast(? as CHAR(10)), cast(? as CHAR(10)))',
+			['ab', 'cd'],
+		],
+		['eq', eq(codes.code, 'ab'), '"codes"."code" = cast(? as CHAR(10))', ['ab']],
+		['ne', ne(codes.code, 'ab'), '"codes"."code" <> cast(? as CHAR(10))', ['ab']],
+		// Longer than n, in characters or in UTF-8 bytes: widened, never truncated.
+		[
+			'a longer value',
+			inArray(codes.code, ['abcdefghijk', 'ab']),
+			'"codes"."code" in (cast(? as CHAR(11)), cast(? as CHAR(10)))',
+			['abcdefghijk', 'ab'],
+		],
+		['a multi-byte value', eq(codes.code, '가나다라'), '"codes"."code" = cast(? as CHAR(12))', ['가나다라']],
+		[
+			'null',
+			inArray(codes.code, ['ab', null as unknown as string]),
+			'"codes"."code" in (cast(? as CHAR(10)), ?)',
+			['ab', null],
+		],
+		['a VARCHAR column', inArray(codes.name, ['ab', 'cd']), '"codes"."name" in (?, ?)', ['ab', 'cd']],
+		["like(), whose pattern is not the column's value", like(codes.code, 'a%'), '"codes"."code" like ?', ['a%']],
+		['a non-string value', eq(codes.code, 5 as unknown as string), '"codes"."code" = ?', [5]],
+	])('%s', (_label, condition, text, params) => {
+		expect(where(condition)).toEqual({ sql: prefix + text, params });
+	});
+
+	it('casts in subqueries, inserts and updates; leaves placeholders as ?', () => {
+		const inner = db
+			.select({ id: codes.id })
+			.from(codes)
+			.where(inArray(codes.code, ['ab', 'cd']));
+		expect(db.select({ id: codes.id }).from(codes).where(inArray(codes.id, inner)).toSQL().sql).toBe(
+			`${prefix}"codes"."id" in (select "codes"."id" from "codes" where "codes"."code" in (cast(? as CHAR(10)), cast(? as CHAR(10))))`,
+		);
+		expect(db.insert(codes).values({ id: 1, code: 'ab' }).toSQL().sql).toBe(
+			'insert into "codes" ("id", "code", "name") values (?, cast(? as CHAR(10)), default)',
+		);
+		expect(db.update(codes).set({ code: 'ab' }).toSQL().sql).toBe('update "codes" set "code" = cast(? as CHAR(10))');
+		expect(where(eq(codes.code, sql.placeholder('c'))).sql).toBe(`${prefix}"codes"."code" = ?`);
+		expect(where(eq(codes.id, 1)).sql).toBe(`${prefix}"codes"."id" = ?`);
 	});
 });
 

@@ -28,6 +28,8 @@ import {
 	like,
 	lt,
 	max,
+	ne,
+	notInArray,
 	relations,
 	sql,
 	sum,
@@ -3152,4 +3154,118 @@ describe('drizzle-cubrid/native relational queries (#158)', () => {
 		await expect(db().query.users.findMany({ limit: sql.placeholder('n') })).rejects.toThrow(/non-negative integer/);
 		expect(statements).toEqual([]);
 	});
+});
+
+describe('CHAR columns compared with several bound values (#237)', () => {
+	// CUBRID 11.4 types the host variables of `IN (?, ?)` as VARCHAR and then
+	// compares a CHAR column with them unpadded, so `IN` matched no row and
+	// `NOT IN` every row. Both dialects send `cast(? as CHAR(n))` for a CHAR
+	// column's values, widened to the value's length so nothing is truncated.
+	const table = name('char_in');
+	const legacy = cubridTable(table, {
+		id: int('id').primaryKey(),
+		code: char('code', { length: 10 }),
+	});
+	const nat = native.cubridTable(table, {
+		id: native.integer().primaryKey(),
+		code: native.char({ length: 10 }),
+	});
+	type Where = (c: typeof legacy.code | typeof nat.code) => ReturnType<typeof inArray>;
+	const cases: [string, Where, number[]][] = [
+		['inArray', (c) => inArray(c, ['ab', 'cd']), [1, 2]],
+		['inArray, three values', (c) => inArray(c, ['ab', 'cd', 'zz']), [1, 2]],
+		['inArray, padded values', (c) => inArray(c, ['ab        ', 'cd   ']), [1, 2]],
+		['inArray, a value with trailing spaces past n', (c) => inArray(c, ['abcdefghij  ', 'cd']), [2, 3]],
+		['inArray, a value longer than n', (c) => inArray(c, ['abcdefghijk', 'ab']), [1]],
+		['inArray, a null', (c) => inArray(c, ['ab', null as unknown as string]), [1]],
+		['notInArray', (c) => notInArray(c, ['ab', 'cd']), [3]],
+		['notInArray, a value longer than n', (c) => notInArray(c, ['abcdefghijk', 'ab']), [2, 3]],
+		['eq, a value longer than n', (c) => eq(c, 'abcdefghijk'), []],
+		['ne', (c) => ne(c, 'ab'), [2, 3]],
+		['gt', (c) => gt(c, 'ab'), [2, 3]],
+	];
+
+	beforeAll(async () => {
+		await createTable(table, 'id INT PRIMARY KEY, code CHAR(10)');
+		await client.query(`INSERT INTO ${table} VALUES (1, 'ab'), (2, 'cd'), (3, 'abcdefghij'), (4, NULL)`);
+	}, DDL_TIMEOUT);
+
+	for (const binding of ['prepared', 'literal'] as const) {
+		it(`0.x: inArray, notInArray and comparisons match padded CHAR values (${binding})`, async () => {
+			const db = drizzle(client, { binding });
+			for (const [label, where, expected] of cases) {
+				const rows = await db
+					.select({ id: legacy.id })
+					.from(legacy)
+					.where(where(legacy.code) as never)
+					.orderBy(legacy.id);
+				expect([label, rows.map((r) => r.id)]).toEqual([label, expected]);
+			}
+			const nested = await db
+				.select({ id: legacy.id })
+				.from(legacy)
+				.where(
+					inArray(
+						legacy.id,
+						db
+							.select({ id: legacy.id })
+							.from(legacy)
+							.where(inArray(legacy.code, ['ab', 'cd'])),
+					),
+				)
+				.orderBy(legacy.id);
+			expect(nested.map((r) => r.id)).toEqual([1, 2]);
+		});
+
+		it(`native: inArray, notInArray and comparisons match padded CHAR values (${binding})`, async () => {
+			const db = native.drizzle(client, { binding });
+			for (const [label, where, expected] of cases) {
+				const rows = await db
+					.select({ id: nat.id })
+					.from(nat)
+					.where(where(nat.code) as never)
+					.orderBy(nat.id);
+				expect([label, rows.map((r) => r.id)]).toEqual([label, expected]);
+			}
+			const nested = await db
+				.select({ id: nat.id })
+				.from(nat)
+				.where(
+					inArray(
+						nat.id,
+						db
+							.select({ id: nat.id })
+							.from(nat)
+							.where(inArray(nat.code, ['ab', 'cd'])),
+					),
+				)
+				.orderBy(nat.id);
+			expect(nested.map((r) => r.id)).toEqual([1, 2]);
+		});
+
+		it(`writes CHAR values as before: padded, trailing spaces trimmed, too long refused (${binding})`, async () => {
+			const legacyDb = drizzle(client, { binding });
+			const nativeDb = native.drizzle(client, { binding });
+			try {
+				await legacyDb.insert(legacy).values({ id: 10, code: 'xy' });
+				await nativeDb.insert(nat).values({ id: 11, code: 'abcdefghij  ' });
+				await legacyDb
+					.update(legacy)
+					.set({ code: 'zz' })
+					.where(inArray(legacy.id, [10, 12]));
+				await nativeDb
+					.update(nat)
+					.set({ code: 'zy' })
+					.where(and(gte(nat.id, 10), inArray(nat.code, ['abcdefghij', 'zz'])));
+				await expect(legacyDb.insert(legacy).values({ id: 12, code: 'abcdefghijk' })).rejects.toThrow();
+				await expect(nativeDb.insert(nat).values({ id: 12, code: 'abcdefghijk' })).rejects.toThrow();
+				expect(await client.query(`SELECT id, code FROM ${table} WHERE id >= 10 ORDER BY id`)).toEqual([
+					{ id: 10, code: 'zy        ' },
+					{ id: 11, code: 'zy        ' },
+				]);
+			} finally {
+				await client.query(`DELETE FROM ${table} WHERE id >= 10`);
+			}
+		});
+	}
 });

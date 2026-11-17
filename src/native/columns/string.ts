@@ -78,6 +78,25 @@ export class CubridChar<T extends ColumnBaseConfig<'string', 'CubridChar'>> exte
 	}
 }
 
+const utf8 = new TextEncoder();
+
+/**
+ * The placeholder for a value bound to a column: `cast(? as CHAR(m))` for a
+ * string compared with or written to a `CHAR(n)` column, `?` otherwise.
+ *
+ * CUBRID 11.4 types the host variables of `IN (?, ?)` (two or more) as
+ * VARCHAR and compares a CHAR column with VARCHAR values without space
+ * padding, so `inArray()` matched no row and `notInArray()` every row (#237).
+ * Typed CHAR, the values compare padded, as a single `= ?` already does.
+ * `m` is `n`, or the value's UTF-8 byte length when that is larger, so a
+ * longer value is never truncated into a match; that byte length is at least
+ * its length in characters in any database charset.
+ */
+export function charParamSql(encoder: unknown, value: unknown): string {
+	if (!(encoder instanceof CubridChar) || typeof value !== 'string') return '?';
+	return `cast(? as CHAR(${Math.max(encoder.length, utf8.encode(value).length)}))`;
+}
+
 /** A `CHAR(n)` column; `length` is required. Values read back space-padded to `n`. */
 export function char(config: LengthOnlyConfig): CubridCharBuilder<StringBuilderConfig<'', 'CubridChar'>>;
 export function char<TName extends string>(
