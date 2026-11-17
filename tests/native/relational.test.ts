@@ -587,6 +587,8 @@ describe('keys and config edge cases', () => {
 		expect(error).toBeInstanceOf(SqlSyntaxError);
 		expect(error).toBeInstanceOf(QueryError);
 		expect(error).toMatchObject({ message: 'Query failed.', code: -494, kind: 'syntax', origin: 'server', cause });
+		expect((error as Error).name).toBe(new SqlSyntaxError('x').name);
+		expect((error as Error).name).not.toBe(failure.name);
 		expect((error as { transactionError?: unknown }).transactionError).toBe(failure);
 		const plain = Object.assign(new TransactionError('Transaction query failed.', { cause }), { kind: 'other' });
 		const second = fakeClient([[[1n, 'Ann', null]], plain as never]);

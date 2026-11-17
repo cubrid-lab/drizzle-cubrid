@@ -53,7 +53,7 @@ function asQueryError(error: unknown): unknown {
 	if (!(error instanceof TransactionError)) return error;
 	const details: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(error)) {
-		if (key !== 'transactionError' && key !== 'rollbackError') details[key] = value;
+		if (key !== 'transactionError' && key !== 'rollbackError' && key !== 'name') details[key] = value;
 	}
 	const options = { ...details, cause: error.cause };
 	const kind = details.kind;
