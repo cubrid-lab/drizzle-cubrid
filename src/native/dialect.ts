@@ -16,6 +16,7 @@ import {
 	type Query,
 	SQL,
 	type SQLWrapper,
+	StringChunk,
 	sql,
 } from 'drizzle-orm/sql/sql';
 import { getTableName, Table } from 'drizzle-orm/table';
@@ -23,7 +24,7 @@ import { getTableColumns } from 'drizzle-orm/utils';
 import { CubridCollection } from './columns/collections.js';
 import { describeValue } from './columns/common.js';
 import { CubridTemporalDate, CubridTemporalString } from './columns/temporal.js';
-import { getSqlDecoder } from './internal.js';
+import { getAliasedTableOriginalName, getSqlDecoder } from './internal.js';
 
 /**
  * A double-quoted identifier, with an embedded `"` doubled (`a"b` → `"a""b"`).
@@ -44,6 +45,8 @@ export function quoteString(value: string): string {
 export interface OrderedField {
 	path: string[];
 	field: Column | SQL | SQL.Aliased;
+	/** The subquery a scalar subquery field (`field`, its `(select ...)`) was made from. */
+	subquery?: Subquery;
 }
 
 export type CubridJoinType = 'inner' | 'left' | 'right' | 'cross';
@@ -103,6 +106,121 @@ export interface CubridSelectConfig {
 	forUpdate: boolean;
 }
 
+export type CubridSetOperator = 'union' | 'intersect' | 'except';
+
+/**
+ * A set operation: `(first) union [all] (right) …`, evaluated left to right
+ * (CUBRID gives UNION, INTERSECT and EXCEPT the same precedence), then ORDER
+ * BY, LIMIT and OFFSET on the result.
+ */
+export interface CubridCompoundConfig {
+	first: CubridSelectConfig | CubridCompoundConfig;
+	operations: { operator: CubridSetOperator; all: boolean; right: CubridSelectConfig | CubridCompoundConfig }[];
+	orderBy: CubridOrderByItem[];
+	limit?: number | Placeholder;
+	offset?: number | Placeholder;
+}
+
+function isCompound(config: CubridSelectConfig | CubridCompoundConfig): config is CubridCompoundConfig {
+	return 'operations' in config;
+}
+
+/** The fields of a select or set operation; a set operation's are those of its first select. */
+export function compoundFields(config: CubridSelectConfig | CubridCompoundConfig): OrderedField[] {
+	return isCompound(config) ? compoundFields(config.first) : orderSelectedFields(config.fields);
+}
+
+/** Every select of a set operation, first to last. */
+export function compoundSelects(config: CubridSelectConfig | CubridCompoundConfig): CubridSelectConfig[] {
+	if (!isCompound(config)) return [config];
+	return [...compoundSelects(config.first), ...config.operations.flatMap(({ right }) => compoundSelects(right))];
+}
+
+/**
+ * An ORDER BY item of a set operation: a selected field of the first select,
+ * bare or in `asc()`/`desc()`, sent as its position (`order by 2 desc`).
+ * Anything else is refused: the result has no other columns, and a column
+ * inside an expression cannot be replaced by a position.
+ */
+function compoundOrderSql(item: CubridOrderByItem, fields: readonly OrderedField[]): SQL {
+	const position = (value: unknown) =>
+		fields.findIndex(({ field, subquery }) => field === value || (subquery !== undefined && subquery === value));
+	let target: unknown = item;
+	let direction = '';
+	if (is(item, SQL) && position(item) < 0) {
+		const values = item.queryChunks.filter((chunk) => !is(chunk, StringChunk));
+		const text = item.queryChunks
+			.filter((chunk): chunk is StringChunk => is(chunk, StringChunk))
+			.map((chunk) => chunk.value.join(''))
+			.join('')
+			.trim()
+			.toLowerCase();
+		if (values.length === 1 && (text === 'asc' || text === 'desc' || text === '')) {
+			target = values[0];
+			direction = text === '' ? '' : ` ${text}`;
+		}
+	}
+	const index = position(target);
+	if (index < 0) {
+		throw new Error(
+			'orderBy() of a set operation takes only fields of its first select, bare or in asc()/desc(); the result has no other columns',
+		);
+	}
+	return sql.raw(`${index + 1}${direction}`);
+}
+
+/**
+ * The sources a select or set operation reads (tables and subqueries, by the
+ * name they are referred to by), recorded for subqueries made with `.as()`.
+ */
+const subquerySources = new WeakMap<Subquery, readonly string[]>();
+
+export function markSubquerySources(subquery: Subquery, config: CubridSelectConfig | CubridCompoundConfig): void {
+	const names = compoundSelects(config).flatMap((select) => [
+		sourceName(select.source),
+		...select.joins.map((join) => sourceName(join.source)),
+	]);
+	subquerySources.set(subquery, names);
+}
+
+/** The SQL type a field's codec reads, without length or precision and with CHAR, VARCHAR and STRING as one; undefined without a column codec. */
+function codecType(field: Column | SQL | SQL.Aliased): string | undefined {
+	const decoder = decoderOf(field);
+	if (!is(decoder, Column)) return undefined;
+	return decoder
+		.getSQLType()
+		.toLowerCase()
+		.replace(/\([^()]*\)/g, '')
+		.replace(/\b(char|varchar|string)\b/g, 'string')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+/**
+ * Refuses a set operation whose rows the first select's codecs could not read
+ * as the server returns them. Each result column has the operands' common
+ * type, and is decoded by the first select's field: a DATE codec truncates a
+ * DATETIME value, so a codec for another SQL type, or a value without a
+ * column codec under a date or time codec, is refused.
+ */
+export function assertSetOperandCodecs(
+	first: readonly OrderedField[],
+	other: readonly OrderedField[],
+	where: string,
+): void {
+	first.forEach(({ path, field }, index) => {
+		const right = other[index];
+		if (!right) return;
+		const [leftType, rightType] = [codecType(field), codecType(right.field)];
+		if (leftType === undefined || leftType === rightType) return;
+		if (rightType !== undefined || readsTemporal(field)) {
+			throw new Error(
+				`${where}: field ${path.join('.')} is ${leftType.toUpperCase()} in the first select but ${rightType?.toUpperCase() ?? 'a sql value without a column codec'} in another; the first select's codec decodes every row, so select the same type, or cast it and map it with the first select's column (sql\`cast(... as ${leftType.toUpperCase()})\`.mapWith(column))`,
+			);
+		}
+	});
+}
+
 /**
  * `sql` expressions that stand for a field of a subquery (`"alias"."field"`),
  * by the subquery alias they belong to. They count as that source's fields
@@ -144,9 +262,12 @@ export function orderSelectedFields(fields: Record<string, unknown>, prefix: str
 		} else if (is(value, Table)) {
 			ordered.push(...orderSelectedFields(getTableColumns(value), path));
 		} else if (is(value, Subquery)) {
-			throw new TypeError(
-				`Selected field ${path.join('.')} is a subquery; select its fields, or use it in from() or a join`,
-			);
+			if (prefix.length > 0) {
+				throw new TypeError(
+					`Selected field ${path.join('.')} is a subquery inside an object; Drizzle's select types allow a subquery field only at the top level`,
+				);
+			}
+			ordered.push({ path, field: scalarSubquerySql(value, path), subquery: value });
 		} else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
 			ordered.push(...orderSelectedFields(value as Record<string, unknown>, path));
 		} else {
@@ -154,6 +275,32 @@ export function orderSelectedFields(fields: Record<string, unknown>, prefix: str
 		}
 	}
 	return ordered;
+}
+
+/**
+ * A subquery selected as a field (`select({ n: db.select(...).as('n') })`):
+ * `(select ...)`, read with the codec of its one field. CUBRID rejects a
+ * subquery of more than one column there (-493), so that is refused.
+ */
+function scalarSubquerySql(subquery: Subquery, path: readonly string[]): SQL {
+	const inner = Object.values(subquery._.selectedFields);
+	const [field] = inner;
+	if (inner.length !== 1 || !(is(field, Column) || is(field, SQL) || is(field, SQL.Aliased))) {
+		throw new TypeError(
+			`Selected field ${path.join('.')} is a subquery of ${inner.length === 1 ? 'a nested object' : `${inner.length} fields`}; a subquery selected as a field must select exactly one column or sql value`,
+		);
+	}
+	return sql`(${subquery._.sql})`.mapWith(decoderOf(field));
+}
+
+/** `query` with each subquery that is a selected field written as its `(select ...)`. */
+function withScalarSubqueries(query: SQL, scalars: ReadonlyMap<Subquery, SQL>): SQL {
+	return new SQL(
+		query.queryChunks.map((chunk) => {
+			if (is(chunk, Subquery)) return scalars.get(chunk) ?? chunk;
+			return is(chunk, SQL) ? withScalarSubqueries(chunk, scalars) : chunk;
+		}),
+	);
 }
 
 /** The decoder of a selected field: the column itself, or what `sql.mapWith()` set. */
@@ -339,6 +486,14 @@ export class CubridDialect {
 		return { sql: text, params };
 	}
 
+	/** A source in FROM or a join: an `aliasedTable()` is `"table" "alias"`. */
+	private sourceSql(source: CubridSelectSource): SQL {
+		const original = is(source, Table) ? getAliasedTableOriginalName(source) : undefined;
+		return original === undefined
+			? sql`${source}`
+			: sql`${sql.identifier(original)} ${sql.identifier(getTableName(source as Table))}`;
+	}
+
 	/** The SELECT; with `outputNames`, as a subquery whose every field has an output name. */
 	buildSelectQuery(config: CubridSelectConfig, outputNames = false): SQL {
 		if (config.offset !== undefined && config.limit === undefined) {
@@ -351,23 +506,78 @@ export class CubridDialect {
 		}
 		const fields = orderSelectedFields(config.fields);
 		if (fields.length === 0) throw new Error('A select needs at least one field');
+		// CUBRID compares identifiers ignoring case.
+		const sources = [config.source, ...config.joins.map((join) => join.source)].map((source) =>
+			sourceName(source).toLowerCase(),
+		);
+		const scalars = new Map<Subquery, SQL>();
+		for (const { path, field, subquery } of fields) {
+			if (!subquery) continue;
+			const clash = subquerySources.get(subquery)?.find((name) => sources.includes(name.toLowerCase()));
+			if (clash !== undefined) {
+				throw new Error(
+					`Selected field ${path.join('.')} is a subquery that reads ${clash}, which the outer query reads too: inside the subquery ${clash} would mean its own rows, not the outer row. Give one of them another name with aliasedTable(table, 'alias') from drizzle-orm`,
+				);
+			}
+			scalars.set(subquery, field as SQL);
+		}
+		// A subquery field used in a condition or ordering is its `(select ...)`, not a FROM source.
+		const scalar = <T>(item: T): T | SQL => {
+			if (is(item, Subquery)) return scalars.get(item) ?? item;
+			return scalars.size > 0 && is(item, SQL) ? withScalarSubqueries(item, scalars) : item;
+		};
 		const parts: SQL[] = [
-			sql`select ${config.distinct ? sql`distinct ` : undefined}${selectionSql(fields, outputNames)} from ${config.source}`,
+			sql`select ${config.distinct ? sql`distinct ` : undefined}${selectionSql(fields, outputNames)} from ${this.sourceSql(config.source)}`,
 		];
 		for (const join of config.joins) {
 			parts.push(
 				join.type === 'cross'
-					? sql` cross join ${join.source}`
-					: sql` ${sql.raw(join.type)} join ${join.source}${join.on ? sql` on ${join.on}` : undefined}`,
+					? sql` cross join ${this.sourceSql(join.source)}`
+					: sql` ${sql.raw(join.type)} join ${this.sourceSql(join.source)}${join.on ? sql` on ${scalar(join.on)}` : undefined}`,
 			);
 		}
-		if (config.where) parts.push(sql` where ${config.where}`);
-		if (config.groupBy.length > 0) parts.push(sql` group by ${sql.join(config.groupBy, sql`, `)}`);
-		if (config.having) parts.push(sql` having ${config.having}`);
-		if (config.orderBy.length > 0) parts.push(sql` order by ${sql.join(config.orderBy, sql`, `)}`);
+		if (config.where) parts.push(sql` where ${scalar(config.where)}`);
+		if (config.groupBy.length > 0) parts.push(sql` group by ${sql.join(config.groupBy.map(scalar), sql`, `)}`);
+		if (config.having) parts.push(sql` having ${scalar(config.having)}`);
+		if (config.orderBy.length > 0) parts.push(sql` order by ${sql.join(config.orderBy.map(scalar), sql`, `)}`);
 		if (config.limit !== undefined) parts.push(sql` limit ${config.limit}`);
 		if (config.offset !== undefined) parts.push(sql` offset ${config.offset}`);
 		if (config.forUpdate) parts.push(sql` for update`);
+		return sql.join(parts);
+	}
+
+	/**
+	 * A set operation. Each operand is parenthesised, so its own ORDER BY and
+	 * LIMIT apply to it; a set operation followed by another one is
+	 * parenthesised too. With `outputNames` the first select names every
+	 * field (the result's column names come from it), as for `.as()`.
+	 */
+	buildCompoundQuery(config: CubridCompoundConfig, outputNames = false): SQL {
+		for (const select of compoundSelects(config)) {
+			if (select.forUpdate) {
+				throw new Error(
+					'CUBRID rejects FOR UPDATE in a set operation (-494 on an operand, -493 on the result); lock the rows in a separate select',
+				);
+			}
+		}
+		if (config.offset !== undefined && config.limit === undefined) {
+			throw new Error('CUBRID needs limit() with offset(); add .limit() or remove .offset()');
+		}
+		const operand = (part: CubridSelectConfig | CubridCompoundConfig, names: boolean): SQL =>
+			isCompound(part) ? this.buildCompoundQuery(part, names) : this.buildSelectQuery(part, names);
+		let query = sql`(${operand(config.first, outputNames)})`;
+		config.operations.forEach(({ operator, all, right }, index) => {
+			if (index > 0) query = sql`(${query})`;
+			query = sql`${query} ${sql.raw(operator)}${all ? sql` all` : undefined} (${operand(right, false)})`;
+		});
+		const parts = [query];
+		if (config.orderBy.length > 0) {
+			const fields = compoundFields(config);
+			const items = config.orderBy.map((item) => compoundOrderSql(item, fields));
+			parts.push(sql` order by ${sql.join(items, sql`, `)}`);
+		}
+		if (config.limit !== undefined) parts.push(sql` limit ${config.limit}`);
+		if (config.offset !== undefined) parts.push(sql` offset ${config.offset}`);
 		return sql.join(parts);
 	}
 

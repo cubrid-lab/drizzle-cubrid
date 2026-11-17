@@ -17,12 +17,13 @@
 - `collectionLiteralSql(column, count)`: the typed literal a statement uses to
   write a collection (see [Collections](#collections)).
 - `drizzle(client)` with `db.select()`, `db.selectDistinct()` and
-  `db.execute()` (see [Queries](#queries)), `db.insert()`, `db.update()`
+  `db.execute()` (see [Queries](#queries)), set operations and scalar
+  subqueries (see [Set operations](#set-operations) and
+  [Subqueries as values](#subqueries-as-values)), `db.insert()`, `db.update()`
   and `db.delete()` (see [Writes](#writes-insert-update-delete)), and
   `db.transaction()` with nested transactions (see [Transactions](#transactions)).
 
-**Not yet:** relational queries (`db.query`), set operations (`union` and friends),
-scalar subqueries as selected fields, migrations or DDL generation (#163), and
+**Not yet:** relational queries (`db.query`), migrations or DDL generation (#163), and
 indexes or foreign keys in `extraConfig`. Native tables are not supported by
 the 0.x `drizzle()` from `drizzle-cubrid`.
 
@@ -96,6 +97,144 @@ types, so they match Drizzle's other dialects.
 Rows are read with `rowMode: 'array'` and mapped by position, so joined tables
 that share column names (`users.id`, `posts.id`) keep both values.
 
+### Set operations
+
+```ts
+import { desc } from 'drizzle-orm';
+import { union } from 'drizzle-cubrid/native';
+
+const names = await db
+  .select({ id: users.id, name: users.name })
+  .from(users)
+  .unionAll(db.select({ id: admins.userId, name: admins.login }).from(admins))
+  .orderBy(({ name }) => desc(name))
+  .limit(10);
+
+// posts.authorId is nullable, so it goes first: every operand's rows must fit the first's type.
+const ids = union(
+  db.select({ id: posts.authorId }).from(posts),
+  db.select({ id: users.id }).from(users),
+  db.select({ id: admins.userId }).from(admins),
+);
+```
+
+| Method | SQL |
+| --- | --- |
+| `.union(q)`, `union(a, b, ...rest)` | `(a) union (b)` |
+| `.unionAll(q)`, `unionAll(...)` | `(a) union all (b)` |
+| `.intersect(q)`, `intersect(...)` | `(a) intersect (b)` |
+| `.intersectAll(q)`, `intersectAll(...)` | `(a) intersect all (b)`: each row as often as the select that returns it least |
+| `.except(q)`, `except(...)` | `(a) except (b)` |
+| `.exceptAll(q)`, `exceptAll(...)` | `(a) except all (b)`: each row of `a` as often as it occurs there more than in `b` |
+
+They are methods of a select and of a set operation, standalone functions
+exported from `drizzle-cubrid/native`, and callbacks (`.union(({ intersect })
+=> intersect(b, c))`), as in Drizzle. Every one, with the ALL forms' bag
+semantics, was verified on CUBRID 11.4 (which also spells them `INTERSECTION`
+and `DIFFERENCE`).
+
+- **Operands** are native selects or set operations with the same keys in
+  the same order, and (at the type level) rows assignable to the first
+  select's. Each operand is parenthesised, so its own `orderBy()`,
+  `limit()` and `offset()` apply to it.
+- **Order:** chained operators run left to right; `a.union(b).intersect(c)`
+  is `((a) union (b)) intersect (c)`. CUBRID gives UNION, INTERSECT and
+  EXCEPT one precedence (unlike standard SQL, where INTERSECT binds tighter),
+  and the parentheses make the order explicit. A set operation passed as an
+  operand (`a.union(b.intersect(c))`) is parenthesised as one.
+- **Result:** `orderBy()`, `limit()` and `offset()` after the last operator
+  apply to the whole result. `orderBy()` takes fields of the first select
+  (or a callback receiving them), bare or in `asc()`/`desc()`, and sends
+  their positions (`order by 2 desc`). Anything else is refused: another
+  column, raw `sql`, and an expression such as ``sql`length(${t.s})` ``
+  (its column would become a position, `length(2)`, which CUBRID rejects
+  with -494). A set operator called after them makes the ordered result an
+  operand. Calling a set operator returns a new set operation; the one it
+  is called on is not changed.
+- **Operands are not copied:** a select used as an operand stays part of the
+  set operation, so changing it afterwards (`a.where(...)` after
+  `a.union(b)`) changes the set operation too, as with Drizzle's builders.
+  Build each operand completely before combining them.
+- **Rows** have the first select's fields and types and are read by position
+  with its codecs. The server gives each result column the common type of
+  the operands, so a field whose column has another SQL type than the first
+  select's is refused when the set operation is built: DATE with DATETIME or
+  TIMESTAMP comes back as a DATETIME, which a `date()` codec would cut to
+  midnight. Length, precision and mode do not count (`numeric(10, 2)` with
+  `numeric(38, 10)` is allowed), and CHAR, VARCHAR and STRING count as one
+  type. A `sql` field without a column codec is refused under a date or time
+  field; under any other codec it is allowed, and the codec throws on a value
+  it cannot read (an `integer()` codec refuses NUMERIC `'1.50'` rather than
+  rounding it), while the server rejects INTEGER with VARCHAR (-181). To
+  combine other types, cast and map with the first select's column:
+  ``sql`cast(${events.at} as date)`.mapWith(events.day)``.
+  A left join of the first select makes its fields nullable as for a select.
+- `.as(alias)`, `.prepare()` with placeholders in any operand, `.toSQL()`,
+  `$dynamic()` and use as a value list (`inArray(col, a.union(b))`) work as
+  for a select.
+
+### Subqueries as values
+
+A select made into a subquery with `.as(alias)` can be a selected field when
+it selects exactly one field, as in Drizzle 0.45 (drizzle-cubrid types it the
+same way on drizzle-orm 0.44, whose own types lack it); it is sent as `(select ...)` and
+read with that field's codec (a column's, or a `sql` field's `mapWith()`).
+Outer columns in its conditions are qualified, so correlated subqueries work.
+A subquery field (or a callback's field) used in `where`, `having`, `orderBy`
+or `groupBy` is sent as the same `(select ...)`:
+
+```ts
+import { count, eq, exists, inArray, max, sql } from 'drizzle-orm';
+
+const postCount = db
+  .select({ n: count().as('n') }) // a sql field in a subquery needs .as()
+  .from(posts)
+  .where(eq(posts.authorId, users.id))
+  .as('post_count');
+const rows = await db.select({ id: users.id, postCount }).from(users);
+// { id: bigint; postCount: number }[]
+
+await db.select().from(users).where(exists(db.select({ one: sql`1` }).from(posts).where(eq(posts.authorId, users.id))));
+await db.select().from(users).where(inArray(users.id, db.select({ id: posts.authorId }).from(posts)));
+await db.select({ id: users.id, top: sql<number>`${db.select({ m: max(posts.id) }).from(posts)}` }).from(users);
+```
+
+- A subquery that returns more than one row fails on the server (-459); use
+  `limit(1)` or an aggregate. One that returns no row gives `null`, though
+  Drizzle's types do not add `| null` (declare a `sql<T | null>` field when
+  that matters).
+- A select used inside `sql`, `exists()` or `inArray()` needs no `.as()`; it
+  is sent in parentheses. Such a `sql` field is not decoded unless it has
+  `mapWith()`.
+- **The same table inside and outside:** a subquery field that reads a
+  table (or subquery alias) the outer query also reads is refused, since
+  inside the subquery that name means the subquery's own rows, so
+  `where(eq(employees.boss, employees.id))` would compare each inner row with
+  itself. Read the inner table through Drizzle's `aliasedTable()`, which is
+  written as `"employees" "staff"`; this also works in `from()` and joins:
+
+  ```ts
+  import { aliasedTable, count, eq } from 'drizzle-orm';
+
+  const staff = aliasedTable(employees, 'staff');
+  const reports = db
+    .select({ c: count().as('c') })
+    .from(staff)
+    .where(eq(staff.boss, employees.id))
+    .as('reports');
+  await db.select({ id: employees.id, reports }).from(employees);
+  ```
+
+  `aliasedTable()` keeps the table's type, so it does not give a join its
+  own nullability at the type level. Selects used inside `sql`, `exists()`
+  or `inArray()` are not checked: as in SQL, a table name there means the
+  inner table.
+- A subquery of several fields is typed as an error, as in Drizzle, and
+  refused at runtime. A subquery field is allowed only at the top level of
+  the selection (Drizzle types it `never` inside an object), and not in a
+  select made into a subquery with `.as()`: use
+  ``sql`${query}`.as('name')`` there.
+
 ### Binding
 
 By default values are sent as typed binds with cubrid-client's
@@ -119,7 +258,14 @@ and `cause`. These are refused before anything is sent:
 
 | Refused | Why |
 | --- | --- |
-| FULL JOIN, lateral joins, `union`/`intersect`/`except` | No method: CUBRID has no FULL JOIN or LATERAL; set operations are a later slice |
+| FULL JOIN, lateral joins | No method: CUBRID has no FULL JOIN or LATERAL |
+| `.for('update')` on a select of a set operation | CUBRID 11.4 rejects FOR UPDATE on an operand (-494) and on the result (-493); a set operation has no `for()` |
+| Set operation operands with different keys (or in another order) | CUBRID rejects a different column count (-493); keys are checked as in Drizzle |
+| `orderBy()` of a set operation on anything but a field of the first select, bare or in `asc()`/`desc()` | Not a column of the result; an expression would be sent with positions in it (-494) |
+| A set operation whose operand field has another SQL type than the first select's (DATE with DATETIME), or a `sql` value without a column codec under a date or time field | The first select's codec decodes every row; a DATE codec would truncate the DATETIME the server returns |
+| A subquery field reading a table or alias the outer query reads | Inside it the name means the subquery's own rows; use `aliasedTable()` |
+| A subquery of more than one field (or a nested object) selected as a field | CUBRID 11.4 rejects it (-493) |
+| A subquery selected as a field inside an object, or inside a select made into a subquery with `.as()` | Drizzle's select types allow a subquery field only at the top level; use ``sql`${query}`.as('name')`` inside `.as()` |
 | `offset()` without `limit()` | CUBRID needs `LIMIT` with `OFFSET` |
 | `.for('share')`, `noWait`, `skipLocked` | CUBRID has only FOR UPDATE, without options |
 | `.for('update')` with DISTINCT, GROUP BY or HAVING | CUBRID 11.4 rejects it (-494) |

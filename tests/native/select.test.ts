@@ -321,14 +321,14 @@ describe('refusals', () => {
 		expect(() => db.select().from(users).innerJoin(users, undefined)).toThrow(/users is already used in this query/);
 		// @ts-expect-error not a field
 		expect(() => db.select({ x: 1 }).from(users).toSQL()).toThrow(/Selected field x is number 1, not a column or sql/);
-		const sq = db.select({ id: users.id }).from(users).as('sq');
-		// drizzle-orm 0.45 types allow a one-field subquery here (0.44 does not); scalar subqueries are a later slice.
+		const sq = db.select({ id: users.id, name: users.name }).from(users).as('sq');
+		// A multi-field subquery is typed as an error in the result; the cast checks the runtime refusal.
 		expect(() =>
 			db
 				.select({ sq } as unknown as CubridSelectedFields)
 				.from(users)
 				.toSQL(),
-		).toThrow(/Selected field sq is a subquery/);
+		).toThrow(/Selected field sq is a subquery of 2 fields; .*exactly one column or sql value/);
 		expect(() => db.select({}).from(users).toSQL()).toThrow(/at least one field/);
 		expect(() => db.select({ v: sql`1` }).from(users).as('s')).toThrow(/Subquery field v is raw sql without a name/);
 		expect(() => db.select({ _: users.id }).from(users).as('s')).toThrow(/cannot be named _/);

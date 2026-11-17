@@ -6,7 +6,7 @@ import { aliasedTable, Subquery } from 'drizzle-orm';
 import { Column, type ColumnBaseConfig, type UpdateColConfig } from 'drizzle-orm/column';
 import type { ColumnDataType } from 'drizzle-orm/column-builder';
 import { entityKind, is } from 'drizzle-orm/entity';
-import type { SelectedFields } from 'drizzle-orm/operations';
+import type { SelectedFields, SelectedFieldsFlat } from 'drizzle-orm/operations';
 import type {
 	AppendToNullabilityMap,
 	AppendToResult,
@@ -16,6 +16,7 @@ import type {
 	JoinNullability,
 	SelectMode,
 	SelectResult,
+	SelectResultField,
 } from 'drizzle-orm/query-builders/select.types';
 import { QueryPromise } from 'drizzle-orm/query-promise';
 import {
@@ -29,17 +30,23 @@ import {
 	sql,
 } from 'drizzle-orm/sql/sql';
 import { Table } from 'drizzle-orm/table';
-import type { Assume, DrizzleTypeError, Simplify } from 'drizzle-orm/utils';
+import type { Assume, DrizzleTypeError, Simplify, ValidateShape } from 'drizzle-orm/utils';
 import { getTableColumns } from 'drizzle-orm/utils';
 import type { CubridColumn } from './columns/common.js';
 import {
+	assertSetOperandCodecs,
+	type CubridCompoundConfig,
 	type CubridDialect,
 	type CubridJoinType,
 	type CubridOrderByItem,
 	type CubridSelectConfig,
 	type CubridSelectSource,
+	type CubridSetOperator,
+	compoundFields,
+	compoundSelects,
 	mapRow,
 	markSubqueryField,
+	markSubquerySources,
 	type OrderedField,
 	orderSelectedFields,
 	outputName,
@@ -50,6 +57,43 @@ import {
 import { getSqlDecoder } from './internal.js';
 import type { CubridSession } from './session.js';
 import { CubridTable } from './table.js';
+
+/**
+ * What `select()` takes: Drizzle's selected fields, plus a subquery as a
+ * field. drizzle-orm 0.45 types allow that and 0.44 types do not, so it is
+ * spelled out here for the whole supported range.
+ */
+export type CubridSelectedFields = Record<
+	string,
+	| SelectedFields<CubridColumn, CubridTable>[string]
+	| Subquery
+	| Record<string, SelectedFieldsFlat<CubridColumn>[string] | Subquery>
+>;
+
+type IsUnion<T, TAll = T> = T extends unknown ? ([TAll] extends [T] ? false : true) : never;
+
+type OneColumnError = SQL<DrizzleTypeError<'You can only select one column in the subquery'>>;
+
+/** The value of a subquery selected as a field: its one field's, or a type error as in drizzle-orm 0.45. */
+type ScalarSubqueryField<TFields> = [keyof TFields] extends [never]
+	? OneColumnError
+	: IsUnion<keyof TFields> extends true
+		? OneColumnError
+		: TFields[keyof TFields] extends Column | SQL | SQL.Aliased
+			? SQL<SelectResultField<TFields[keyof TFields]>>
+			: OneColumnError;
+
+/**
+ * A selection with each top-level subquery field typed as the `sql` value it
+ * is read as, so Drizzle's select result types (0.44 and 0.45 alike) give its
+ * one field's type. A subquery inside an object stays one, which Drizzle
+ * types `never` and the select refuses.
+ */
+export type CubridScalarSelection<TSelection> = {
+	[K in keyof TSelection]: TSelection[K] extends Subquery
+		? ScalarSubqueryField<TSelection[K]['_']['selectedFields']>
+		: TSelection[K];
+};
 
 /** A native table or a native subquery: what `from()` and the joins accept. */
 export type CubridSource = CubridTable | Subquery;
@@ -151,6 +195,10 @@ function aliasFields(fields: Record<string, unknown>, alias: string, prefix: str
 			aliased[key] = markSubqueryField(sql`${sql.identifier(alias)}.${sql.identifier(name)}`.mapWith(decoder), alias);
 		} else if (is(value, SQL)) {
 			throw new Error(`Subquery field ${name} is raw sql without a name; give it one with sql\`...\`.as('name')`);
+		} else if (is(value, Subquery)) {
+			throw new Error(
+				`Subquery field ${name} is a scalar subquery; inside a subquery select it as sql\`\${query}\`.as('name') with the unaliased query`,
+			);
 		} else if (is(value, Table)) {
 			aliased[key] = aliasFields(getTableColumns(value), alias, path);
 		} else if (is(value, Column)) {
@@ -160,6 +208,223 @@ function aliasFields(fields: Record<string, unknown>, alias: string, prefix: str
 		}
 	}
 	return aliased;
+}
+
+function orderItems<TSelection>(items: OrderItems<TSelection>, fields: TSelection): CubridOrderByItem[] {
+	const [first] = items;
+	if (typeof first === 'function') {
+		const result = first(fields);
+		return Array.isArray(result) ? result : [result];
+	}
+	return items as CubridOrderByItem[];
+}
+
+/** A subquery of a select or set operation, whose SQL names every field (see `outputName`). */
+function subqueryOf(
+	config: CubridSelectConfig | CubridCompoundConfig,
+	fields: Record<string, unknown>,
+	alias: string,
+	query: SQL,
+): Subquery & Record<string, unknown> {
+	for (const key of Object.keys(fields)) {
+		if (key === '_' || key === 'getSQL') throw new Error(`A subquery field cannot be named ${key}`);
+	}
+	const aliased = aliasFields(fields, alias);
+	const subquery = new Subquery(query, aliased, alias);
+	markSubquerySources(subquery, config);
+	return Object.assign(subquery, aliased);
+}
+
+type SubqueryOf<
+	TSelection extends ColumnsSelection,
+	TNullabilityMap extends Record<string, JoinNullability>,
+	TAlias extends string,
+> = CubridSubquery<TAlias, CubridAliasedSelection<BuildSubquerySelection<TSelection, TNullabilityMap>, TAlias>>;
+
+/** A native select or set operation whose rows are `TRow`: what a set operator takes. */
+export interface CubridSetOperand<TRow> extends SQLWrapper {
+	readonly _: { readonly result: TRow[] };
+}
+
+/** The right-hand select of a set operator, or a type error naming the keys `TRow` lacks. */
+export type CubridSetOperandRight<TValue extends CubridSetOperand<TRow>, TRow> = TValue extends {
+	readonly _: { readonly result: (infer TValueRow)[] };
+}
+	? ValidateShape<TValueRow, TRow, TValue>
+	: TValue;
+
+type CubridSetOperandRest<TValue extends readonly CubridSetOperand<TRow>[], TRow> = TValue extends [
+	infer First extends CubridSetOperand<TRow>,
+	...infer Rest extends CubridSetOperand<TRow>[],
+]
+	? [CubridSetOperandRight<First, TRow>, ...CubridSetOperandRest<Rest, TRow>]
+	: TValue;
+
+/** `union(left, right, ...rest)` and the other standalone set operators. */
+export type CubridSetOperatorFn = <
+	TSelection extends ColumnsSelection,
+	TSelectMode extends SelectMode,
+	TNullabilityMap extends Record<string, JoinNullability>,
+	TValue extends CubridSetOperand<SelectResult<TSelection, TSelectMode, TNullabilityMap>>,
+	TRest extends CubridSetOperand<SelectResult<TSelection, TSelectMode, TNullabilityMap>>[],
+>(
+	left: CubridSetOperationSource<TSelection, TSelectMode, TNullabilityMap>,
+	right: CubridSetOperandRight<TValue, SelectResult<TSelection, TSelectMode, TNullabilityMap>>,
+	...rest: CubridSetOperandRest<TRest, SelectResult<TSelection, TSelectMode, TNullabilityMap>>
+) => CubridSetOperation<TSelection, TSelectMode, TNullabilityMap>;
+
+/** What the callback form of `.union((ops) => …)` receives. */
+export interface CubridSetOperators {
+	union: CubridSetOperatorFn;
+	unionAll: CubridSetOperatorFn;
+	intersect: CubridSetOperatorFn;
+	intersectAll: CubridSetOperatorFn;
+	except: CubridSetOperatorFn;
+	exceptAll: CubridSetOperatorFn;
+}
+
+type SetOperandArgument<TValue extends CubridSetOperand<TRow>, TRow> =
+	| CubridSetOperandRight<TValue, TRow>
+	| ((setOperators: CubridSetOperators) => CubridSetOperandRight<TValue, TRow>);
+
+interface Operand {
+	session: CubridSession;
+	dialect: CubridDialect;
+	config: CubridSelectState | CubridCompoundConfig;
+}
+
+/** The session, dialect and query of every native select and set operation. */
+const operands = new WeakMap<object, Operand>();
+
+function operandOf(value: unknown, where: string): Operand {
+	const operand = typeof value === 'object' && value !== null ? operands.get(value) : undefined;
+	if (!operand) throw new TypeError(`${where} needs a drizzle-cubrid/native select or set operation`);
+	return operand;
+}
+
+/** The first select of a set operation, whose fields and joins the result has. */
+function firstSelect(config: CubridSelectState | CubridCompoundConfig): CubridSelectState {
+	return compoundSelects(config)[0] as CubridSelectState;
+}
+
+function setOperation<
+	TSelection extends ColumnsSelection,
+	TSelectMode extends SelectMode,
+	TNullabilityMap extends Record<string, JoinNullability>,
+>(
+	left: CubridSetOperationSource<TSelection, TSelectMode, TNullabilityMap>,
+	operator: CubridSetOperator,
+	all: boolean,
+	right: unknown,
+): CubridSetOperation<TSelection, TSelectMode, TNullabilityMap> {
+	const name = `${operator}${all ? 'All' : ''}()`;
+	const { session, dialect, config } = operandOf(left, name);
+	const resolved = typeof right === 'function' ? right(setOperators) : right;
+	const other = operandOf(resolved, name);
+	const [leftFields, rightFields] = [compoundFields(config), compoundFields(other.config)];
+	const keys = (fields: OrderedField[]) => fields.map(({ path }) => path.join('.'));
+	const [leftKeys, rightKeys] = [keys(leftFields), keys(rightFields)];
+	if (leftKeys.join(',') !== rightKeys.join(',')) {
+		throw new Error(
+			`${name}: the selects have different fields (${leftKeys.join(', ')} and ${rightKeys.join(', ')}); every select of a set operation needs the same keys in the same order`,
+		);
+	}
+	assertSetOperandCodecs(leftFields, rightFields, name);
+	const operation = { operator, all, right: other.config };
+	const compound: CubridCompoundConfig =
+		'operations' in config && config.orderBy.length === 0 && config.limit === undefined && config.offset === undefined
+			? { ...config, operations: [...config.operations, operation] }
+			: { first: config, operations: [operation], orderBy: [] };
+	return new CubridSetOperation<TSelection, TSelectMode, TNullabilityMap>(session, dialect, compound);
+}
+
+function setOperator(operator: CubridSetOperator, all: boolean): CubridSetOperatorFn {
+	return (left, right, ...rest) => {
+		let result = setOperation(left, operator, all, right);
+		for (const next of rest) result = setOperation(result, operator, all, next);
+		return result;
+	};
+}
+
+/** `UNION`: rows of either select, without duplicates. */
+export const union: CubridSetOperatorFn = setOperator('union', false);
+/** `UNION ALL`: rows of every select, duplicates kept. */
+export const unionAll: CubridSetOperatorFn = setOperator('union', true);
+/** `INTERSECT`: distinct rows that every select returns. */
+export const intersect: CubridSetOperatorFn = setOperator('intersect', false);
+/** `INTERSECT ALL`: rows that every select returns, each as often as the select that returns it least. */
+export const intersectAll: CubridSetOperatorFn = setOperator('intersect', true);
+/** `EXCEPT`: distinct rows of the left select that the right one does not return. */
+export const except: CubridSetOperatorFn = setOperator('except', false);
+/** `EXCEPT ALL`: rows of the left select, each as often as it occurs there more than in the right one. */
+export const exceptAll: CubridSetOperatorFn = setOperator('except', true);
+
+const setOperators: CubridSetOperators = { union, unionAll, intersect, intersectAll, except, exceptAll };
+
+/**
+ * A select or set operation that set operators can be called on. The result
+ * has the first select's fields and types; rows are mapped by position.
+ */
+export abstract class CubridSetOperationSource<
+		TSelection extends ColumnsSelection,
+		TSelectMode extends SelectMode,
+		TNullabilityMap extends Record<string, JoinNullability>,
+	>
+	extends QueryPromise<SelectResult<TSelection, TSelectMode, TNullabilityMap>[]>
+	implements SQLWrapper
+{
+	static override readonly [entityKind]: string = 'CubridSetOperationSource';
+
+	declare readonly _: {
+		readonly selection: TSelection;
+		readonly selectMode: TSelectMode;
+		readonly nullabilityMap: TNullabilityMap;
+		readonly result: SelectResult<TSelection, TSelectMode, TNullabilityMap>[];
+	};
+
+	abstract getSQL(): SQL;
+
+	/** `UNION` with another select or set operation of the same fields. */
+	union<TValue extends CubridSetOperand<SelectResult<TSelection, TSelectMode, TNullabilityMap>>>(
+		right: SetOperandArgument<TValue, SelectResult<TSelection, TSelectMode, TNullabilityMap>>,
+	): CubridSetOperation<TSelection, TSelectMode, TNullabilityMap> {
+		return setOperation(this, 'union', false, right);
+	}
+
+	/** `UNION ALL`. */
+	unionAll<TValue extends CubridSetOperand<SelectResult<TSelection, TSelectMode, TNullabilityMap>>>(
+		right: SetOperandArgument<TValue, SelectResult<TSelection, TSelectMode, TNullabilityMap>>,
+	): CubridSetOperation<TSelection, TSelectMode, TNullabilityMap> {
+		return setOperation(this, 'union', true, right);
+	}
+
+	/** `INTERSECT`. */
+	intersect<TValue extends CubridSetOperand<SelectResult<TSelection, TSelectMode, TNullabilityMap>>>(
+		right: SetOperandArgument<TValue, SelectResult<TSelection, TSelectMode, TNullabilityMap>>,
+	): CubridSetOperation<TSelection, TSelectMode, TNullabilityMap> {
+		return setOperation(this, 'intersect', false, right);
+	}
+
+	/** `INTERSECT ALL` (bag semantics, as CUBRID 11.4 evaluates it). */
+	intersectAll<TValue extends CubridSetOperand<SelectResult<TSelection, TSelectMode, TNullabilityMap>>>(
+		right: SetOperandArgument<TValue, SelectResult<TSelection, TSelectMode, TNullabilityMap>>,
+	): CubridSetOperation<TSelection, TSelectMode, TNullabilityMap> {
+		return setOperation(this, 'intersect', true, right);
+	}
+
+	/** `EXCEPT`. */
+	except<TValue extends CubridSetOperand<SelectResult<TSelection, TSelectMode, TNullabilityMap>>>(
+		right: SetOperandArgument<TValue, SelectResult<TSelection, TSelectMode, TNullabilityMap>>,
+	): CubridSetOperation<TSelection, TSelectMode, TNullabilityMap> {
+		return setOperation(this, 'except', false, right);
+	}
+
+	/** `EXCEPT ALL` (bag semantics, as CUBRID 11.4 evaluates it). */
+	exceptAll<TValue extends CubridSetOperand<SelectResult<TSelection, TSelectMode, TNullabilityMap>>>(
+		right: SetOperandArgument<TValue, SelectResult<TSelection, TSelectMode, TNullabilityMap>>,
+	): CubridSetOperation<TSelection, TSelectMode, TNullabilityMap> {
+		return setOperation(this, 'except', true, right);
+	}
 }
 
 /**
@@ -175,20 +440,14 @@ export class CubridQueryBuilder {
 	) {}
 
 	select(): CubridSelectBuilder<undefined>;
-	select<TSelection extends SelectedFields<CubridColumn, CubridTable>>(
-		fields: TSelection,
-	): CubridSelectBuilder<TSelection>;
-	select(fields?: SelectedFields<CubridColumn, CubridTable>): CubridSelectBuilder<ColumnsSelection | undefined> {
+	select<TSelection extends CubridSelectedFields>(fields: TSelection): CubridSelectBuilder<TSelection>;
+	select(fields?: CubridSelectedFields): CubridSelectBuilder<ColumnsSelection | undefined> {
 		return new CubridSelectBuilder(this.session, this.dialect, fields, false);
 	}
 
 	selectDistinct(): CubridSelectBuilder<undefined>;
-	selectDistinct<TSelection extends SelectedFields<CubridColumn, CubridTable>>(
-		fields: TSelection,
-	): CubridSelectBuilder<TSelection>;
-	selectDistinct(
-		fields?: SelectedFields<CubridColumn, CubridTable>,
-	): CubridSelectBuilder<ColumnsSelection | undefined> {
+	selectDistinct<TSelection extends CubridSelectedFields>(fields: TSelection): CubridSelectBuilder<TSelection>;
+	selectDistinct(fields?: CubridSelectedFields): CubridSelectBuilder<ColumnsSelection | undefined> {
 		return new CubridSelectBuilder(this.session, this.dialect, fields, true);
 	}
 }
@@ -209,7 +468,7 @@ export class CubridSelectBuilder<TSelection extends ColumnsSelection | undefined
 		GetSelectTableName<TFrom>,
 		TSelection extends undefined
 			? Assume<GetSelectTableSelection<TFrom>, ColumnsSelection>
-			: Assume<TSelection, ColumnsSelection>,
+			: Assume<CubridScalarSelection<TSelection>, ColumnsSelection>,
 		TSelection extends undefined ? 'single' : 'partial'
 	> {
 		assertSource(source, 'from()');
@@ -246,7 +505,7 @@ export class CubridSelect<
 		TSelectMode extends SelectMode,
 		TNullabilityMap extends Record<string, JoinNullability> = DefaultNullability<TTableName>,
 	>
-	extends QueryPromise<SelectResult<TSelection, TSelectMode, TNullabilityMap>[]>
+	extends CubridSetOperationSource<TSelection, TSelectMode, TNullabilityMap>
 	implements SQLWrapper
 {
 	static override readonly [entityKind]: string = 'CubridSelect';
@@ -265,6 +524,7 @@ export class CubridSelect<
 		private readonly config: CubridSelectState,
 	) {
 		super();
+		operands.set(this, { session, dialect, config });
 	}
 
 	private join<TJoined extends CubridSource, TJoinType extends CubridJoinType>(
@@ -314,12 +574,7 @@ export class CubridSelect<
 	}
 
 	private items(items: OrderItems<TSelection>): CubridOrderByItem[] {
-		const [first] = items;
-		if (typeof first === 'function') {
-			const result = first(this.config.fields as TSelection);
-			return Array.isArray(result) ? result : [result];
-		}
-		return items as CubridOrderByItem[];
+		return orderItems(items, this.config.fields as TSelection);
 	}
 
 	where(where: Condition<TSelection>): this {
@@ -389,18 +644,13 @@ export class CubridSelect<
 	}
 
 	/** This query as a subquery for `from()`, a join or another query's condition. */
-	as<TAlias extends string>(
-		alias: TAlias,
-	): CubridSubquery<TAlias, CubridAliasedSelection<BuildSubquerySelection<TSelection, TNullabilityMap>, TAlias>> {
-		for (const key of Object.keys(this.config.fields)) {
-			if (key === '_' || key === 'getSQL') throw new Error(`A subquery field cannot be named ${key}`);
-		}
-		const fields = aliasFields(this.config.fields, alias);
-		const query = this.dialect.buildSelectQuery(this.config, true);
-		return Object.assign(new Subquery(query, fields, alias), fields) as CubridSubquery<
-			TAlias,
-			CubridAliasedSelection<BuildSubquerySelection<TSelection, TNullabilityMap>, TAlias>
-		>;
+	as<TAlias extends string>(alias: TAlias): SubqueryOf<TSelection, TNullabilityMap, TAlias> {
+		return subqueryOf(
+			this.config,
+			this.config.fields,
+			alias,
+			this.dialect.buildSelectQuery(this.config, true),
+		) as SubqueryOf<TSelection, TNullabilityMap, TAlias>;
 	}
 
 	/** Builds the SQL once; `execute()` takes the values of `sql.placeholder()`s. */
@@ -416,20 +666,97 @@ export class CubridSelect<
 	}
 }
 
+/**
+ * A set operation (`union`, `unionAll`, `intersect`, `intersectAll`, `except`,
+ * `exceptAll`). Its rows have the first select's fields, decoded by their
+ * codecs. `orderBy()` takes fields of the first select (sent as positions),
+ * and `limit()`/`offset()` apply to the result; a set operator called after
+ * them makes the ordered result an operand.
+ */
+export class CubridSetOperation<
+	TSelection extends ColumnsSelection,
+	TSelectMode extends SelectMode,
+	TNullabilityMap extends Record<string, JoinNullability>,
+> extends CubridSetOperationSource<TSelection, TSelectMode, TNullabilityMap> {
+	static override readonly [entityKind]: string = 'CubridSetOperation';
+
+	constructor(
+		private readonly session: CubridSession,
+		private readonly dialect: CubridDialect,
+		private readonly config: CubridCompoundConfig,
+	) {
+		super();
+		operands.set(this, { session, dialect, config });
+	}
+
+	/** ORDER BY on the result; use the first select's fields, with `asc()` and `desc()`. */
+	orderBy(...columns: OrderItems<TSelection>): this {
+		this.config.orderBy = orderItems(columns, firstSelect(this.config).fields as TSelection);
+		return this;
+	}
+
+	limit(limit: number | Placeholder): this {
+		this.config.limit = limit;
+		return this;
+	}
+
+	/** OFFSET; CUBRID needs a `limit()` with it. */
+	offset(offset: number | Placeholder): this {
+		this.config.offset = offset;
+		return this;
+	}
+
+	/** Returns the query typed for dynamic building. */
+	$dynamic(): this {
+		return this;
+	}
+
+	getSQL(): SQL {
+		return this.dialect.buildCompoundQuery(this.config);
+	}
+
+	toSQL(): Query {
+		return this.dialect.sqlToQuery(this);
+	}
+
+	/** This set operation as a subquery; its fields are the first select's. */
+	as<TAlias extends string>(alias: TAlias): SubqueryOf<TSelection, TNullabilityMap, TAlias> {
+		return subqueryOf(
+			this.config,
+			firstSelect(this.config).fields,
+			alias,
+			this.dialect.buildCompoundQuery(this.config, true),
+		) as SubqueryOf<TSelection, TNullabilityMap, TAlias>;
+	}
+
+	/** Builds the SQL once; `execute()` takes the values of `sql.placeholder()`s. */
+	prepare(): CubridPreparedSelect<SelectResult<TSelection, TSelectMode, TNullabilityMap>> {
+		const query = this.toSQL();
+		const first = firstSelect(this.config);
+		const nullability = first.joins.length > 0 ? { ...first.nullability } : undefined;
+		const temporal = compoundSelects(this.config).some((select) =>
+			orderSelectedFields(select.fields).some(({ field }) => readsTemporal(field)),
+		);
+		return new CubridPreparedSelect(this.session, query, compoundFields(this.config), nullability, temporal);
+	}
+
+	override execute(): Promise<SelectResult<TSelection, TSelectMode, TNullabilityMap>[]> {
+		return this.prepare().execute();
+	}
+}
+
 /** A SELECT built once; run it with `execute(placeholderValues)`. */
 export class CubridPreparedSelect<TRow> {
 	static readonly [entityKind]: string = 'CubridPreparedSelect';
-
-	private readonly temporal: boolean;
 
 	constructor(
 		private readonly session: CubridSession,
 		private readonly query: Query,
 		private readonly fields: readonly OrderedField[],
 		private readonly nullability: Record<string, boolean> | undefined,
-	) {
-		this.temporal = fields.some(({ field }) => readsTemporal(field));
-	}
+		/** Whether any select reads a date or time column (see `readsTemporal`). */
+		private readonly temporal = fields.some(({ field }) => readsTemporal(field)),
+	) {}
 
 	async execute(placeholderValues: Record<string, unknown> = {}): Promise<TRow[]> {
 		const params = fillPlaceholders(this.query.params, placeholderValues);
