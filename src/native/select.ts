@@ -6,7 +6,7 @@ import { aliasedTable, Subquery } from 'drizzle-orm';
 import { Column, type ColumnBaseConfig, type UpdateColConfig } from 'drizzle-orm/column';
 import type { ColumnDataType } from 'drizzle-orm/column-builder';
 import { entityKind, is } from 'drizzle-orm/entity';
-import type { SelectedFields } from 'drizzle-orm/operations';
+import type { SelectedFields, SelectedFieldsFlat } from 'drizzle-orm/operations';
 import type {
 	AppendToNullabilityMap,
 	AppendToResult,
@@ -16,6 +16,7 @@ import type {
 	JoinNullability,
 	SelectMode,
 	SelectResult,
+	SelectResultField,
 } from 'drizzle-orm/query-builders/select.types';
 import { QueryPromise } from 'drizzle-orm/query-promise';
 import {
@@ -56,6 +57,43 @@ import {
 import { getSqlDecoder } from './internal.js';
 import type { CubridSession } from './session.js';
 import { CubridTable } from './table.js';
+
+/**
+ * What `select()` takes: Drizzle's selected fields, plus a subquery as a
+ * field. drizzle-orm 0.45 types allow that and 0.44 types do not, so it is
+ * spelled out here for the whole supported range.
+ */
+export type CubridSelectedFields = Record<
+	string,
+	| SelectedFields<CubridColumn, CubridTable>[string]
+	| Subquery
+	| Record<string, SelectedFieldsFlat<CubridColumn>[string] | Subquery>
+>;
+
+type IsUnion<T, TAll = T> = T extends unknown ? ([TAll] extends [T] ? false : true) : never;
+
+type OneColumnError = SQL<DrizzleTypeError<'You can only select one column in the subquery'>>;
+
+/** The value of a subquery selected as a field: its one field's, or a type error as in drizzle-orm 0.45. */
+type ScalarSubqueryField<TFields> = [keyof TFields] extends [never]
+	? OneColumnError
+	: IsUnion<keyof TFields> extends true
+		? OneColumnError
+		: TFields[keyof TFields] extends Column | SQL | SQL.Aliased
+			? SQL<SelectResultField<TFields[keyof TFields]>>
+			: OneColumnError;
+
+/**
+ * A selection with each top-level subquery field typed as the `sql` value it
+ * is read as, so Drizzle's select result types (0.44 and 0.45 alike) give its
+ * one field's type. A subquery inside an object stays one, which Drizzle
+ * types `never` and the select refuses.
+ */
+export type CubridScalarSelection<TSelection> = {
+	[K in keyof TSelection]: TSelection[K] extends Subquery
+		? ScalarSubqueryField<TSelection[K]['_']['selectedFields']>
+		: TSelection[K];
+};
 
 /** A native table or a native subquery: what `from()` and the joins accept. */
 export type CubridSource = CubridTable | Subquery;
@@ -402,20 +440,14 @@ export class CubridQueryBuilder {
 	) {}
 
 	select(): CubridSelectBuilder<undefined>;
-	select<TSelection extends SelectedFields<CubridColumn, CubridTable>>(
-		fields: TSelection,
-	): CubridSelectBuilder<TSelection>;
-	select(fields?: SelectedFields<CubridColumn, CubridTable>): CubridSelectBuilder<ColumnsSelection | undefined> {
+	select<TSelection extends CubridSelectedFields>(fields: TSelection): CubridSelectBuilder<TSelection>;
+	select(fields?: CubridSelectedFields): CubridSelectBuilder<ColumnsSelection | undefined> {
 		return new CubridSelectBuilder(this.session, this.dialect, fields, false);
 	}
 
 	selectDistinct(): CubridSelectBuilder<undefined>;
-	selectDistinct<TSelection extends SelectedFields<CubridColumn, CubridTable>>(
-		fields: TSelection,
-	): CubridSelectBuilder<TSelection>;
-	selectDistinct(
-		fields?: SelectedFields<CubridColumn, CubridTable>,
-	): CubridSelectBuilder<ColumnsSelection | undefined> {
+	selectDistinct<TSelection extends CubridSelectedFields>(fields: TSelection): CubridSelectBuilder<TSelection>;
+	selectDistinct(fields?: CubridSelectedFields): CubridSelectBuilder<ColumnsSelection | undefined> {
 		return new CubridSelectBuilder(this.session, this.dialect, fields, true);
 	}
 }
@@ -436,7 +468,7 @@ export class CubridSelectBuilder<TSelection extends ColumnsSelection | undefined
 		GetSelectTableName<TFrom>,
 		TSelection extends undefined
 			? Assume<GetSelectTableSelection<TFrom>, ColumnsSelection>
-			: Assume<TSelection, ColumnsSelection>,
+			: Assume<CubridScalarSelection<TSelection>, ColumnsSelection>,
 		TSelection extends undefined ? 'single' : 'partial'
 	> {
 		assertSource(source, 'from()');

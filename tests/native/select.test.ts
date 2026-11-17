@@ -322,7 +322,7 @@ describe('refusals', () => {
 		// @ts-expect-error not a field
 		expect(() => db.select({ x: 1 }).from(users).toSQL()).toThrow(/Selected field x is number 1, not a column or sql/);
 		const sq = db.select({ id: users.id, name: users.name }).from(users).as('sq');
-		// drizzle-orm 0.45 types allow a subquery here and type a multi-field one as an error; 0.44 types do not allow one.
+		// A multi-field subquery is typed as an error in the result; the cast checks the runtime refusal.
 		expect(() =>
 			db
 				.select({ sq } as unknown as CubridSelectedFields)

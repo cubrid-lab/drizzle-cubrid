@@ -2,20 +2,19 @@
 
 import { DefaultLogger, type Logger, TransactionRollbackError } from 'drizzle-orm';
 import { entityKind } from 'drizzle-orm/entity';
-import type { SelectedFields } from 'drizzle-orm/operations';
 import type { SQLWrapper } from 'drizzle-orm/sql/sql';
-import type { CubridColumn } from './columns/common.js';
 import { CubridDialect } from './dialect.js';
 import { CubridDelete, CubridInsertBuilder, CubridUpdateBuilder } from './dml.js';
-import { CubridSelectBuilder } from './select.js';
+import { CubridSelectBuilder, type CubridSelectedFields } from './select.js';
+
+export type { CubridSelectedFields };
+
 import { type CubridBinding, type CubridNativeClient, CubridSession, type CubridTransactionConfig } from './session.js';
 import { CubridTable } from './table.js';
 
 function assertTable(table: unknown, method: string): asserts table is CubridTable {
 	if (!(table instanceof CubridTable)) throw new TypeError(`${method} needs a drizzle-cubrid/native table`);
 }
-
-export type CubridSelectedFields = SelectedFields<CubridColumn, CubridTable>;
 
 export interface CubridDrizzleConfig {
 	/** `true` logs every statement with Drizzle's `DefaultLogger`. */

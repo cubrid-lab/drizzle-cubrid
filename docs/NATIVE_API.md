@@ -176,7 +176,8 @@ and `DIFFERENCE`).
 ### Subqueries as values
 
 A select made into a subquery with `.as(alias)` can be a selected field when
-it selects exactly one field, as in Drizzle; it is sent as `(select ...)` and
+it selects exactly one field, as in Drizzle 0.45 (drizzle-cubrid types it the
+same way on drizzle-orm 0.44, whose own types lack it); it is sent as `(select ...)` and
 read with that field's codec (a column's, or a `sql` field's `mapWith()`).
 Outer columns in its conditions are qualified, so correlated subqueries work.
 A subquery field (or a callback's field) used in `where`, `having`, `orderBy`
