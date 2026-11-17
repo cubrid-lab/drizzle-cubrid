@@ -50,7 +50,7 @@ flowchart TD
 
 ### Native dialect preview
 
-`drizzle-cubrid/native` is an **experimental preview** of the CUBRID-native dialect that will replace the MySQL-derived classes ([ADR 0007](docs/adr/0007-drizzle-extension-boundary.md)). Today it has `cubridTable()` and column builders with CUBRID types and codecs (`smallint`, `integer`, `bigint`, `numeric`, `float`, `double`, `char`, `varchar`, `string`, `boolean`, date and time, `monetary`, `set`/`multiset`/`sequence`) and `drizzle(client)` with `select()` (joins, grouping, subqueries, placeholders), but no writes yet, so it is **not for production**. See [docs/NATIVE_API.md](docs/NATIVE_API.md).
+`drizzle-cubrid/native` is an **experimental preview** of the CUBRID-native dialect that will replace the MySQL-derived classes ([ADR 0007](docs/adr/0007-drizzle-extension-boundary.md)). Today it has `cubridTable()` and column builders with CUBRID types and codecs (`smallint`, `integer`, `bigint`, `numeric`, `float`, `double`, `char`, `varchar`, `string`, `boolean`, date and time, `monetary`, `set`/`multiset`/`sequence`) and `drizzle(client, { schema? })` with `select()` (joins, grouping, subqueries, set operations, placeholders), `insert()`/`update()`/`delete()`, `transaction()` and relational queries with `with` (`db.query`), but its API can still change, so it is **not for production**. See [docs/NATIVE_API.md](docs/NATIVE_API.md).
 
 ## Installation
 
@@ -311,8 +311,9 @@ for DATE/DATETIME values and which garbles non-ASCII text in an ISO-8859-1
 database; Drizzle also reads that JSON with `JSON.parse`, which rounds BIGINT
 values beyond 2^53
 ([#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200)). Query the
-related table separately or use a join; native support is tracked in
-[#158](https://github.com/cubrid-lab/drizzle-cubrid/issues/158).
+related table separately or use a join. The experimental `drizzle-cubrid/native`
+entry loads `with` without LATERAL or JSON
+([Relational queries](docs/NATIVE_API.md#relational-queries), #158).
 
 ## Error Handling
 
@@ -351,7 +352,7 @@ try {
 | [Schema Guide](docs/SCHEMA.md) | Column types, CUBRID types, relations, custom types |
 | [Queries Guide](docs/QUERIES.md) | SELECT, INSERT, UPDATE, DELETE, joins, aggregations, raw SQL |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common errors, TypeScript issues, performance tips |
-| [Native API preview](docs/NATIVE_API.md) | Experimental `drizzle-cubrid/native` tables, column builders, codecs and SELECT |
+| [Native API preview](docs/NATIVE_API.md) | Experimental `drizzle-cubrid/native` tables, column builders, codecs, queries, writes, transactions and relational queries |
 | [Schema migration status](examples/migration/README.md) | Native CUBRID migration is not yet supported; no other database dialect fallback |
 
 ## Development

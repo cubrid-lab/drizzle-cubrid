@@ -20,10 +20,12 @@
   `db.execute()` (see [Queries](#queries)), set operations and scalar
   subqueries (see [Set operations](#set-operations) and
   [Subqueries as values](#subqueries-as-values)), `db.insert()`, `db.update()`
-  and `db.delete()` (see [Writes](#writes-insert-update-delete)), and
-  `db.transaction()` with nested transactions (see [Transactions](#transactions)).
+  and `db.delete()` (see [Writes](#writes-insert-update-delete)),
+  `db.transaction()` with nested transactions (see [Transactions](#transactions)),
+  and relational queries, `db.query.<table>.findMany()`/`findFirst()` with
+  `with` (see [Relational queries](#relational-queries)).
 
-**Not yet:** relational queries (`db.query`), migrations or DDL generation (#163), and
+**Not yet:** prepared or streamed relational queries (#165), migrations or DDL generation (#163), and
 indexes or foreign keys in `extraConfig`. Native tables are not supported by
 the 0.x `drizzle()` from `drizzle-cubrid`.
 
@@ -475,6 +477,185 @@ Refused before a connection is taken:
 | `isolationLevel` with a `transaction()` that declares no options parameter | It would run at the server's default level |
 | Two nested transactions of one level at the same time | They would roll back to the same point of one connection |
 | A config that is not a plain object (`null`, an array); only an own `isolationLevel` is read | |
+
+## Relational queries
+
+```ts
+import { createPool } from 'cubrid-client';
+import { relations } from 'drizzle-orm';
+import { drizzle } from 'drizzle-cubrid/native';
+
+export const usersRelations = relations(users, ({ one, many }) => ({
+  posts: many(posts),
+  manager: one(users, { fields: [users.managerId], references: [users.id], relationName: 'manager' }),
+  reports: many(users, { relationName: 'manager' }),
+  memberships: many(memberships), // many-to-many: two one-to-many hops through the junction table
+}));
+export const postsRelations = relations(posts, ({ one, many }) => ({
+  author: one(users, { fields: [posts.authorId], references: [users.id] }),
+  comments: many(comments),
+}));
+
+// schema: the tables and relations, e.g. `import * as schema`; see Consistency and connections for the pool's level
+const pool = createPool({ host, database, user, password, timezone: 'utc', isolationLevel: 'repeatable read' });
+const db = drizzle(pool, { schema });
+
+const rows = await db.query.users.findMany({
+  columns: { id: true, name: true },
+  where: (u, { gt }) => gt(u.id, 0n),
+  orderBy: (u, { asc }) => asc(u.name),
+  limit: 20,
+  offset: 40,
+  extras: (u, { sql }) => ({ nameLength: sql<number>`char_length(${u.name})`.mapWith(Number).as('name_length') }),
+  with: {
+    manager: { columns: { name: true } }, // object or null
+    posts: {
+      where: (p, { like }) => like(p.title, 'A%'),
+      orderBy: (p, { desc }) => desc(p.id),
+      limit: 3, // per user
+      with: { comments: true },
+    },
+    memberships: { columns: {}, with: { group: true } },
+  },
+});
+const first = await db.query.users.findFirst({ where: (u, { eq }) => eq(u.id, 1n) }); // row or undefined
+```
+
+`drizzle(client, { schema })` takes the native tables and Drizzle's
+`relations()` (from `drizzle-orm`, the v1 relations API of Drizzle 0.44 and
+0.45) and adds `db.query.<table>` with `findMany()` and `findFirst()`, as in
+Drizzle's other dialects: `columns` (include with `true`, or exclude with
+`false`; `{}` selects none), `with` to any depth, `where` and `orderBy` as values or
+callbacks, `limit` (and `offset` at the root), and `extras`. Result types are Drizzle's
+neutral `BuildQueryResult`: a `one()` relation is an object, or `null` when its
+`fields` are nullable or nothing matches; a `many()` relation is an array. `tx.query`
+works the same inside `db.transaction()`. Without `schema`, `db.query` is a
+type error, as in Drizzle.
+
+### How it loads
+
+CUBRID has no `LATERAL`, and its JSON aggregation loses value types (and
+rejects date and time values), so relations are not loaded as JSON. Instead:
+
+1. One SELECT reads the root rows.
+2. For each relation in `with`, one SELECT reads the related rows of all
+   parents of that level: `where "posts"."author_id" in (?, ?, …)`, with the
+   distinct non-NULL parent keys. A composite key uses a row-value `IN`
+   (`("lines"."region", "lines"."num") in ((?, ?), (?, ?))`, verified on 11.4).
+   Keys are sent in chunks of 1,000: CUBRID 11.4 ran `IN` lists of 100,000
+   bound values, and a chunk keeps one statement small. Parent keys are bound
+   with the parent column's codec.
+3. Nested relations repeat step 2 on the rows just loaded.
+4. The rows are joined in JavaScript on the key values. When a key column
+   and the column it references have the same SQL type and codec, the
+   related rows are matched on that column as read. Otherwise each related
+   row also reads `cast(<reference> as <parent column type>)`, decoded by the
+   parent column's codec, so both sides decode alike and a row the server
+   returned is never dropped.
+
+Key column pairs (see [Key types](#key-types)) that the server compares and
+casts reliably are matched that way; any other pair is refused before
+anything is sent.
+
+So a query sends **1 + (relations in `with`) × (key chunks)** statements,
+however many parent rows there are; a level whose parents have no keys sends
+nothing. Each SELECT goes through the native select compiler and its values
+are decoded by their column codecs, so `bigint`, `Date`, collections and
+booleans keep exact types at every level; `extras` keep their
+`.mapWith()` decoders. Key columns that `columns` leaves out are still read,
+and dropped from the result.
+
+`orderBy` of a `many()` relation orders its rows within each parent. Its
+`limit` applies **per parent**:
+`row_number() over (partition by <key> order by <orderBy>)` in a derived
+table, keeping ranks up to the limit. CUBRID 11.4 evaluates `ROW_NUMBER()`
+with `PARTITION BY`, with or without `ORDER BY`, in a derived table with bound
+`IN` values. Without `orderBy`, which rows are kept is up to the server, as in
+Drizzle. A row that several parents share (a many-to-one target) appears as a
+separate object under each.
+
+As in Drizzle's types, a nested relation takes no `offset`, and a `one()`
+relation takes no `where`, `orderBy`, `limit` or `offset`; those are refused
+at runtime too, rather than given a meaning Drizzle does not type.
+
+### Key types
+
+| Parent key and reference | Matched | Verified on 11.4 |
+| --- | --- | --- |
+| Same SQL type and codec | On the reference as read | |
+| `SMALLINT`, `INTEGER`, `BIGINT`, `NUMERIC(p,s)` with each other (also other precisions and scales) | On the reference cast to the parent type | `BIGINT` with `INTEGER` (both directions), `NUMERIC(10,2)` with `NUMERIC(10,3)`: `1.500` matches `1.50`, `1.505` matches nothing |
+| `CHAR(n)` with `CHAR(m)` | On the reference cast to the parent type; the keys are sent as `cast(? as CHAR(n))` | `CHAR(5)` with `CHAR(10)`: both space-padded, `'ab'` matches `'ab'`. CUBRID compares a `CHAR` column with an `IN` list of two or more untyped bound values exactly, without padding (`'ab   '` did not match a `CHAR(10)` `'ab'`), but pads when they are typed `CHAR` |
+| `VARCHAR(n)`/`STRING` with each other | On the reference cast to the parent type | |
+| `CHAR` with `VARCHAR`, numbers with strings, `FLOAT` with `DOUBLE`, dates with times, any other pair | Refused | CUBRID matched a `VARCHAR` value against `CHAR` column values but not a `CHAR` value against `VARCHAR` ones, and `FLOAT` `0.1` does not equal `DOUBLE` `0.1` |
+| A SET/MULTISET/SEQUENCE column | Refused | cubrid-client cannot bind a collection value |
+
+`VARCHAR` comparison is exact on 11.4: trailing spaces and case count. A
+column with a case-insensitive collation can match on the server values
+that differ in case; those rows are not joined in JavaScript, so give such
+keys a binary collation.
+
+### Consistency and connections
+
+All statements of one query run on one connection. Outside
+`db.transaction()`, `drizzle(client, { schema, relationalReads })` decides how
+a query with `with` runs (a query without `with` is one statement, run as
+`select()` runs it):
+
+| `relationalReads` | What runs | Guarantee | Cost |
+| --- | --- | --- | --- |
+| `'snapshot'` (default) | cubrid-client's `transaction(callback, { isolationLevel: 'repeatable read' })` | One snapshot: under `'repeatable read'` CUBRID 11.4 reads every statement of the transaction from the snapshot of the first one, so a row committed by another connection between the statements is not seen (verified live) | A `CubridPool` created with `isolationLevel: 'repeatable read'` reuses its connection. Any other pool closes the connection after each such query, because the transaction ran at another level than the pool's (cubrid-client keeps no connection with changed settings), and opens a new one for the next: verified live, pool size 1 → 0. A pool created with `'serializable'` is also run at `'repeatable read'` and loses its connection; use `'client'` there. A `CubridClient` opens a connection of its own for every such query |
+| `'client'` | `transaction(callback)` at the client's own isolation level | One snapshot when that level is `'repeatable read'` or `'serializable'` (verified live for both); at `'read committed'` (CUBRID's default) each statement sees what was committed when it ran, so a row committed between two statements can be missing from one level and present in the next (verified live) | A pool keeps its connection at any level. A `CubridClient` opens a connection per query |
+| `'separate'` | The statements one by one on the client, outside a transaction | Each statement sees what was committed when it ran | None; a pool may run each on another connection |
+
+Recommended: a pool created with `isolationLevel: 'repeatable read'` and the
+default `'snapshot'` (or `'client'`, which is the same there); with a pool
+that must stay at `'read committed'`, choose between `'snapshot'` (snapshot
+reads, a new connection per query) and `'client'` (no reconnects, statements
+may see different commits). cubrid-client's settings are private, so the
+dialect cannot tell what level a pool was created with.
+
+`'snapshot'` needs a client whose `transaction()` declares an options
+parameter, and `'client'` a client with `transaction()`; for any other client
+a query with `with` is refused before anything is sent unless
+`relationalReads: 'separate'` is given.
+
+Inside `db.transaction()` the query always uses the transaction's connection
+and isolation level, whatever `relationalReads` says; uncommitted writes of
+the transaction are seen. Pass `{ isolationLevel: 'repeatable read' }` to
+`db.transaction()` for one snapshot there.
+
+### Errors
+
+A failed statement rejects the query with the error class cubrid-client
+gives the same statement outside a transaction: inside the query's own
+transaction (`'snapshot'` or `'client'`), cubrid-client reports a statement
+error as a `TransactionError`, so it is given the `QueryError` class (or
+`ConstraintError`, `SqlSyntaxError`, `DeadlockError` or `LockTimeoutError`
+by its `kind`, as cubrid-client picks them) with the same `message` (`Query
+failed.`), `code`, `kind` and `cause`; cubrid-client's `TransactionError` is
+kept as `transactionError`. A failed commit is passed through unchanged.
+Inside `db.transaction()` statement errors stay `TransactionError`s, as for
+`tx.select()`.
+
+### Refused
+
+Refused before anything is sent:
+
+| Refused | Why |
+| --- | --- |
+| `prepare()` | A relational query runs several statements, each built from the previous results; prepared relational queries are #165. Await the query, or use `select().prepare()` |
+| `sql.placeholder()` (or anything but a non-negative integer) as `limit` or `offset` | There is no `prepare()` to fill it. A placeholder elsewhere (in `where`) fails with Drizzle's `No value for placeholder` |
+| `offset` without `limit` at the root | CUBRID needs `LIMIT` with `OFFSET` |
+| `offset` on a nested relation; `where`, `orderBy`, `limit` or `offset` on a `one()` relation | Not in Drizzle's types |
+| Key columns of types that cannot be matched reliably | See [Key types](#key-types) |
+| A query with `with` on a client without the `transaction()` its `relationalReads` needs | See [Consistency and connections](#consistency-and-connections) |
+| A relation name the table does not have, an option Drizzle does not have (`having`), `columns`/`with` that are not objects, an `extras` value without `.as()`, a `where` that is not `sql`, an `orderBy` item that is not a column or `sql` | Not a relational query |
+| `columns: {}` with no `extras` and no `with` | Nothing to select (Drizzle refuses it too) |
+| A relation whose table is not in `schema`, or a schema table that is not a native table | It cannot be loaded with the native compiler |
+
+Collection values compared in `where` are refused as in `select()` (see
+[Errors and refusals](#errors-and-refusals)), and date and time columns need a
+UTC-decoding client at every level (see [Date and time](#date-and-time)).
 
 ## Column builders
 

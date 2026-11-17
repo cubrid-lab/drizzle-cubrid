@@ -6,7 +6,14 @@
 // CUBRID_TEST_PASSWORD (empty). Without CUBRID_TEST_HOST the run fails instead
 // of skipping, so a missing database can never look like a pass.
 // CUBRID_TEST_EXPECT_VERSION, when set, must prefix the server version.
-import { type CubridClient, type CubridPool, createClient, createPool } from 'cubrid-client';
+import {
+	TransactionError as ClientTransactionError,
+	type CubridClient,
+	type CubridPool,
+	createClient,
+	createPool,
+	QueryError,
+} from 'cubrid-client';
 import {
 	aliasedTable,
 	and,
@@ -48,6 +55,7 @@ import {
 import { drizzle } from '../src/driver';
 import { createTableSql } from '../src/native/ddl';
 import * as native from '../src/native/index';
+import { RELATIONAL_KEY_CHUNK } from '../src/native/relational';
 import { cubridTable } from '../src/table';
 import { monetary } from '../src/types';
 
@@ -2454,5 +2462,694 @@ describe('drizzle-cubrid/native transactions (#161)', () => {
 				.from(events)
 				.where(eq(events.id, rolledBackId ?? -1)),
 		).toEqual([]);
+	});
+});
+
+describe('drizzle-cubrid/native relational queries (#158)', () => {
+	// Drizzle's relational types find a relation's table by its name, so each
+	// table keeps a distinct literal name type while the run-unique name is used at runtime.
+	const tableName = <T extends string>(base: T) => name(base) as T;
+	const big = 9007199254740993n; // 2^53 + 1
+	const joined = new Date(Date.UTC(2024, 1, 29, 23, 59, 58, 123));
+	const users = native.cubridTable(tableName('nrusers'), {
+		id: native.bigint({ mode: 'bigint' }).primaryKey(),
+		name: native.varchar({ length: 30 }).notNull(),
+		managerId: native.bigint('manager_id', { mode: 'bigint' }),
+		joined: native.datetime(),
+		tags: native.set({ element: native.varchar({ length: 10 }) }),
+	});
+	const posts = native.cubridTable(tableName('nrposts'), {
+		id: native.integer().primaryKey(),
+		authorId: native.bigint('author_id', { mode: 'bigint' }).notNull(),
+		title: native.varchar({ length: 30 }).notNull(),
+		day: native.date(),
+	});
+	const comments = native.cubridTable(tableName('nrcomments'), {
+		id: native.integer().primaryKey(),
+		postId: native.integer('post_id').notNull(),
+		body: native.varchar({ length: 30 }).notNull(),
+	});
+	const profiles = native.cubridTable(tableName('nrprofiles'), {
+		userId: native.bigint('user_id', { mode: 'bigint' }).primaryKey(),
+		bio: native.varchar({ length: 30 }),
+	});
+	const groups = native.cubridTable(tableName('nrgroups'), {
+		id: native.integer().primaryKey(),
+		name: native.varchar({ length: 30 }).notNull(),
+	});
+	const members = native.cubridTable(
+		tableName('nrmembers'),
+		{
+			userId: native.bigint('user_id', { mode: 'bigint' }).notNull(),
+			groupId: native.integer('group_id').notNull(),
+		},
+		(t) => [native.primaryKey({ columns: [t.userId, t.groupId] })],
+	);
+	const orders = native.cubridTable(
+		tableName('nrorders'),
+		{
+			region: native.varchar({ length: 10 }).notNull(),
+			num: native.integer().notNull(),
+			note: native.varchar({ length: 30 }),
+		},
+		(t) => [native.primaryKey({ columns: [t.region, t.num] })],
+	);
+	const lines = native.cubridTable(tableName('nrlines'), {
+		id: native.integer().primaryKey(),
+		region: native.varchar({ length: 10 }).notNull(),
+		num: native.integer().notNull(),
+		qty: native.integer().notNull(),
+	});
+	// An INTEGER reference to the BIGINT users.id.
+	const scores = native.cubridTable(tableName('nrscores'), {
+		id: native.integer().primaryKey(),
+		userId: native.integer('user_id').notNull(),
+	});
+	// Key columns of the same family with another length or scale, and a VARCHAR against a CHAR.
+	const keyParents = native.cubridTable(tableName('nrkeyp'), {
+		code: native.char({ length: 5 }).primaryKey(),
+		amount: native.numeric({ precision: 10, scale: 2 }).notNull(),
+	});
+	const keyChildren = native.cubridTable(tableName('nrkeyc'), {
+		id: native.integer().primaryKey(),
+		code: native.char({ length: 10 }).notNull(),
+		amount: native.numeric({ precision: 10, scale: 3 }).notNull(),
+	});
+	const keyVarchars = native.cubridTable(tableName('nrkeyv'), {
+		id: native.integer().primaryKey(),
+		code: native.varchar({ length: 10 }).notNull(),
+	});
+	const parents = native.cubridTable(tableName('nrparents'), { id: native.integer().primaryKey() });
+	const kids = native.cubridTable(tableName('nrkids'), {
+		id: native.integer().primaryKey(),
+		parentId: native.integer('parent_id').notNull(),
+	});
+	const schema = {
+		users,
+		posts,
+		comments,
+		profiles,
+		groups,
+		members,
+		orders,
+		lines,
+		parents,
+		kids,
+		scores,
+		keyParents,
+		keyChildren,
+		keyVarchars,
+		keyParentsRelations: relations(keyParents, ({ many }) => ({
+			byCode: many(keyChildren, { relationName: 'code' }),
+			byAmount: many(keyChildren, { relationName: 'amount' }),
+			byVarchar: many(keyVarchars),
+		})),
+		keyChildrenRelations: relations(keyChildren, ({ one }) => ({
+			code: one(keyParents, { fields: [keyChildren.code], references: [keyParents.code], relationName: 'code' }),
+			amount: one(keyParents, {
+				fields: [keyChildren.amount],
+				references: [keyParents.amount],
+				relationName: 'amount',
+			}),
+		})),
+		keyVarcharsRelations: relations(keyVarchars, ({ one }) => ({
+			parent: one(keyParents, { fields: [keyVarchars.code], references: [keyParents.code] }),
+		})),
+		usersRelations: relations(users, ({ one, many }) => ({
+			posts: many(posts),
+			scores: many(scores),
+			profile: one(profiles),
+			manager: one(users, { fields: [users.managerId], references: [users.id], relationName: 'manager' }),
+			reports: many(users, { relationName: 'manager' }),
+			memberships: many(members),
+		})),
+		postsRelations: relations(posts, ({ one, many }) => ({
+			author: one(users, { fields: [posts.authorId], references: [users.id] }),
+			comments: many(comments),
+		})),
+		commentsRelations: relations(comments, ({ one }) => ({
+			post: one(posts, { fields: [comments.postId], references: [posts.id] }),
+		})),
+		profilesRelations: relations(profiles, ({ one }) => ({
+			user: one(users, { fields: [profiles.userId], references: [users.id] }),
+		})),
+		groupsRelations: relations(groups, ({ many }) => ({ members: many(members) })),
+		membersRelations: relations(members, ({ one }) => ({
+			user: one(users, { fields: [members.userId], references: [users.id] }),
+			group: one(groups, { fields: [members.groupId], references: [groups.id] }),
+		})),
+		ordersRelations: relations(orders, ({ many }) => ({ lines: many(lines) })),
+		linesRelations: relations(lines, ({ one }) => ({
+			order: one(orders, { fields: [lines.region, lines.num], references: [orders.region, orders.num] }),
+		})),
+		scoresRelations: relations(scores, ({ one }) => ({
+			user: one(users, { fields: [scores.userId], references: [users.id] }),
+		})),
+		parentsRelations: relations(parents, ({ many }) => ({ kids: many(kids) })),
+		kidsRelations: relations(kids, ({ one }) => ({
+			parent: one(parents, { fields: [kids.parentId], references: [parents.id] }),
+		})),
+	};
+	const fanOut = RELATIONAL_KEY_CHUNK * 2 + 50;
+	let statements: string[] = [];
+	const db = () => native.drizzle(client, { schema, logger: { logQuery: (query) => statements.push(query) } });
+
+	beforeAll(async () => {
+		for (const table of [
+			users,
+			posts,
+			comments,
+			profiles,
+			groups,
+			members,
+			orders,
+			lines,
+			parents,
+			kids,
+			scores,
+			keyParents,
+			keyChildren,
+			keyVarchars,
+		]) {
+			await client.query(createTableSql(table));
+			created.push(`"${native.getTableConfig(table).name}"`);
+		}
+		const setup = native.drizzle(client);
+		await setup.insert(users).values([
+			{ id: 1n, name: 'Ann', managerId: null, joined, tags: ['a', 'b'] },
+			{ id: big, name: 'Bob', managerId: 1n, joined: null, tags: [] },
+			{ id: 3n, name: 'Cy', managerId: 1n, joined: null, tags: null },
+			{ id: 4n, name: 'Dee', managerId: big, joined: null, tags: ['z'] },
+		]);
+		await setup.insert(posts).values([
+			{ id: 10, authorId: 1n, title: 'A1', day: new Date(Date.UTC(2024, 0, 2)) },
+			{ id: 11, authorId: 1n, title: 'A2', day: null },
+			{ id: 12, authorId: 1n, title: 'A3', day: null },
+			{ id: 20, authorId: big, title: 'B1', day: new Date(Date.UTC(9999, 11, 31)) },
+		]);
+		await setup.insert(comments).values([
+			{ id: 100, postId: 10, body: 'c100' },
+			{ id: 101, postId: 10, body: 'c101' },
+			{ id: 102, postId: 20, body: 'c102' },
+		]);
+		await setup.insert(profiles).values([
+			{ userId: 1n, bio: 'ann' },
+			{ userId: big, bio: null },
+		]);
+		await setup.insert(groups).values([
+			{ id: 7, name: 'admins' },
+			{ id: 8, name: 'devs' },
+		]);
+		await setup.insert(members).values([
+			{ userId: 1n, groupId: 7 },
+			{ userId: 1n, groupId: 8 },
+			{ userId: big, groupId: 8 },
+		]);
+		await setup.insert(orders).values([
+			{ region: 'kr', num: 1, note: 'first' },
+			{ region: 'kr', num: 2, note: null },
+			{ region: 'us', num: 1, note: 'third' },
+		]);
+		await setup.insert(lines).values([
+			{ id: 1, region: 'kr', num: 1, qty: 5 },
+			{ id: 2, region: 'us', num: 1, qty: 6 },
+			{ id: 3, region: 'kr', num: 1, qty: 7 },
+		]);
+		await setup.insert(scores).values([
+			{ id: 1, userId: 1 },
+			{ id: 2, userId: 3 },
+			{ id: 3, userId: 3 },
+		]);
+		await setup.insert(keyParents).values([
+			{ code: 'ab', amount: '1.5' },
+			{ code: 'cd', amount: '2' },
+		]);
+		await setup.insert(keyChildren).values([
+			{ id: 10, code: 'ab', amount: '1.5' },
+			{ id: 11, code: 'cd', amount: '2' },
+			{ id: 12, code: 'ab', amount: '1.505' },
+		]);
+		await setup.insert(keyVarchars).values({ id: 1, code: 'ab' });
+		const p = native.getTableConfig(parents).name;
+		const k = native.getTableConfig(kids).name;
+		await client.query(`INSERT INTO "${p}" ("id") SELECT ROWNUM FROM db_root CONNECT BY LEVEL <= ${fanOut}`);
+		await client.query(
+			`INSERT INTO "${k}" ("id", "parent_id") SELECT ROWNUM, ROWNUM FROM db_root CONNECT BY LEVEL <= ${fanOut}`,
+		);
+		await client.query(`INSERT INTO "${k}" ("id", "parent_id") VALUES (${fanOut + 1}, ${fanOut})`);
+	}, DDL_TIMEOUT);
+
+	const selects = () => statements.filter((statement) => statement.startsWith('select'));
+
+	it('loads one-to-many and nullable many-to-one with one statement per relation, keeping codec types', async () => {
+		statements = [];
+		const rows = await db().query.users.findMany({
+			orderBy: (u) => u.id,
+			with: {
+				posts: { columns: { id: true, title: true, day: true }, orderBy: (p) => p.id },
+				manager: { columns: { id: true, name: true, joined: true, tags: true } },
+			},
+		});
+		const ann = { id: 1n, name: 'Ann', joined, tags: ['a', 'b'] };
+		expect(rows).toEqual([
+			{
+				...ann,
+				managerId: null,
+				manager: null,
+				posts: [
+					{ id: 10, title: 'A1', day: new Date(Date.UTC(2024, 0, 2)) },
+					{ id: 11, title: 'A2', day: null },
+					{ id: 12, title: 'A3', day: null },
+				],
+			},
+			{ id: 3n, name: 'Cy', managerId: 1n, joined: null, tags: null, manager: ann, posts: [] },
+			{
+				id: 4n,
+				name: 'Dee',
+				managerId: big,
+				joined: null,
+				tags: ['z'],
+				manager: { id: big, name: 'Bob', joined: null, tags: [] },
+				posts: [],
+			},
+			{
+				id: big,
+				name: 'Bob',
+				managerId: 1n,
+				joined: null,
+				tags: [],
+				manager: ann,
+				posts: [{ id: 20, title: 'B1', day: new Date(Date.UTC(9999, 11, 31)) }],
+			},
+		]);
+		expect(selects()).toHaveLength(3);
+	});
+
+	it('loads one-to-one in both directions, a self relation and three nested levels', async () => {
+		statements = [];
+		const rows = await db().query.users.findMany({
+			columns: { id: true },
+			where: (u, { inArray }) => inArray(u.id, [1n, big]),
+			orderBy: (u, { desc }) => desc(u.id),
+			with: {
+				profile: { with: { user: { columns: { name: true } } } },
+				reports: { columns: { name: true }, orderBy: (u) => u.name },
+				posts: {
+					columns: { title: true },
+					orderBy: (p) => p.id,
+					with: {
+						comments: { columns: { body: true }, orderBy: (c) => c.id, with: { post: { columns: { id: true } } } },
+					},
+				},
+			},
+		});
+		expect(rows).toEqual([
+			{
+				id: big,
+				profile: { userId: big, bio: null, user: { name: 'Bob' } },
+				reports: [{ name: 'Dee' }],
+				posts: [{ title: 'B1', comments: [{ body: 'c102', post: { id: 20 } }] }],
+			},
+			{
+				id: 1n,
+				profile: { userId: 1n, bio: 'ann', user: { name: 'Ann' } },
+				reports: [{ name: 'Bob' }, { name: 'Cy' }],
+				posts: [
+					{
+						title: 'A1',
+						comments: [
+							{ body: 'c100', post: { id: 10 } },
+							{ body: 'c101', post: { id: 10 } },
+						],
+					},
+					{ title: 'A2', comments: [] },
+					{ title: 'A3', comments: [] },
+				],
+			},
+		]);
+		// users, profile, profile.user, reports, posts, posts.comments, comments.post
+		expect(selects()).toHaveLength(7);
+	});
+
+	it('loads many-to-many through the junction table, and the reverse', async () => {
+		statements = [];
+		const rows = await db().query.users.findMany({
+			columns: { name: true },
+			where: (u, { ne }) => ne(u.id, 4n),
+			orderBy: (u) => u.id,
+			with: { memberships: { columns: {}, orderBy: (m) => m.groupId, with: { group: { columns: { name: true } } } } },
+		});
+		expect(rows).toEqual([
+			{ name: 'Ann', memberships: [{ group: { name: 'admins' } }, { group: { name: 'devs' } }] },
+			{ name: 'Cy', memberships: [] },
+			{ name: 'Bob', memberships: [{ group: { name: 'devs' } }] },
+		]);
+		expect(selects()).toHaveLength(3);
+		const groupRows = await db().query.groups.findMany({
+			orderBy: (g) => g.id,
+			with: { members: { columns: {}, orderBy: (m) => m.userId, with: { user: { columns: { id: true } } } } },
+		});
+		expect(groupRows).toEqual([
+			{ id: 7, name: 'admins', members: [{ user: { id: 1n } }] },
+			{ id: 8, name: 'devs', members: [{ user: { id: 1n } }, { user: { id: big } }] },
+		]);
+	});
+
+	for (const binding of ['prepared', 'literal'] as const) {
+		it(`matches composite keys with a row-value IN (${binding} binding)`, async () => {
+			const logged: string[] = [];
+			const rdb = native.drizzle(client, { schema, binding, logger: { logQuery: (q) => logged.push(q) } });
+			const rows = await rdb.query.orders.findMany({
+				orderBy: (o) => [o.region, o.num],
+				with: { lines: { columns: { id: true, qty: true }, orderBy: (l) => l.id } },
+			});
+			expect(rows).toEqual([
+				{
+					region: 'kr',
+					num: 1,
+					note: 'first',
+					lines: [
+						{ id: 1, qty: 5 },
+						{ id: 3, qty: 7 },
+					],
+				},
+				{ region: 'kr', num: 2, note: null, lines: [] },
+				{ region: 'us', num: 1, note: 'third', lines: [{ id: 2, qty: 6 }] },
+			]);
+			expect(logged[1]).toMatch(
+				/where \("it_nrlines_\w+"\."region", "it_nrlines_\w+"\."num"\) in \(\(\?, \?\), \(\?, \?\), \(\?, \?\)\)/,
+			);
+			const line = await rdb.query.lines.findFirst({
+				where: (l, { eq }) => eq(l.id, 2),
+				with: { order: { columns: { note: true } } },
+			});
+			expect(line).toEqual({ id: 2, region: 'us', num: 1, qty: 6, order: { note: 'third' } });
+		});
+	}
+
+	it('matches a BIGINT key with an INTEGER reference in both directions', async () => {
+		const rows = await db().query.users.findMany({
+			columns: { id: true },
+			where: (u, { lt }) => lt(u.id, 4n),
+			orderBy: (u) => u.id,
+			with: { scores: { columns: { id: true }, orderBy: (s) => s.id } },
+		});
+		expect(rows).toEqual([
+			{ id: 1n, scores: [{ id: 1 }] },
+			{ id: 3n, scores: [{ id: 2 }, { id: 3 }] },
+		]);
+		const back = await db().query.scores.findMany({
+			orderBy: (s) => s.id,
+			with: { user: { columns: { name: true } } },
+		});
+		expect(back).toEqual([
+			{ id: 1, userId: 1, user: { name: 'Ann' } },
+			{ id: 2, userId: 3, user: { name: 'Cy' } },
+			{ id: 3, userId: 3, user: { name: 'Cy' } },
+		]);
+	});
+
+	it('matches CHAR keys of other lengths and NUMERIC keys of other scales, as the server compares them', async () => {
+		statements = [];
+		const rows = await db().query.keyParents.findMany({
+			orderBy: (k) => k.code,
+			with: {
+				byCode: { columns: { id: true }, orderBy: (c) => c.id },
+				byAmount: { columns: { id: true }, orderBy: (c) => c.id },
+			},
+		});
+		expect(rows).toEqual([
+			{ code: 'ab   ', amount: '1.50', byCode: [{ id: 10 }, { id: 12 }], byAmount: [{ id: 10 }] },
+			{ code: 'cd   ', amount: '2.00', byCode: [{ id: 11 }], byAmount: [{ id: 11 }] },
+		]);
+		expect(selects()[1]).toContain('cast(');
+		const back = await db().query.keyChildren.findMany({
+			columns: { id: true },
+			orderBy: (c) => c.id,
+			with: { code: { columns: { amount: true } }, amount: { columns: { code: true } } },
+		});
+		expect(back).toEqual([
+			{ id: 10, code: { amount: '1.50' }, amount: { code: 'ab   ' } },
+			{ id: 11, code: { amount: '2.00' }, amount: { code: 'cd   ' } },
+			{ id: 12, code: { amount: '1.50' }, amount: null },
+		]);
+	});
+
+	it('refuses a VARCHAR key against a CHAR key before sending anything', async () => {
+		statements = [];
+		await expect(db().query.keyParents.findMany({ with: { byVarchar: true } })).rejects.toThrow(
+			'keyParents.byVarchar: key code (CHAR(5)) and code (VARCHAR(10)) have types that cannot be matched reliably',
+		);
+		await expect(db().query.keyVarchars.findMany({ with: { parent: true } })).rejects.toThrow(
+			'cannot be matched reliably',
+		);
+		expect(statements).toEqual([]);
+	});
+
+	it('applies a nested limit per parent with row_number(), and refuses a nested offset', async () => {
+		statements = [];
+		const rows = await db().query.users.findMany({
+			columns: { id: true },
+			orderBy: (u) => u.id,
+			limit: 2,
+			with: {
+				posts: { columns: { id: true }, orderBy: (p, { desc }) => desc(p.id), limit: 2 },
+				reports: { columns: { name: true }, orderBy: (u, { desc }) => desc(u.name), limit: 1 },
+			},
+		});
+		expect(rows).toEqual([
+			{ id: 1n, posts: [{ id: 12 }, { id: 11 }], reports: [{ name: 'Cy' }] },
+			{ id: 3n, posts: [], reports: [] },
+		]);
+		expect(selects()[1]).toContain('row_number() over (partition by');
+		const page = await db().query.users.findMany({
+			columns: { name: true },
+			orderBy: (u) => u.id,
+			limit: 2,
+			offset: 1,
+		});
+		expect(page).toEqual([{ name: 'Cy' }, { name: 'Dee' }]);
+		statements = [];
+		await expect(db().query.users.findMany({ with: { posts: { limit: 1, offset: 1 } as never } })).rejects.toThrow(
+			'a nested many relation takes no offset',
+		);
+		expect(statements).toEqual([]);
+	});
+
+	it('selects extras at every level, and columns include and exclude', async () => {
+		const rows = await db().query.users.findMany({
+			columns: { joined: false, tags: false, managerId: false },
+			where: (u, { eq }) => eq(u.id, 1n),
+			extras: (u, { sql }) => ({ nameLength: sql<number>`char_length(${u.name})`.mapWith(Number).as('name_length') }),
+			with: {
+				posts: {
+					columns: { id: true },
+					orderBy: (p) => p.id,
+					extras: { upper: sql<string>`upper(${posts.title})`.as('upper_title') },
+				},
+			},
+		});
+		expect(rows).toEqual([
+			{
+				id: 1n,
+				name: 'Ann',
+				nameLength: 3,
+				posts: [
+					{ id: 10, upper: 'A1' },
+					{ id: 11, upper: 'A2' },
+					{ id: 12, upper: 'A3' },
+				],
+			},
+		]);
+	});
+
+	it('resolves findFirst to a row or undefined, and empty results to [] without loading relations', async () => {
+		expect(await db().query.users.findFirst({ columns: { name: true }, orderBy: (u, { desc }) => desc(u.id) })).toEqual(
+			{
+				name: 'Bob',
+			},
+		);
+		statements = [];
+		expect(
+			await db().query.users.findFirst({ where: (u, { eq }) => eq(u.id, 99n), with: { posts: true } }),
+		).toBeUndefined();
+		expect(await db().query.users.findMany({ where: (u, { eq }) => eq(u.id, 99n), with: { posts: true } })).toEqual([]);
+		expect(selects()).toHaveLength(2);
+	});
+
+	it(`loads ${fanOut} parents with one statement per ${RELATIONAL_KEY_CHUNK} keys`, async () => {
+		statements = [];
+		const rows = await db().query.parents.findMany({
+			orderBy: (p) => p.id,
+			with: { kids: { columns: { id: true }, orderBy: (k) => k.id } },
+		});
+		expect(rows).toHaveLength(fanOut);
+		expect(rows[0]).toEqual({ id: 1, kids: [{ id: 1 }] });
+		expect(rows[fanOut - 1]).toEqual({ id: fanOut, kids: [{ id: fanOut }, { id: fanOut + 1 }] });
+		expect(rows.every((row) => row.kids.length >= 1 && row.kids[0]?.id === row.id)).toBe(true);
+		expect(selects()).toHaveLength(1 + Math.ceil(fanOut / RELATIONAL_KEY_CHUNK));
+	});
+
+	it("runs inside db.transaction() on the transaction's connection and sees its own writes", async () => {
+		for (const source of [client, pool]) {
+			const tdb = native.drizzle(source, { schema });
+			const seen = await tdb
+				.transaction(async (tx) => {
+					await tx.insert(comments).values({ id: 900, postId: 11, body: 'uncommitted' });
+					const rows = await tx.query.posts.findMany({
+						columns: { id: true },
+						where: (p, { eq }) => eq(p.id, 11),
+						with: { comments: { columns: { body: true } }, author: { columns: { name: true } } },
+					});
+					tx.rollback();
+					return rows;
+				})
+				.catch((error: unknown) => error);
+			expect(seen).toBeInstanceOf(TransactionRollbackError);
+			let rows: unknown;
+			await tdb
+				.transaction(async (tx) => {
+					await tx.insert(comments).values({ id: 900, postId: 11, body: 'uncommitted' });
+					rows = await tx.query.posts.findMany({
+						columns: { id: true },
+						where: (p, { eq }) => eq(p.id, 11),
+						with: { comments: { columns: { body: true } }, author: { columns: { name: true } } },
+					});
+					tx.rollback();
+				})
+				.catch(() => undefined);
+			expect(rows).toEqual([{ id: 11, comments: [{ body: 'uncommitted' }], author: { name: 'Ann' } }]);
+			expect(
+				await tdb.query.posts.findFirst({ where: (p, { eq }) => eq(p.id, 11), with: { comments: true } }),
+			).toMatchObject({
+				comments: [],
+			});
+		}
+	});
+
+	/**
+	 * A client over `source` whose transaction client commits a new comment
+	 * on another connection right after the first statement (the posts) returns.
+	 */
+	const racingClient = (source: CubridPool): native.CubridNativeClient => {
+		const c = native.getTableConfig(comments).name;
+		return {
+			query: (text, params) => source.query(text, params as unknown[], { rowMode: 'array' }),
+			queryPrepared: (text, params) => source.queryPrepared(text, params as unknown[], { rowMode: 'array' }),
+			transaction: (callback, options) =>
+				source.transaction(async (tx) => {
+					let first = true;
+					const run = async (text: string, params?: readonly unknown[]) => {
+						const rows = await tx.queryPrepared(text, params as unknown[], { rowMode: 'array' });
+						if (first) {
+							first = false;
+							await client.executePrepared(`INSERT INTO "${c}" VALUES (?, ?, ?)`, [901, 12, 'raced']);
+						}
+						return rows;
+					};
+					return callback({ query: run, queryPrepared: run });
+				}, options),
+		};
+	};
+
+	for (const [label, isolationLevel, relationalReads] of [
+		['the default snapshot mode on a default pool', undefined, undefined],
+		["relationalReads: 'client' on a serializable pool", 'serializable', 'client'],
+		["relationalReads: 'client' on a repeatable read pool", 'repeatable read', 'client'],
+	] as const) {
+		it(`reads every statement of a relational query from one snapshot outside a transaction (${label})`, async () => {
+			const c = native.getTableConfig(comments).name;
+			const source = createPool({ ...config, timezone: 'utc', max: 1, isolationLevel });
+			try {
+				const rows = await native.drizzle(racingClient(source), { schema, relationalReads }).query.posts.findMany({
+					columns: { id: true },
+					where: (p, { eq }) => eq(p.id, 12),
+					with: { comments: { columns: { body: true } } },
+				});
+				expect(rows).toEqual([{ id: 12, comments: [] }]);
+				// The comment was committed before the comments were read.
+				expect(await client.query(`SELECT body FROM "${c}" WHERE id = 901`)).toEqual([{ body: 'raced' }]);
+			} finally {
+				await client.query(`DELETE FROM "${c}" WHERE id = 901`);
+				await source.close();
+			}
+		});
+	}
+
+	it("sees a row committed between the statements with relationalReads: 'client' on a read committed pool", async () => {
+		const c = native.getTableConfig(comments).name;
+		const source = createPool({ ...config, timezone: 'utc', max: 1, isolationLevel: 'read committed' });
+		try {
+			const rows = await native
+				.drizzle(racingClient(source), { schema, relationalReads: 'client' })
+				.query.posts.findMany({
+					columns: { id: true },
+					where: (p, { eq }) => eq(p.id, 12),
+					with: { comments: { columns: { body: true } } },
+				});
+			expect(rows).toEqual([{ id: 12, comments: [{ body: 'raced' }] }]);
+		} finally {
+			await client.query(`DELETE FROM "${c}" WHERE id = 901`);
+			await source.close();
+		}
+	});
+
+	it('keeps the pooled connection on a repeatable read pool, and on any pool with relationalReads: client', async () => {
+		const query = (rdb: Pick<ReturnType<typeof db>, 'query'>) =>
+			rdb.query.users.findMany({ columns: { id: true }, with: { posts: { columns: { id: true } } } });
+		const opened: Record<string, number[]> = {};
+		for (const [label, isolationLevel, relationalReads] of [
+			['repeatable read pool', 'repeatable read', undefined],
+			['serializable pool, client', 'serializable', 'client'],
+			['default pool, client', undefined, 'client'],
+			['default pool, snapshot', undefined, undefined],
+		] as const) {
+			const source = createPool({ ...config, timezone: 'utc', max: 1, isolationLevel });
+			try {
+				await source.query('SELECT 1');
+				const rdb = native.drizzle(source, { schema, relationalReads });
+				const totals = [source.stats().total];
+				for (let i = 0; i < 3; i++) {
+					await query(rdb);
+					totals.push(source.stats().total);
+				}
+				opened[label] = totals;
+			} finally {
+				await source.close();
+			}
+		}
+		expect(opened).toEqual({
+			'repeatable read pool': [1, 1, 1, 1],
+			'serializable pool, client': [1, 1, 1, 1],
+			'default pool, client': [1, 1, 1, 1],
+			// cubrid-client closes a connection whose transaction ran at another
+			// level than the pool's, as documented.
+			'default pool, snapshot': [1, 0, 0, 0],
+		});
+	});
+
+	it('rejects a failed statement with the same error class with and without with', async () => {
+		const bad = { where: sql`no_such_column = 1` };
+		const without = await db()
+			.query.posts.findMany(bad)
+			.catch((e: unknown) => e);
+		const withRelations = await db()
+			.query.posts.findMany({ ...bad, with: { comments: true } })
+			.catch((e: unknown) => e);
+		expect(without).toBeInstanceOf(QueryError);
+		expect(withRelations).toBeInstanceOf(QueryError);
+		expect((withRelations as Error).constructor).toBe((without as Error).constructor);
+		expect(withRelations).toMatchObject({
+			code: (without as { code: number }).code,
+			kind: (without as { kind: string }).kind,
+		});
+		expect((withRelations as { transactionError?: unknown }).transactionError).toBeInstanceOf(ClientTransactionError);
+	});
+
+	it('refuses prepare() and a placeholder limit before sending anything', async () => {
+		statements = [];
+		expect(() => db().query.users.findMany().prepare()).toThrow(/#165/);
+		await expect(db().query.users.findMany({ limit: sql.placeholder('n') })).rejects.toThrow(/non-negative integer/);
+		expect(statements).toEqual([]);
 	});
 });
