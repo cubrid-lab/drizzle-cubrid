@@ -11,7 +11,8 @@ Key facts:
 - Query: `await db.select().from(users).where(eq(users.name, 'Alice'))`
 - Imports: `drizzle`, `cubridTable`, column builders, `eq`/`and`/`or`/`asc`/`desc`/`sql` and similar come from `drizzle-cubrid`; `relations`, `like`, `inArray` and other helpers come from `drizzle-orm`; `createClient`/`createPool` from `cubrid-client`
 - CUBRID-specific column types: `set()`, `multiset()`, `sequence()` (also exported as `cubridSet()`, `cubridMultiset()`, `cubridSequence()`), `monetary()`
-- Not supported: relational queries with `with`, streaming (`.iterator()`), schema migrations/DDL generation, JSON/BLOB/CLOB column builders; only CUBRID 11.4 is tested
+- Not supported: relational queries with `with` (0.x entry), streaming (`.iterator()`), schema diffing/ALTER generation, Drizzle Kit in any dialect, JSON/BLOB/CLOB column builders; only CUBRID 11.4 is tested
+- Experimental migrations for `drizzle-cubrid/native`: `migrate(db, { migrationsFolder })` from `drizzle-cubrid/native/migrator` applies `0001_name.sql` CUBRID SQL files, one transaction per migration; `generateInitialMigration(schema)` writes the first one ([MIGRATIONS.md](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/docs/MIGRATIONS.md))
 - Offline unit tests with a 95% coverage gate, plus a live CUBRID 11.4 suite in CI
 - TypeScript-first with full type inference from schema definitions
 

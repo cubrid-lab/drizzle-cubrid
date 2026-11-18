@@ -69,7 +69,7 @@ under *Unreleased* in the [CHANGELOG](../CHANGELOG.md); for example, its
 | Relational `with` | Refused | [#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200) |
 | `.iterator()` (streaming) | Throws | not implemented |
 | JSON columns, BLOB/CLOB columns | No builder | `customType` only; unverified |
-| Schema migrations, DDL generation | Not provided | [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163) |
+| Schema migrations, DDL generation | Not provided for this entry | `drizzle-cubrid/native` has an experimental migrator ([MIGRATIONS.md](MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)) |
 
 ### Verification
 
@@ -151,7 +151,7 @@ None of the following exists today:
 | Driver and row mapping rebuilt around cubrid-client | [#160](https://github.com/cubrid-lab/drizzle-cubrid/issues/160) |
 | Native transactions and savepoints | [#161](https://github.com/cubrid-lab/drizzle-cubrid/issues/161) |
 | Native collection and scalar type codecs | [#162](https://github.com/cubrid-lab/drizzle-cubrid/issues/162) |
-| CUBRID-native schema migrations (no Drizzle Kit MySQL mode) | [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163) |
+| CUBRID-native schema migrations (no Drizzle Kit MySQL mode): applier and initial `CREATE TABLE` generation in preview ([ADR 0009](adr/0009-cubrid-native-migrations.md)); schema diffing and `ALTER` generation open | [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163) |
 | Prepared-query reuse and streaming | [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165) |
 | Real-server verification beyond CUBRID 11.4 | [#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164) |
 | CUBRID-only dialect boundary enforcement | [#192](https://github.com/cubrid-lab/drizzle-cubrid/issues/192) |

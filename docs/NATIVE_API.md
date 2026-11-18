@@ -27,9 +27,12 @@
 - `prepare()` on every query, relational ones included (see
   [Prepared queries](#prepared-queries)), and `iterator()` streaming of
   selects and set operations (see [Streaming](#streaming)).
+- Schema migrations: `migrate()` from `drizzle-cubrid/native/migrator`
+  applies ordered CUBRID SQL files, and `generateInitialMigration(schema)`
+  writes the first one (`CREATE TABLE`). See [MIGRATIONS.md](MIGRATIONS.md).
 
 **Not yet:** streaming inside `db.transaction()` or of relational queries
-(both refused, see [Streaming](#streaming)), migrations or DDL generation (#163), and
+(both refused, see [Streaming](#streaming)), schema diffing and `ALTER` generation (#163), and
 indexes or foreign keys in `extraConfig`. Native tables are not supported by
 the 0.x `drizzle()` from `drizzle-cubrid`.
 

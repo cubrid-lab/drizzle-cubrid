@@ -60,7 +60,7 @@ export const metrics = cubridTable("metrics", {
 > - `float()` on a CUBRID `FLOAT` column is 32-bit: `1.1` reads back as `1.100000023841858`. Use `double()` on a `DOUBLE` column.
 > - `sum()` and `avg()` return strings, as Drizzle does on MySQL; wrap them with `.mapWith(Number)` if needed.
 >
-> Schema migrations are tracked in [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163).
+> Schema migrations exist only for `drizzle-cubrid/native` tables, as an experimental migrator of CUBRID SQL files; see [MIGRATIONS.md](MIGRATIONS.md) ([#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)).
 
 ### String Types
 

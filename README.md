@@ -8,7 +8,7 @@
 
 **Drizzle ORM dialect for the CUBRID database** — TypeScript-first, type-safe schema definition and query builder for Node.js.
 
-> **Community adapter:** `drizzle-cubrid` is independently maintained by CUBRID Lab. It is not an official `drizzle-orm` dialect or a built-in Drizzle Kit integration. CUBRID-native schema migration support is under design; do not assume that Drizzle Kit's MySQL dialect is compatible with CUBRID. See [migration design tracking](https://github.com/cubrid-lab/drizzle-cubrid/issues/163) and [native dialect design](https://github.com/cubrid-lab/drizzle-cubrid/issues/155).
+> **Community adapter:** `drizzle-cubrid` is independently maintained by CUBRID Lab. It is not an official `drizzle-orm` dialect or a built-in Drizzle Kit integration. Drizzle Kit is not supported in any dialect; do not assume that its MySQL dialect is compatible with CUBRID. An experimental CUBRID-native migrator for `drizzle-cubrid/native` applies hand-written or generated CUBRID SQL files (see [Schema migrations](docs/MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)) and [native dialect design](https://github.com/cubrid-lab/drizzle-cubrid/issues/155).
 
 [🇰🇷 한국어](docs/README.ko.md) · [🇺🇸 English](README.md)
 
@@ -340,7 +340,7 @@ try {
 | `INSERT ... RETURNING` | ❌ Not supported | Use `$returningId()` for a one-row INSERT, `lastInsertId`, or a separate SELECT ([details](docs/QUERIES.md#affected-rows-and-generated-keys)) |
 | Streaming / `.iterator()` | ❌ Not implemented (throws) | Use LIMIT/OFFSET for pagination. The experimental `drizzle-cubrid/native` streams selects ([Streaming](docs/NATIVE_API.md#streaming), [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)) |
 | Relational queries with `with` | ❌ Refused | See [Relations](#relations) ([#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200)) |
-| Schema migrations / DDL generation | ❌ Not provided | See [schema migration status](examples/migration/README.md) ([#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)) |
+| Schema migrations | ⚠️ Experimental, `drizzle-cubrid/native` only | `migrate()` from `drizzle-cubrid/native/migrator` applies ordered CUBRID SQL files; `generateInitialMigration()` writes the first one. No schema diff, `ALTER` generation, reflection or Drizzle Kit ([details](docs/MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)) |
 | JSON, BLOB and CLOB columns | ⚠️ No builder exported | Not exposed or tested by this adapter; a `customType` is unverified |
 | Native BOOLEAN | ❌ Not supported | Declare `boolean()` columns as SMALLINT (0/1) |
 | Sequence objects (`CREATE SERIAL`) | ❌ No builder | Use `.autoincrement()`; `sequence()` here is the SEQUENCE collection type |
@@ -354,7 +354,7 @@ try {
 | [Queries Guide](docs/QUERIES.md) | SELECT, INSERT, UPDATE, DELETE, joins, aggregations, raw SQL |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common errors, TypeScript issues, performance tips |
 | [Native API preview](docs/NATIVE_API.md) | Experimental `drizzle-cubrid/native` tables, column builders, codecs, queries, writes, transactions, relational queries, prepared queries and streaming |
-| [Schema migration status](examples/migration/README.md) | Native CUBRID migration is not yet supported; no other database dialect fallback |
+| [Schema migrations](docs/MIGRATIONS.md) | Experimental CUBRID-native migrator for `drizzle-cubrid/native`: file format, refusals, recovery, what is not implemented |
 
 ## Development
 

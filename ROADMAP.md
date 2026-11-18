@@ -12,7 +12,7 @@
 
 - API freeze and stability guarantees
 - CUBRID-native dialect replacing the MySQL-derived classes ([#155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155))
-- CUBRID-native schema migrations; none exist today and Drizzle Kit's MySQL mode is not a supported path ([#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163))
+- CUBRID-native schema migrations: an experimental applier of CUBRID SQL files and an initial-schema generator exist for `drizzle-cubrid/native` ([MIGRATIONS.md](docs/MIGRATIONS.md)); schema diffing, `ALTER` generation and catalog reflection are not implemented, and Drizzle Kit's MySQL mode is not a supported path ([#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163))
 - Relational queries with `with` ([#158](https://github.com/cubrid-lab/drizzle-cubrid/issues/158)) and streaming ([#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)), both unsupported today
 - Live tests on every supported CUBRID server version; only 11.4 is tested now ([#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164))
 

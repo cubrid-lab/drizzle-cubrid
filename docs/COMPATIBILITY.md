@@ -96,9 +96,9 @@ tarball they tested.
 | Check | Verified with |
 | --- | --- |
 | Live suite (`tests/integration.test.ts`) on the source | CUBRID 11.4 (`cubrid/cubrid:11.4`, pinned by digest), Node 22, `TZ=Asia/Seoul`, lockfile `drizzle-orm` and `cubrid-client` (CI only) |
-| Live suite on the packed npm tarball, ESM, both entry points | The same server and Node; once with the lockfile peers (`drizzle-orm` 0.45.4, `cubrid-client` 1.4.0) and once with the peer floors from `package.json` (`drizzle-orm` 0.44.1, `cubrid-client` 1.4.0) |
+| Live suite on the packed npm tarball, ESM, every entry point (the migrator included) | The same server and Node; once with the lockfile peers (`drizzle-orm` 0.45.4, `cubrid-client` 1.4.0) and once with the peer floors from `package.json` (`drizzle-orm` 0.44.1, `cubrid-client` 1.4.0) |
 | CommonJS live smoke on the packed tarball | `require('drizzle-cubrid')` and `require('drizzle-cubrid/native')` against the same server, in both peer lanes: generated keys, BIGINT beyond 2^53, SET values, rollback and error propagation |
-| Packed tarball imported on Node 18 | CommonJS and ESM, both entry points, lockfile peers, no database |
+| Packed tarball imported on Node 18 | CommonJS and ESM, all three entry points (`drizzle-cubrid`, `drizzle-cubrid/native`, `drizzle-cubrid/native/migrator`, which reads a migrations folder), lockfile peers, no database |
 | Type check, build and unit tests | Node 20 and 22 with the lockfile peers; Node 22 with the `drizzle-orm` floor |
 | Lint and the foreign-dialect boundary | `src` and the packed tarball |
 | Fault injection (`tests/faults.test.ts`, `npm run integration:faults`) on the source | CUBRID 11.4 (same pinned digest) in a container of its own that the tests restart, pause and kill, Node 22, lockfile peers (CI only, not in the release gate) |
@@ -184,6 +184,6 @@ then runs `npm publish <tarball>`.
   `cubrid-client` version.
 - Windows and macOS: every job runs on Linux (`ubuntu-latest`).
 - A TypeScript consumer type-checking against the packed `.d.ts` files.
-- Migrations and schema reflection (#163).
+- Schema reflection, schema diffing and `ALTER` generation (#163). The migrator ([MIGRATIONS.md](MIGRATIONS.md)) is live-tested on CUBRID 11.4 only, for the DDL kinds [ADR 0009](adr/0009-cubrid-native-migrations.md) lists.
 - Streaming memory use beyond the row count: the bound of one server reply
   is cubrid-client's contract (`stream()`), not measured by these tests.
