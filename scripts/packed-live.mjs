@@ -6,7 +6,8 @@
 // versions, or the floors of the peer ranges in package.json) into a new
 // consumer project outside this repository, copies tests/integration.test.ts
 // there and runs it with every `../src/<entry>` import pointing at the
-// installed package, so the code under test is the tarball's ESM build. Two
+// installed package (`../src/native/migrator` at drizzle-cubrid/native/migrator),
+// so the code under test is the tarball's ESM build. Two
 // test helpers that are not public are taken from src without touching the
 // package: createTableSql (src/native/ddl.ts, copied with its imports pointed at
 // drizzle-cubrid/native) and the RELATIONAL_KEY_CHUNK constant. Any other
@@ -128,7 +129,7 @@ if (entry?.integrity !== integrity) {
 	fail(`Installed drizzle-cubrid integrity ${entry?.integrity} is not the tarball's ${integrity}`);
 }
 if (installedVersion('drizzle-cubrid') !== packed.version) fail('Installed drizzle-cubrid is not the tarball version');
-for (const specifier of ['drizzle-cubrid', 'drizzle-cubrid/native']) {
+for (const specifier of ['drizzle-cubrid', 'drizzle-cubrid/native', 'drizzle-cubrid/native/migrator']) {
 	const path = require.resolve(specifier);
 	if (!path.startsWith(join(consumer, 'node_modules', 'drizzle-cubrid', 'dist'))) {
 		fail(`${specifier} resolves to ${path}, not the installed tarball`);
@@ -158,6 +159,7 @@ export default defineConfig({
 		alias: [
 			{ find: /^\\.\\.\\/src\\/(columns|driver|table|types)$/, replacement: 'drizzle-cubrid' },
 			{ find: /^\\.\\.\\/src\\/native\\/index$/, replacement: 'drizzle-cubrid/native' },
+			{ find: /^\\.\\.\\/src\\/native\\/migrator$/, replacement: 'drizzle-cubrid/native/migrator' },
 			{ find: /^\\.\\.\\/src\\/native\\/(ddl|relational)$/, replacement: ${JSON.stringify(join(consumer, 'tests', 'support'))} + '/$1.ts' },
 		],
 	},

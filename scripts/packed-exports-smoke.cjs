@@ -27,6 +27,26 @@ const assert = require('node:assert/strict');
 		assert.equal(table.big.mapFromDriverValue(9223372036854775807n), 9223372036854775807n);
 		assert.equal(table.tags.getSQLType(), 'SET(VARCHAR(10))');
 	}
+	// Native migrator entry (#163): reads and checks a migrations folder without a database.
+	const fs = require('node:fs');
+	const os = require('node:os');
+	const path = require('node:path');
+	const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'node18-migrations-'));
+	try {
+		fs.writeFileSync(path.join(folder, '0001_init.sql'), 'CREATE TABLE "node18_smoke" ("id" INT);\n');
+		const migratorCjs = require('drizzle-cubrid/native/migrator');
+		const migratorEsm = await import('drizzle-cubrid/native/migrator');
+		for (const api of [migratorCjs, migratorEsm]) {
+			assert.equal(typeof api.migrate, 'function');
+			const [file] = await api.readMigrationFiles(folder);
+			assert.deepEqual([file.id, file.name, file.statements.length, file.checksum.length], [1, 'init', 1, 64]);
+		}
+		const nativeApi = require('drizzle-cubrid/native');
+		const table = nativeApi.cubridTable('node18_migration_smoke', { id: nativeApi.integer().primaryKey() });
+		assert.match(nativeApi.generateInitialMigration([table]), /CREATE TABLE "node18_migration_smoke"/);
+	} finally {
+		fs.rmSync(folder, { recursive: true, force: true });
+	}
 	console.log(`Node ${process.version} packed CJS and ESM consumer assertions passed`);
 })().catch((error) => {
 	console.error(error);

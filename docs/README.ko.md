@@ -18,7 +18,7 @@
 
 ---
 
-> **커뮤니티 어댑터:** `drizzle-cubrid`는 CUBRID Lab이 독립적으로 유지보수하는 어댑터이며, 공식 `drizzle-orm` 다이얼렉트나 Drizzle Kit 내장 통합이 아닙니다. CUBRID 전용 스키마 마이그레이션은 설계 중이며, Drizzle Kit의 MySQL 다이얼렉트가 CUBRID와 호환된다고 가정하지 마세요. [마이그레이션 설계](https://github.com/cubrid-lab/drizzle-cubrid/issues/163), [네이티브 다이얼렉트 설계](https://github.com/cubrid-lab/drizzle-cubrid/issues/155) 참고.
+> **커뮤니티 어댑터:** `drizzle-cubrid`는 CUBRID Lab이 독립적으로 유지보수하는 어댑터이며, 공식 `drizzle-orm` 다이얼렉트나 Drizzle Kit 내장 통합이 아닙니다. Drizzle Kit은 어떤 다이얼렉트로도 지원하지 않으며, Drizzle Kit의 MySQL 다이얼렉트가 CUBRID와 호환된다고 가정하지 마세요. `drizzle-cubrid/native`용 실험적 CUBRID 전용 마이그레이터가 CUBRID SQL 파일을 순서대로 적용합니다 ([스키마 마이그레이션](MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)), [네이티브 다이얼렉트 설계](https://github.com/cubrid-lab/drizzle-cubrid/issues/155) 참고.
 
 ## 왜 drizzle-cubrid인가?
 
@@ -128,7 +128,7 @@ await db.transaction(async (tx) => {
 - `eq`, `and`, `or`, `asc`, `desc`, `sql` 등 일부 연산자만 `drizzle-cubrid`에서 다시 내보냅니다. `relations`, `like`, `inArray` 등 그 밖의 헬퍼는 `drizzle-orm`에서 가져오세요.
 - `with`로 관계를 불러오는 관계형 쿼리는 지원하지 않으며 오류를 던집니다 ([#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200)).
 - 스트리밍(`.iterator()`)은 구현되지 않았습니다 ([#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)).
-- 스키마 마이그레이션과 DDL 생성은 제공하지 않습니다 ([#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)).
+- 스키마 마이그레이션은 `drizzle-cubrid/native`에서만 실험적으로 제공합니다: `drizzle-cubrid/native/migrator`의 `migrate()`가 순서가 매겨진 CUBRID SQL 파일을 마이그레이션마다 하나의 트랜잭션으로 적용하고, `generateInitialMigration()`이 첫 마이그레이션(`CREATE TABLE`)을 생성합니다. 스키마 비교(diff), `ALTER` 생성, 카탈로그 리플렉션, Drizzle Kit은 지원하지 않습니다 ([MIGRATIONS.md](MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)).
 - JSON, BLOB, CLOB 컬럼 빌더는 제공하지 않습니다.
 - 자세한 내용은 영문 [README](../README.md#cubrid-limitations)를 참고하세요.
 

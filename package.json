@@ -26,6 +26,16 @@
         "types": "./dist/native.d.cts",
         "default": "./dist/native.cjs"
       }
+    },
+    "./native/migrator": {
+      "import": {
+        "types": "./dist/native-migrator.d.ts",
+        "default": "./dist/native-migrator.js"
+      },
+      "require": {
+        "types": "./dist/native-migrator.d.cts",
+        "default": "./dist/native-migrator.cjs"
+      }
     }
   },
   "files": [

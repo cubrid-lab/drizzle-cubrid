@@ -6,7 +6,9 @@
 // CUBRID_TEST_PASSWORD (empty). Without CUBRID_TEST_HOST the run fails instead
 // of skipping, so a missing database can never look like a pass.
 // CUBRID_TEST_EXPECT_VERSION, when set, must prefix the server version.
-
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
 	TransactionError as ClientTransactionError,
 	type CubridClient,
@@ -61,6 +63,7 @@ import {
 import { drizzle } from '../src/driver';
 import { createTableSql } from '../src/native/ddl';
 import * as native from '../src/native/index';
+import { CubridMigrationError, migrate } from '../src/native/migrator';
 import { RELATIONAL_KEY_CHUNK } from '../src/native/relational';
 import { cubridTable } from '../src/table';
 import { monetary } from '../src/types';
@@ -4011,4 +4014,428 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 		expect({ cases: cases.length, differing }).toEqual({ cases: cases.length, differing: [] });
 		expect(cases.length).toBeGreaterThan(80);
 	});
+});
+
+// The measurements behind ADR 0009 (#163): what CUBRID does with DDL in a
+// transaction that cubrid-client's transaction() owns, on this server version.
+describe('DDL in a transaction on CUBRID (#163, ADR 0009)', () => {
+	const exists = async (on: { query: CubridClient['query'] }, table: string) =>
+		(await on.query(`SELECT class_name FROM db_class WHERE class_name = '${table}'`)).length > 0;
+	const columns = async (table: string) =>
+		(
+			await client.query<{ attr_name: string }>(
+				`SELECT attr_name FROM db_attribute WHERE class_name = '${table}' ORDER BY def_order`,
+			)
+		).map((row) => row.attr_name);
+	const indexes = async (table: string) =>
+		(
+			await client.query<{ index_name: string }>(
+				`SELECT index_name FROM db_index WHERE class_name = '${table}' ORDER BY index_name`,
+			)
+		).map((row) => row.index_name);
+	let other: CubridClient;
+
+	beforeAll(() => {
+		other = createClient(config);
+	});
+	afterAll(async () => {
+		await other?.close();
+	});
+
+	it(
+		'a CREATE TABLE is visible only to its own transaction, gone after rollback and kept after commit',
+		async () => {
+			const table = name('ddl_create');
+			await expect(
+				client.transaction(async (tx) => {
+					await tx.query(`CREATE TABLE ${table} (id INT PRIMARY KEY)`);
+					await tx.query(`INSERT INTO ${table} VALUES (1)`);
+					expect(await exists(tx, table)).toBe(true);
+					// Another session does not see the uncommitted catalog entry (and is not blocked).
+					expect(await exists(other, table)).toBe(false);
+					throw new Error('roll back');
+				}),
+			).rejects.toThrow();
+			expect(await exists(client, table)).toBe(false);
+			expect(await exists(other, table)).toBe(false);
+
+			await client.transaction(async (tx) => {
+				await tx.query(`CREATE TABLE ${table} (id INT PRIMARY KEY)`);
+				await tx.query(`INSERT INTO ${table} VALUES (1)`);
+			});
+			created.push(table);
+			expect(await exists(other, table)).toBe(true);
+			expect(await other.query(`SELECT id FROM ${table}`)).toEqual([{ id: 1 }]);
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'DDL does not commit the DML before it: a rollback undoes both, for every DDL kind migrations use',
+		async () => {
+			const base = name('ddl_base');
+			const dropped = name('ddl_drop');
+			await client.query(`CREATE TABLE ${base} (id INT PRIMARY KEY, x INT, s VARCHAR(10))`);
+			created.push(base);
+			await client.query(`CREATE INDEX ${name('ddl_ix_old')} ON ${base} (s)`);
+			await client.query(`CREATE TABLE ${dropped} (id INT)`);
+			created.push(dropped);
+			await client.query(`INSERT INTO ${base} VALUES (1, 1, 'a')`);
+			const before = { columns: await columns(base), indexes: await indexes(base) };
+			const statements = [
+				`INSERT INTO ${base} VALUES (2, 2, 'b')`,
+				`CREATE TABLE ${name('ddl_new')} (id INT)`,
+				`ALTER TABLE ${base} ADD COLUMN y VARCHAR(10)`,
+				`ALTER TABLE ${base} DROP COLUMN x`,
+				`CREATE UNIQUE INDEX ${name('ddl_ux')} ON ${base} (y)`,
+				`DROP INDEX ${name('ddl_ix_old')} ON ${base}`,
+				`ALTER TABLE ${base} ADD CONSTRAINT ${name('ddl_uq')} UNIQUE (s)`,
+				`CREATE VIEW ${name('ddl_v')} AS SELECT id FROM ${base}`,
+				`CREATE SERIAL ${name('ddl_serial')}`,
+				`DROP TABLE ${dropped}`,
+				`RENAME TABLE ${base} TO ${name('ddl_renamed')}`,
+			];
+			await expect(
+				client.transaction(async (tx) => {
+					for (const statement of statements) await tx.query(statement);
+					expect(await exists(tx, name('ddl_renamed'))).toBe(true);
+					expect(await exists(tx, dropped)).toBe(false);
+					throw new Error('roll back');
+				}),
+			).rejects.toThrow();
+			expect(await client.query(`SELECT id FROM ${base} ORDER BY id`)).toEqual([{ id: 1 }]);
+			expect({ columns: await columns(base), indexes: await indexes(base) }).toEqual(before);
+			for (const gone of ['ddl_new', 'ddl_v', 'ddl_renamed']) expect(await exists(client, name(gone))).toBe(false);
+			expect(await exists(client, dropped)).toBe(true);
+			expect(await client.query(`SELECT name FROM db_serial WHERE name = '${name('ddl_serial')}'`)).toEqual([]);
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'a failed statement leaves the transaction open with the DDL before it (statement-level atomicity)',
+		async () => {
+			const table = name('ddl_stmt');
+			await client.transaction(async (tx) => {
+				await tx.query(`CREATE TABLE ${table} (id INT)`);
+				await expect(tx.query(`CREATE TABLE ${table} (id INT)`)).rejects.toThrow();
+				expect(await exists(tx, table)).toBe(true);
+				await tx.query(`INSERT INTO ${table} VALUES (1)`);
+			});
+			created.push(table);
+			expect(await other.query(`SELECT id FROM ${table}`)).toEqual([{ id: 1 }]);
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'outside transaction() the driver autocommits each statement; inside it nothing is committed before the end, and readers of an altered table wait',
+		async () => {
+			const table = name('ddl_auto');
+			// Autocommit (the shared client): another session sees each statement at once.
+			await client.query(`CREATE TABLE ${table} (id INT)`);
+			created.push(table);
+			expect(await exists(other, table)).toBe(true);
+			await client.query(`INSERT INTO ${table} VALUES (1)`);
+			expect(await other.query(`SELECT id FROM ${table}`)).toEqual([{ id: 1 }]);
+			// transaction() turns autocommit off on its own connection until it commits.
+			let reader: Promise<unknown> | undefined;
+			await client.transaction(async (tx) => {
+				await tx.query(`INSERT INTO ${table} VALUES (2)`);
+				expect(await other.query(`SELECT id FROM ${table} ORDER BY id`)).toEqual([{ id: 1 }]);
+				await tx.query(`ALTER TABLE ${table} ADD COLUMN n INT`);
+				// The ALTER holds a schema lock: another session reading the table waits for the commit.
+				reader = other.query(`SELECT id, n FROM ${table} ORDER BY id`);
+				const state = await Promise.race([
+					reader.then(() => 'answered'),
+					new Promise((resolve) => setTimeout(() => resolve('waiting'), 1000)),
+				]);
+				expect(state).toBe('waiting');
+			});
+			expect(await reader).toEqual([
+				{ id: 1, n: null },
+				{ id: 2, n: null },
+			]);
+		},
+		DDL_TIMEOUT,
+	);
+});
+
+describe('drizzle-cubrid/native/migrator on CUBRID (#163)', () => {
+	const users = name('mg_users');
+	const posts = name('mg_posts');
+	const table = name('mg_migrations');
+	const usersV1 = native.cubridTable(users, {
+		id: native.integer().primaryKey().autoIncrement(),
+		name: native.varchar({ length: 50 }).notNull(),
+	});
+	const postsV1 = native.cubridTable(posts, {
+		id: native.integer().primaryKey().autoIncrement(),
+		userId: native.integer('user_id').notNull(),
+		title: native.varchar({ length: 100 }).notNull(),
+		legacy: native.varchar({ length: 10 }),
+	});
+	// The schema after migrations 1 to 3.
+	const usersNow = native.cubridTable(users, {
+		id: native.integer().primaryKey().autoIncrement(),
+		name: native.varchar({ length: 50 }).notNull(),
+		email: native.varchar({ length: 100 }),
+		visits: native.bigint({ mode: 'bigint' }).notNull().default(0n),
+	});
+	const postsNow = native.cubridTable(posts, {
+		id: native.integer().primaryKey().autoIncrement(),
+		userId: native.integer('user_id').notNull(),
+		title: native.varchar({ length: 100 }).notNull(),
+	});
+	const files: Record<string, string> = {
+		'0001_initial.sql': native.generateInitialMigration({ usersV1, postsV1 }),
+		'0002_email_and_keys.sql': [
+			`ALTER TABLE "${users}" ADD COLUMN "email" VARCHAR(100);`,
+			`CREATE UNIQUE INDEX "${name('mg_ux_email')}" ON "${users}" ("email");`,
+			`ALTER TABLE "${posts}" ADD CONSTRAINT "${name('mg_fk_user')}" FOREIGN KEY ("user_id") REFERENCES "${users}" ("id");`,
+			`CREATE INDEX "${name('mg_ix_title')}" ON "${posts}" ("title");`,
+			'',
+		].join('\n'),
+		'0003_drop_and_seed.sql': [
+			`ALTER TABLE "${posts}" DROP COLUMN "legacy";`,
+			`DROP INDEX "${name('mg_ix_title')}" ON "${posts}";`,
+			`ALTER TABLE "${users}" ADD COLUMN "visits" BIGINT DEFAULT 0 NOT NULL;`,
+			`INSERT INTO "${users}" ("name", "email") VALUES ('seed', 'seed@example.com');`,
+			'',
+		].join('\n'),
+	};
+	let dir: string;
+	const write = (file: string, text: string) => writeFileSync(join(dir, file), text);
+	const records = async (migrations = table) =>
+		client.query<{ id: number; name: string; checksum: string; applied_at: string }>(
+			`SELECT "id", "name", "checksum", TO_CHAR("applied_at", 'YYYY-MM-DD HH24:MI:SS.FF') "applied_at" FROM "${migrations}" ORDER BY "id"`,
+		);
+	const exists = async (t: string) =>
+		(await client.query(`SELECT class_name FROM db_class WHERE class_name = '${t.toLowerCase()}'`)).length > 0;
+	const columns = async (t: string) =>
+		(
+			await client.query<{ attr_name: string }>(
+				`SELECT attr_name FROM db_attribute WHERE class_name = '${t}' ORDER BY def_order`,
+			)
+		).map((row) => row.attr_name);
+	const failure = async (promise: Promise<unknown>) => {
+		const error = await promise.then(
+			() => undefined,
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(CubridMigrationError);
+		return error as CubridMigrationError;
+	};
+
+	beforeAll(() => {
+		dir = mkdtempSync(join(tmpdir(), 'dz-live-migrations-'));
+		for (const [file, text] of Object.entries(files)) write(file, text);
+		// Dropped in reverse: the posts foreign key goes before users.
+		created.push(`"${table}"`, `"${table}_lock"`, `"${users}"`, `"${posts}"`, `"${name('mg_after')}"`);
+	});
+	afterAll(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it('a dry run reports every migration as pending and creates nothing', async () => {
+		const plan = await migrate(native.drizzle(client), { migrationsFolder: dir, migrationsTable: table, dryRun: true });
+		expect(plan.applied).toEqual([]);
+		expect(plan.pending.map((m) => m.fileName)).toEqual(Object.keys(files));
+		expect([await exists(table), await exists(`${table}_lock`), await exists(users)]).toEqual([false, false, false]);
+	});
+
+	it(
+		'applies CREATE, ALTER ADD/DROP COLUMN, index and constraint migrations in order and records them',
+		async () => {
+			const result = await migrate(native.drizzle(client), { migrationsFolder: dir, migrationsTable: table });
+			expect(result.applied.map((m) => m.fileName)).toEqual(Object.keys(files));
+			expect(await columns(users)).toEqual(['id', 'name', 'email', 'visits']);
+			expect(await columns(posts)).toEqual(['id', 'user_id', 'title']);
+			const indexes = await client.query<{ index_name: string; is_unique: string; is_foreign_key: string }>(
+				`SELECT index_name, is_unique, is_foreign_key FROM db_index WHERE class_name IN ('${users}', '${posts}') ORDER BY index_name`,
+			);
+			expect(indexes.map((i) => i.index_name)).toContain(name('mg_ux_email'));
+			expect(indexes.map((i) => i.index_name)).toContain(name('mg_fk_user'));
+			expect(indexes.map((i) => i.index_name)).not.toContain(name('mg_ix_title'));
+			const recorded = await records();
+			expect(recorded.map(({ id, name: n, checksum }) => [id, n, checksum])).toEqual(
+				result.applied.map((m) => [m.id, m.name, m.checksum]),
+			);
+			for (const row of recorded) expect(row.applied_at).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}$/);
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'round-trips through the native query API on the migrated tables, with their constraints',
+		async () => {
+			const db = native.drizzle(client);
+			const [seed] = await db.select().from(usersNow);
+			expect(seed).toEqual({ id: expect.any(Number), name: 'seed', email: 'seed@example.com', visits: 0n });
+			const [ann] = await db
+				.insert(usersNow)
+				.values({ name: 'ann', email: 'ann@example.com', visits: 9n })
+				.$returningId();
+			await db.insert(postsNow).values({ userId: ann!.id, title: 'hello' });
+			const rows = await db
+				.select({ name: usersNow.name, visits: usersNow.visits, title: postsNow.title })
+				.from(postsNow)
+				.innerJoin(usersNow, eq(postsNow.userId, usersNow.id));
+			expect(rows).toEqual([{ name: 'ann', visits: 9n, title: 'hello' }]);
+			// The unique index of migration 2 and its foreign key are enforced.
+			await expect(db.insert(usersNow).values({ name: 'dup', email: 'ann@example.com' })).rejects.toThrow();
+			await expect(db.insert(postsNow).values({ userId: 999_999, title: 'orphan' })).rejects.toThrow();
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'a rerun applies nothing and leaves the records as they were',
+		async () => {
+			const before = await records();
+			const result = await migrate(native.drizzle(pool), { migrationsFolder: dir, migrationsTable: table });
+			expect(result).toEqual({ applied: [], pending: [], ahead: [] });
+			expect(await records()).toEqual(before);
+			expect(await client.query(`SELECT COUNT(*) n FROM "${users}" WHERE "name" = 'seed'`)).toEqual([{ n: 1n }]);
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'a failing migration is rolled back whole and can be fixed and applied again',
+		async () => {
+			const after = name('mg_after');
+			write(
+				'0004_after.sql',
+				`CREATE TABLE "${after}" ("id" INT);\nINSERT INTO "${users}" ("name") VALUES ('in_failed');\nALTER TABLE "${users}" DROP COLUMN "no_such_column";\n`,
+			);
+			const error = await failure(migrate(native.drizzle(client), { migrationsFolder: dir, migrationsTable: table }));
+			expect(error.code).toBe('statement-failed');
+			expect(error.migration).toEqual({ id: 4, name: 'after' });
+			expect(error.statement).toEqual({
+				index: 3,
+				line: 3,
+				sql: `ALTER TABLE "${users}" DROP COLUMN "no_such_column"`,
+			});
+			expect(error.cause).toBeInstanceOf(ClientTransactionError);
+			// Nothing of migration 4 stayed: its table, its row and its record are gone.
+			expect(await exists(after)).toBe(false);
+			expect(await client.query(`SELECT COUNT(*) n FROM "${users}" WHERE "name" = 'in_failed'`)).toEqual([{ n: 0n }]);
+			expect((await records()).map((r) => r.id)).toEqual([1, 2, 3]);
+
+			write('0004_after.sql', `CREATE TABLE "${after}" ("id" INT);\nALTER TABLE "${users}" DROP COLUMN "visits";\n`);
+			const fixed = await migrate(native.drizzle(client), { migrationsFolder: dir, migrationsTable: table });
+			expect(fixed.applied.map((m) => m.fileName)).toEqual(['0004_after.sql']);
+			expect(await exists(after)).toBe(true);
+			expect(await columns(users)).toEqual(['id', 'name', 'email']);
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'refuses an edited applied migration and foreign SQL before applying anything',
+		async () => {
+			const pendingTable = name('mg_pending');
+			write('0005_pending.sql', `CREATE TABLE "${pendingTable}" ("id" INT);\n`);
+			write('0002_email_and_keys.sql', `${files['0002_email_and_keys.sql']}-- edited after it was applied\n`);
+			const drift = await failure(migrate(native.drizzle(client), { migrationsFolder: dir, migrationsTable: table }));
+			expect(drift.code).toBe('applied-mismatch');
+			expect(drift.issues).toEqual([
+				expect.objectContaining({
+					file: '0002_email_and_keys.sql',
+					message: expect.stringMatching(/changed after it was applied/),
+				}),
+			]);
+			write('0002_email_and_keys.sql', files['0002_email_and_keys.sql']!);
+
+			write('0006_foreign.sql', 'CREATE TABLE `mg_foreign` (`id` INT UNSIGNED) ENGINE=InnoDB;\n');
+			const foreign = await failure(migrate(native.drizzle(client), { migrationsFolder: dir, migrationsTable: table }));
+			expect(foreign.code).toBe('invalid-sql');
+			expect(foreign.issues.map((i) => i.message.split(':')[0])).toEqual([
+				'Backtick-quoted identifier `mg_foreign`',
+				'Backtick-quoted identifier `id`',
+				'UNSIGNED is a MySQL type modifier; CUBRID has no unsigned or zero-filled numeric types',
+				'ENGINE= is a MySQL table option; CUBRID has no storage engines',
+			]);
+			// The valid migration 5 before it was not applied either.
+			expect(await exists(pendingTable)).toBe(false);
+			expect((await records()).map((r) => r.id)).toEqual([1, 2, 3, 4]);
+			rmSync(join(dir, '0005_pending.sql'));
+			rmSync(join(dir, '0006_foreign.sql'));
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'an older folder against a database that is ahead applies nothing and reports the newer migrations',
+		async () => {
+			const older = mkdtempSync(join(tmpdir(), 'dz-live-older-'));
+			try {
+				for (const file of ['0001_initial.sql', '0002_email_and_keys.sql', '0003_drop_and_seed.sql']) {
+					writeFileSync(join(older, file), files[file]!);
+				}
+				const before = await records();
+				const result = await migrate(native.drizzle(client), { migrationsFolder: older, migrationsTable: table });
+				expect(result.applied).toEqual([]);
+				expect(result.pending).toEqual([]);
+				expect(result.ahead.map(({ id, name: n }) => [id, n])).toEqual([[4, 'after']]);
+				expect(await records()).toEqual(before);
+			} finally {
+				rmSync(older, { recursive: true, force: true });
+			}
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		"ignores another owner's table of the same name as the record table",
+		async () => {
+			const owner = name('mgown');
+			const shared = name('mg_shared');
+			const folder = mkdtempSync(join(tmpdir(), 'dz-live-owner-'));
+			await client.query(`CREATE USER "${owner}"`);
+			try {
+				await client.query(`CREATE TABLE "${owner}"."${shared}" ("x" INT)`);
+				writeFileSync(join(folder, '0001_one.sql'), `CREATE TABLE "${name('mg_owned')}" ("id" INT);\n`);
+				created.push(`"${shared}"`, `"${shared}_lock"`, `"${name('mg_owned')}"`);
+				const config = { migrationsFolder: folder, migrationsTable: shared };
+				const plan = await migrate(native.drizzle(client), { ...config, dryRun: true });
+				expect(plan.pending.map((m) => m.id)).toEqual([1]);
+				const result = await migrate(native.drizzle(client), config);
+				expect(result.applied.map((m) => m.id)).toEqual([1]);
+				expect((await records(shared)).map((r) => r.id)).toEqual([1]);
+			} finally {
+				rmSync(folder, { recursive: true, force: true });
+				await client.query(`DROP TABLE IF EXISTS "${owner}"."${shared}"`);
+				await client.query(`DROP USER "${owner}"`);
+			}
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'two concurrent migrate() calls apply each migration once',
+		async () => {
+			const concurrent = name('mg_conc');
+			const folder = mkdtempSync(join(tmpdir(), 'dz-live-concurrent-'));
+			const tables = [1, 2, 3].map((n) => name(`mg_conc${n}`));
+			try {
+				tables.forEach((t, index) => {
+					writeFileSync(join(folder, `${index + 1}_t${index + 1}.sql`), `CREATE TABLE "${t}" ("id" INT);\n`);
+				});
+				created.push(`"${concurrent}"`, `"${concurrent}_lock"`, ...tables.map((t) => `"${t}"`));
+				const config = { migrationsFolder: folder, migrationsTable: concurrent };
+				const [a, b] = await Promise.all([
+					migrate(native.drizzle(client), config),
+					migrate(native.drizzle(pool), config),
+				]);
+				expect([...a.applied, ...b.applied].map((m) => m.id).sort()).toEqual([1, 2, 3]);
+				expect((await records(concurrent)).map((r) => r.id)).toEqual([1, 2, 3]);
+				for (const t of tables) expect(await exists(t)).toBe(true);
+			} finally {
+				rmSync(folder, { recursive: true, force: true });
+			}
+		},
+		DDL_TIMEOUT,
+	);
 });

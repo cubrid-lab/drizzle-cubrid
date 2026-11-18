@@ -2,8 +2,9 @@
 //
 // Tables, column builders with codecs, and drizzle() with select(), insert(),
 // update(), delete(), execute(), transaction() and relational queries
-// (db.query) (#158, #159, #160, #161).
-// See docs/NATIVE_API.md.
+// (db.query) (#158, #159, #160, #161), and generateInitialMigration() for the
+// migrator entry drizzle-cubrid/native/migrator (#163).
+// See docs/NATIVE_API.md and docs/MIGRATIONS.md.
 // It must never import the 0.x modules, which are built on Drizzle's MySQL
 // classes (ADR 0003, ADR 0007); scripts/check-dialect-boundary.mjs enforces it.
 
@@ -82,6 +83,7 @@ export {
 	CubridTransactionRollbackError,
 	drizzle,
 } from './db.js';
+export { generateInitialMigration } from './ddl.js';
 export { CubridDialect, type CubridSetOperator, quoteIdentifier } from './dialect.js';
 export {
 	CubridDelete,
