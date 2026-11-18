@@ -1,6 +1,6 @@
 // drizzle-cubrid/native: the CUBRID-native dialect (experimental preview).
 //
-// Tables, column builders with codecs, and drizzle() with select(), insert(),
+// Tables with constraints, indexes and foreign keys, column builders with codecs, and drizzle() with select(), insert(),
 // update(), delete(), execute(), transaction() and relational queries
 // (db.query) (#158, #159, #160, #161), and generateInitialMigration() for the
 // migrator entry drizzle-cubrid/native/migrator (#163).
@@ -99,6 +99,14 @@ export {
 	type CubridUpdateSet,
 } from './dml.js';
 export {
+	CubridForeignKey,
+	type CubridForeignKeyAction,
+	type CubridForeignKeyActions,
+	type CubridForeignKeyReference,
+	type CubridForeignKeyUpdateAction,
+	foreignKey,
+} from './foreign-keys.js';
+export {
 	CubridPreparedRelationalQuery,
 	CubridRelationalQuery,
 	CubridRelationalQueryBuilder,
@@ -137,6 +145,8 @@ export {
 } from './session.js';
 export {
 	type BuildCubridColumns,
+	CubridIndex,
+	type CubridIndexBuilderOn,
 	CubridPrimaryKey,
 	CubridTable,
 	type CubridTableConfig,
@@ -146,6 +156,8 @@ export {
 	CubridUniqueConstraint,
 	cubridTable,
 	getTableConfig,
+	index,
 	primaryKey,
 	unique,
+	uniqueIndex,
 } from './table.js';

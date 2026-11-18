@@ -12,8 +12,11 @@
 - Column builders with CUBRID names, CUBRID SQL types (`getSQLType()`) and
   codecs (`mapToDriverValue()` / `mapFromDriverValue()`) for the values
   cubrid-client 1.x sends and returns.
-- Table constraints in `extraConfig`: `primaryKey({ name?, columns })` and
-  `unique(name?).on(...columns)`, read back with `getTableConfig(table)`.
+- Table constraints and indexes in `extraConfig`: `primaryKey({ name?, columns })`,
+  `unique(name?).on(...columns)`, `foreignKey({ name?, columns, foreignColumns })`,
+  `index(name).on(...columns)` and `uniqueIndex(name).on(...columns)`, plus a
+  column's `.references(() => column, { onDelete?, onUpdate? })`, read back
+  with `getTableConfig(table)` (see [Indexes and foreign keys](#indexes-and-foreign-keys)).
 - `collectionLiteralSql(column, count)`: the typed literal a statement uses to
   write a collection (see [Collections](#collections)).
 - `drizzle(client)` with `db.select()`, `db.selectDistinct()` and
@@ -29,12 +32,12 @@
   selects and set operations (see [Streaming](#streaming)).
 - Schema migrations: `migrate()` from `drizzle-cubrid/native/migrator`
   applies ordered CUBRID SQL files, and `generateInitialMigration(schema)`
-  writes the first one (`CREATE TABLE`). See [MIGRATIONS.md](MIGRATIONS.md).
+  writes the first one (`CREATE TABLE` and `CREATE INDEX`). See [MIGRATIONS.md](MIGRATIONS.md).
 
 **Not yet:** streaming inside `db.transaction()` or of relational queries
 (both refused, see [Streaming](#streaming)), schema diffing and `ALTER` generation (#163), and
-indexes or foreign keys in `extraConfig`. Native tables are not supported by
-the 0.x `drizzle()` from `drizzle-cubrid`.
+descending, function-based or filtered indexes (write them in a migration by
+hand). Native tables are not supported by the 0.x `drizzle()` from `drizzle-cubrid`.
 
 ```ts
 import { bigint, cubridTable, integer, primaryKey, set, varchar } from 'drizzle-cubrid/native';
@@ -59,7 +62,8 @@ export const memberships = cubridTable(
 A builder called without a name takes its key in the table as the column
 name. Every builder has Drizzle's neutral modifiers `.notNull()`,
 `.default()`, `.$defaultFn()`, `.$onUpdateFn()`, `.$type<T>()` and
-`.primaryKey()`, plus `.unique(name?)`. `smallint`, `integer`/`int` and
+`.primaryKey()`, plus `.unique(name?)` and `.references()` (see
+[Indexes and foreign keys](#indexes-and-foreign-keys)). `smallint`, `integer`/`int` and
 `bigint` also have `.autoIncrement()` (CUBRID `AUTO_INCREMENT`), which makes
 the column optional on insert. `.generatedAlwaysAs()` throws: CUBRID generated
 columns are not supported yet.
@@ -967,6 +971,86 @@ The cast uses the element's declared type, except that `VARCHAR` and `STRING`
 elements cast to `STRING`, so the cast cannot truncate a value that the column
 would refuse. `insert()` and `update()` emit this literal themselves (see
 [Collections in writes](#collections-in-writes)).
+
+## Indexes and foreign keys
+
+```ts
+import { cubridTable, foreignKey, index, integer, primaryKey, uniqueIndex, varchar } from 'drizzle-cubrid/native';
+import type { CubridColumn } from 'drizzle-cubrid/native';
+
+export const users = cubridTable(
+  'users',
+  { id: integer().primaryKey(), email: varchar({ length: 100 }).notNull() },
+  (t) => [uniqueIndex('ux_users_email').on(t.email)],
+);
+
+export const posts = cubridTable(
+  'posts',
+  {
+    id: integer().primaryKey().autoIncrement(),
+    authorId: integer('author_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    editorId: integer('editor_id').references(() => users.id, { onDelete: 'set null' }),
+    replyTo: integer('reply_to').references((): CubridColumn => posts.id), // self-reference
+    slug: varchar({ length: 50 }).notNull(),
+  },
+  (t) => [index('ix_posts_slug').on(t.slug)],
+);
+
+export const tagged = cubridTable(
+  'tagged',
+  { postId: integer('post_id').notNull(), tag: varchar({ length: 20 }).notNull() },
+  (t) => [
+    primaryKey({ columns: [t.postId, t.tag] }),
+    foreignKey({ name: 'fk_tagged_post', columns: [t.postId], foreignColumns: [posts.id] })
+      .onDelete('cascade')
+      .onUpdate('restrict'),
+  ],
+);
+```
+
+| Declaration | DDL | Notes |
+| --- | --- | --- |
+| `index(name).on(...columns)` | `CREATE INDEX "name" ON "table" (…)` | A separate statement after `CREATE TABLE`. The name is required |
+| `uniqueIndex(name).on(...columns)` | `CREATE UNIQUE INDEX "name" ON "table" (…)` | Violations are cubrid-client `ConstraintError`s with `kind: 'unique-violation'` |
+| `foreignKey({ name?, columns, foreignColumns })` | `[CONSTRAINT "name"] FOREIGN KEY (…) REFERENCES "other" (…)` | A table constraint inside `CREATE TABLE`. Without a name, CUBRID names it `fk_<table>_<columns>` |
+| `.references(() => column, { onDelete?, onUpdate? })` | as `foreignKey()`, one column, unnamed | The callback runs when the schema is read, so it may name a table declared later; a self-reference needs the return type `(): CubridColumn =>` for TypeScript |
+| `.onDelete(action)` | `ON DELETE …` | `'cascade'`, `'restrict'`, `'no action'`, `'set null'`. CUBRID's default is `RESTRICT` |
+| `.onUpdate(action)` | `ON UPDATE …` | `'restrict'`, `'no action'`, `'set null'`. CUBRID has no `ON UPDATE CASCADE` |
+
+Refused, at type level and when the table is read or its DDL is rendered,
+each with a message that names the table and the key:
+
+- `'set default'` for either action, and `'cascade'` for `onUpdate()`:
+  CUBRID 11.4 rejects them as syntax errors (-493).
+- A foreign key whose `foreignColumns` are not exactly the referenced table's
+  primary key (any order): CUBRID accepts a foreign key only onto the whole
+  primary key, not onto a `UNIQUE` column or part of a composite key (-920).
+- `'set null'` on a `NOT NULL` column (-998 on the server).
+- A different number of columns and foreign columns, foreign columns of two
+  tables, key or index columns of another table, and an index without a name
+  or columns.
+- Two indexes or constraints of one table with the same name, compared
+  without case: CUBRID keeps index and constraint names in one namespace per
+  table (-272).
+- Anything but a column in `index().on()`: descending (`DESC`),
+  function-based and filtered (`WHERE`) indexes exist on CUBRID 11.4 but are
+  not built here, and there is no `.using()` (CUBRID indexes are B-trees).
+  Write them in a migration by hand.
+
+Column types are not compared: CUBRID refuses a key column whose type family
+differs from the referenced one (`INTEGER` onto `BIGINT`, `CHAR` onto
+`VARCHAR`: -921), but accepts `VARCHAR(20)` onto `VARCHAR(10)`.
+
+CUBRID orders a composite foreign key as the referenced primary key and keeps
+the pairing you declare: `foreignKey({ columns: [t.x, t.y], foreignColumns: [pairs.b, pairs.a] })`
+pairs `x` with `b`. Foreign key violations are cubrid-client `ConstraintError`s
+with `kind: 'foreign-key-violation'`: code -922 for a missing parent row,
+-924 for deleting a parent row that is still referenced under
+`RESTRICT`/`NO ACTION`. CUBRID also creates an index on the foreign key's
+columns.
+
+`relations()` do not read foreign keys: relational queries still take
+`fields` and `references` from `one()`, as in Drizzle.
 
 ## MySQL-only builders and their CUBRID replacements
 

@@ -2,17 +2,23 @@
 import { getTableColumns, getTableName, is, sql, Table } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
-import { createTableSql } from '../../src/native/ddl';
+import { createIndexSql, createTableSql } from '../../src/native/ddl';
 import { quoteIdentifier } from '../../src/native/dialect';
 import {
 	bigint,
 	boolean,
+	type CubridColumn,
+	CubridForeignKey,
+	CubridIndex,
 	CubridPrimaryKey,
 	CubridTable,
 	CubridUniqueConstraint,
 	cubridTable,
 	datetime,
+	foreignKey,
+	generateInitialMigration,
 	getTableConfig,
+	index,
 	integer,
 	monetary,
 	numeric,
@@ -23,6 +29,7 @@ import {
 	string,
 	time,
 	unique,
+	uniqueIndex,
 	varchar,
 } from '../../src/native/index';
 
@@ -58,7 +65,14 @@ describe('cubridTable', () => {
 
 	it('returns no constraints without extraConfig', () => {
 		const t = cubridTable('plain', { a: integer() });
-		expect(getTableConfig(t)).toEqual({ name: 'plain', columns: [t.a], primaryKeys: [], uniqueConstraints: [] });
+		expect(getTableConfig(t)).toEqual({
+			name: 'plain',
+			columns: [t.a],
+			primaryKeys: [],
+			uniqueConstraints: [],
+			foreignKeys: [],
+			indexes: [],
+		});
 	});
 
 	it('calls extraConfig lazily with the built columns', () => {
@@ -174,5 +188,210 @@ describe('createTableSql (test-only DDL)', () => {
 			'CREATE TABLE "we""ird" (\n\t"co""l" INTEGER\n)',
 		);
 		expect(() => quoteIdentifier('')).toThrow(/cannot be empty/);
+	});
+});
+
+describe('indexes (#157)', () => {
+	const posts = cubridTable(
+		'posts',
+		{ id: integer().primaryKey(), author: integer().notNull(), slug: varchar({ length: 40 }).notNull() },
+		(t) => [index('ix_posts_author').on(t.author), uniqueIndex('ux_posts_author_slug').on(t.author, t.slug)],
+	);
+
+	it('reads indexes back with getTableConfig in declaration order', () => {
+		expect(getTableConfig(posts).indexes).toEqual([
+			new CubridIndex('ix_posts_author', [posts.author], false),
+			new CubridIndex('ux_posts_author_slug', [posts.author, posts.slug], true),
+		]);
+	});
+
+	it('renders one CREATE [UNIQUE] INDEX per index, outside CREATE TABLE', () => {
+		expect(createIndexSql(posts)).toEqual([
+			'CREATE INDEX "ix_posts_author" ON "posts" ("author")',
+			'CREATE UNIQUE INDEX "ux_posts_author_slug" ON "posts" ("author", "slug")',
+		]);
+		expect(createTableSql(posts)).not.toContain('INDEX');
+		expect(createIndexSql(cubridTable('none', { a: integer() }))).toEqual([]);
+		expect(createIndexSql(cubridTable('we"ird', { 'co"l': integer() }, (t) => [index('i"x').on(t['co"l'])]))).toEqual([
+			'CREATE INDEX "i""x" ON "we""ird" ("co""l")',
+		]);
+	});
+
+	it('refuses an index without a name or columns, on expressions and on another table', () => {
+		const t = cubridTable('t', { a: integer() });
+		// @ts-expect-error an index needs a name
+		expect(() => index()).toThrow(/An index needs a name/);
+		expect(() => uniqueIndex('')).toThrow(/An index needs a name/);
+		// @ts-expect-error at least one column
+		expect(() => index('ix').on()).toThrow(/Index ix needs at least one column/);
+		// @ts-expect-error descending, function-based and filtered indexes are not built
+		expect(() => index('ix').on(sql`${t.a} desc`)).toThrow(/takes table columns only; write descending/);
+		const other = cubridTable('other', { a: integer() }, () => [index('ix').on(t.a)]);
+		expect(() => getTableConfig(other)).toThrow(/Constraint on table other names column a of another table/);
+	});
+
+	it('refuses index and constraint names a table repeats, ignoring case', () => {
+		const t = cubridTable('dups', { a: integer(), b: integer() }, (self) => [
+			unique('Name_A').on(self.a),
+			index('name_a').on(self.b),
+		]);
+		expect(() => getTableConfig(t)).toThrow(/Table dups declares the index or constraint name name_a twice/);
+		const column = cubridTable('dups2', { a: integer().unique('u_a') }, (self) => [index('U_A').on(self.a)]);
+		expect(() => getTableConfig(column)).toThrow(/Table dups2 declares the index or constraint name U_A twice/);
+	});
+});
+
+describe('foreign keys (#157)', () => {
+	const users = cubridTable('users', { id: integer().primaryKey(), name: varchar({ length: 20 }) });
+	const pairs = cubridTable('pairs', { a: integer().notNull(), b: integer().notNull() }, (t) => [
+		primaryKey({ columns: [t.a, t.b] }),
+	]);
+
+	it('renders column .references() and table foreignKey() as table constraints with their actions', () => {
+		const posts = cubridTable(
+			'posts',
+			{
+				id: integer().primaryKey(),
+				author: integer().references(() => users.id, { onDelete: 'cascade' }),
+				editor: integer().references(() => users.id, { onDelete: 'set null', onUpdate: 'no action' }),
+				pa: integer().notNull(),
+				pb: integer().notNull(),
+			},
+			(t) => [
+				foreignKey({ name: 'fk_posts_pair', columns: [t.pa, t.pb], foreignColumns: [pairs.b, pairs.a] })
+					.onDelete('restrict')
+					.onUpdate('restrict'),
+			],
+		);
+		expect(createTableSql(posts)).toBe(
+			[
+				'CREATE TABLE "posts" (',
+				'\t"id" INTEGER NOT NULL PRIMARY KEY,',
+				'\t"author" INTEGER,',
+				'\t"editor" INTEGER,',
+				'\t"pa" INTEGER NOT NULL,',
+				'\t"pb" INTEGER NOT NULL,',
+				'\tFOREIGN KEY ("author") REFERENCES "users" ("id") ON DELETE CASCADE,',
+				'\tFOREIGN KEY ("editor") REFERENCES "users" ("id") ON DELETE SET NULL ON UPDATE NO ACTION,',
+				'\tCONSTRAINT "fk_posts_pair" FOREIGN KEY ("pa", "pb") REFERENCES "pairs" ("b", "a") ON DELETE RESTRICT ON UPDATE RESTRICT',
+				')',
+			].join('\n'),
+		);
+		const [author, , pair] = getTableConfig(posts).foreignKeys;
+		expect(author).toBeInstanceOf(CubridForeignKey);
+		expect(author!.getReference()).toEqual({ columns: [posts.author], foreignColumns: [users.id] });
+		expect([author!.name, author!.onDeleteAction, author!.onUpdateAction]).toEqual([undefined, 'cascade', undefined]);
+		expect([pair!.name, pair!.onDeleteAction, pair!.onUpdateAction]).toEqual(['fk_posts_pair', 'restrict', 'restrict']);
+	});
+
+	it('resolves .references() lazily, so a table may reference itself or a later table', () => {
+		const nodes = cubridTable('nodes', {
+			id: integer().primaryKey(),
+			parent: integer().references((): CubridColumn => nodes.id, { onDelete: 'cascade' }),
+			owner: integer().references(() => owners.id),
+		});
+		const owners = cubridTable('owners', { id: integer().primaryKey() });
+		expect(createTableSql(nodes)).toContain('FOREIGN KEY ("parent") REFERENCES "nodes" ("id") ON DELETE CASCADE');
+		expect(createTableSql(nodes)).toContain('FOREIGN KEY ("owner") REFERENCES "owners" ("id")');
+	});
+
+	it('refuses actions CUBRID does not have, at type level and at runtime', () => {
+		const t = cubridTable('t', { a: integer() });
+		// @ts-expect-error CUBRID has no SET DEFAULT
+		expect(() => foreignKey({ columns: [t.a], foreignColumns: [users.id] }).onDelete('set default')).toThrow(
+			/ON DELETE "set default" is not supported by CUBRID; use one of 'cascade', 'restrict', 'no action', 'set null'/,
+		);
+		// @ts-expect-error CUBRID has no ON UPDATE CASCADE
+		expect(() => foreignKey({ columns: [t.a], foreignColumns: [users.id] }).onUpdate('cascade')).toThrow(
+			/ON UPDATE "cascade" is not supported by CUBRID; use one of 'restrict', 'no action', 'set null'/,
+		);
+		expect(() =>
+			cubridTable('bad', {
+				// @ts-expect-error CUBRID has no ON UPDATE CASCADE
+				a: integer().references(() => users.id, { onUpdate: 'cascade' }),
+			}),
+		).toThrow(/ON UPDATE "cascade" is not supported by CUBRID/);
+	});
+
+	it('refuses keys CUBRID would reject', () => {
+		const fk = (name: string, build: (t: { a: CubridColumn; b: CubridColumn }) => CubridForeignKey) =>
+			cubridTable(name, { a: integer(), b: integer().notNull() }, (t) => [build(t)]);
+		const mismatched = fk('m', (t) => foreignKey({ columns: [t.a, t.b], foreignColumns: [users.id] }));
+		expect(() => getTableConfig(mismatched)).toThrow(/needs as many columns as foreign columns/);
+		const twoTables = fk('tt', (t) => foreignKey({ columns: [t.a, t.b], foreignColumns: [users.id, pairs.a] }));
+		expect(() => getTableConfig(twoTables)).toThrow(/references columns of more than one table/);
+		const notKey = fk('nk', (t) => foreignKey({ name: 'fk_nk', columns: [t.a], foreignColumns: [users.name] }));
+		expect(() => createTableSql(notKey)).toThrow(
+			/Foreign key fk_nk on table nk must reference the primary key of table users \(id\): CUBRID refuses/,
+		);
+		const partial = fk('pk', (t) => foreignKey({ columns: [t.a], foreignColumns: [pairs.a] }));
+		expect(() => createTableSql(partial)).toThrow(/must reference the primary key of table pairs \(a, b\)/);
+		const setNull = fk('sn', (t) => foreignKey({ columns: [t.b], foreignColumns: [users.id] }).onDelete('set null'));
+		expect(() => createTableSql(setNull)).toThrow(
+			/Foreign key on table sn sets column b to NULL, but the column is NOT NULL/,
+		);
+		const other = cubridTable('o', { a: integer() });
+		const foreignColumn = fk('fc', () => foreignKey({ columns: [other.a], foreignColumns: [users.id] }));
+		expect(() => getTableConfig(foreignColumn)).toThrow(/Constraint on table fc names column a of another table/);
+	});
+});
+
+describe('generateInitialMigration with indexes and foreign keys (#157)', () => {
+	const users = cubridTable('users', { id: integer().primaryKey(), email: varchar({ length: 50 }) }, (t) => [
+		uniqueIndex('ux_users_email').on(t.email),
+	]);
+	const posts = cubridTable(
+		'posts',
+		{ id: integer().primaryKey(), author: integer().references(() => users.id), tag: integer() },
+		(t) => [index('ix_posts_tag').on(t.tag), foreignKey({ columns: [t.tag], foreignColumns: [tags.id] })],
+	);
+	const tags = cubridTable('tags', { id: integer().primaryKey() });
+
+	it('puts referenced tables first and each table’s indexes after it, deterministically', () => {
+		const expected = [
+			'-- Initial schema, generated by generateInitialMigration() from drizzle-cubrid/native.',
+			'',
+			'CREATE TABLE "users" (\n\t"id" INTEGER NOT NULL PRIMARY KEY,\n\t"email" VARCHAR(50)\n);',
+			'CREATE UNIQUE INDEX "ux_users_email" ON "users" ("email");',
+			'',
+			'CREATE TABLE "tags" (\n\t"id" INTEGER NOT NULL PRIMARY KEY\n);',
+			'',
+			'CREATE TABLE "posts" (',
+			'\t"id" INTEGER NOT NULL PRIMARY KEY,',
+			'\t"author" INTEGER,',
+			'\t"tag" INTEGER,',
+			'\tFOREIGN KEY ("author") REFERENCES "users" ("id"),',
+			'\tFOREIGN KEY ("tag") REFERENCES "tags" ("id")',
+			');',
+			'CREATE INDEX "ix_posts_tag" ON "posts" ("tag");',
+			'',
+		].join('\n');
+		expect(generateInitialMigration({ posts, users, tags })).toBe(expected);
+		const order = (sql: string) => [...sql.matchAll(/CREATE TABLE "(\w+)"/g)].map((m) => m[1]);
+		expect(order(generateInitialMigration([tags, posts, users]))).toEqual(['tags', 'users', 'posts']);
+		// Without foreign keys between them, the given order is kept.
+		const a = cubridTable('a', { id: integer() });
+		const b = cubridTable('b', { id: integer() });
+		expect(order(generateInitialMigration([b, a]))).toEqual(['b', 'a']);
+	});
+
+	it('keeps a self-reference inside its table', () => {
+		const nodes = cubridTable('nodes', {
+			id: integer().primaryKey(),
+			parent: integer().references((): CubridColumn => nodes.id),
+		});
+		expect(generateInitialMigration([nodes])).toContain('FOREIGN KEY ("parent") REFERENCES "nodes" ("id")');
+	});
+
+	it('refuses a referenced table outside the schema and cycles between tables', () => {
+		expect(() => generateInitialMigration({ posts, users })).toThrow(
+			/Table posts has a foreign key to table tags, which is not in the schema/,
+		);
+		const x = cubridTable('x', { id: integer().primaryKey(), y: integer().references((): CubridColumn => y.id) });
+		const y = cubridTable('y', { id: integer().primaryKey(), z: integer().references((): CubridColumn => z.id) });
+		const z = cubridTable('z', { id: integer().primaryKey(), x: integer().references((): CubridColumn => x.id) });
+		expect(() => generateInitialMigration([x, y, z])).toThrow(
+			/Foreign keys form a cycle between tables x -> y -> z -> x; declare one of them in a later migration with ALTER TABLE/,
+		);
 	});
 });

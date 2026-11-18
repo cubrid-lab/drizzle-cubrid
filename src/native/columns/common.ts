@@ -14,6 +14,7 @@ import {
 } from 'drizzle-orm/column-builder';
 import { entityKind } from 'drizzle-orm/entity';
 import type { Table } from 'drizzle-orm/table';
+import { CubridForeignKey, type CubridForeignKeyActions } from '../foreign-keys.js';
 
 /**
  * A builder's runtime config handed to its column. The builder's `data` type
@@ -45,6 +46,26 @@ export abstract class CubridColumnBuilder<
 	TRuntimeConfig extends object = object,
 > extends ColumnBuilder<T, TRuntimeConfig, { dialect: 'cubrid' }> {
 	static override readonly [entityKind]: string = 'CubridColumnBuilder';
+
+	private readonly foreignKeyConfigs: { ref: () => CubridColumn; actions: CubridForeignKeyActions }[] = [];
+
+	/**
+	 * A one-column foreign key to `ref()`, rendered as a table constraint that
+	 * CUBRID names. `ref` is called when the schema is read, so it may name a
+	 * table declared later or this table itself.
+	 */
+	references(ref: () => CubridColumn, actions: CubridForeignKeyActions = {}): this {
+		this.foreignKeyConfigs.push({ ref, actions });
+		return this;
+	}
+
+	/** The foreign keys of `.references()` for the built `column`. Called by `cubridTable()`; dialect-owned. */
+	buildForeignKeys(column: CubridColumn): CubridForeignKey[] {
+		return this.foreignKeyConfigs.map(
+			({ ref, actions }) =>
+				new CubridForeignKey(() => ({ columns: [column], foreignColumns: [ref()] }), undefined, actions),
+		);
+	}
 
 	/** Adds a column `UNIQUE` constraint, optionally named. */
 	unique(name?: string): this {
