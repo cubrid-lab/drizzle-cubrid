@@ -983,7 +983,7 @@ are not in `drizzle-cubrid/native`:
 | `mysqlEnum` | `varchar({ length }).$type<'a' \| 'b'>()`; CUBRID `ENUM` has no builder (see [Not supported in the native dialect](#not-supported-in-the-native-dialect)) |
 | `text`, `tinytext`, `mediumtext`, `longtext` | `string()` or `varchar({ length })` |
 | `real` | `double()` |
-| `binary`, `varbinary` | Being added by [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216); not in a release yet |
+| `binary`, `varbinary` | See [Not supported in the native dialect](#not-supported-in-the-native-dialect) |
 | `blob` | No builder; see [Not supported in the native dialect](#not-supported-in-the-native-dialect) |
 | `json` | No builder; see [Not supported in the native dialect](#not-supported-in-the-native-dialect) |
 
@@ -999,11 +999,11 @@ converted for you.
 
 | CUBRID type | Today | Status |
 | --- | --- | --- |
-| `TIMESTAMPTZ`, `DATETIMETZ`, `TIMESTAMPLTZ`, `DATETIMELTZ` (zone-aware temporal types) | No builder. The `datetime`, `timestamp`, `date` and `time` builders follow the UTC wall-clock rules in [Date and time](#date-and-time) and do not carry a zone. Raw `sql` only | Not planned for 1.0; open an issue to request |
-| `BLOB`, `CLOB` | No builder. Raw `sql` only | Not planned for 1.0; open an issue to request |
-| `ENUM` | No builder. Store the value in `varchar({ length }).$type<'a' \| 'b'>()` instead; that column is a `VARCHAR`, so CUBRID does not enforce the allowed values. Raw `sql` for a real `ENUM` column | Not planned for 1.0; open an issue to request |
-| `JSON` | No builder. Store text in `string()` and parse it in your code, or use raw `sql` | Not planned for 1.0; open an issue to request |
-| `BIT`, `BIT VARYING` (binary) | No builder yet | Being added by [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216); not in a release yet |
+| `TIMESTAMPTZ`, `DATETIMETZ`, `TIMESTAMPLTZ`, `DATETIMELTZ` (zone-aware temporal types) | No builder. The `datetime`, `timestamp`, `date` and `time` builders follow the UTC wall-clock rules in [Date and time](#date-and-time) and do not carry a zone. Raw `sql` only | Not supported; open an issue to request it |
+| `BLOB`, `CLOB` | No builder. Raw `sql` only | Not supported; open an issue to request it |
+| `ENUM` | No builder. Store the value in `varchar({ length }).$type<'a' \| 'b'>()` instead; that column is a `VARCHAR`, so CUBRID does not enforce the allowed values. Raw `sql` for a real `ENUM` column | Not supported; open an issue to request it |
+| `JSON` | No builder. Store text in `string()` and parse it in your code, or use raw `sql` | Not supported; open an issue to request it |
+| `BIT`, `BIT VARYING` (binary) | No builder yet | Tracked in [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216) (`Buffer` design approved, not implemented or released yet) |
 
 ## Known CUBRID behaviors
 
