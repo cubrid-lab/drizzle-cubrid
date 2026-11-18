@@ -36,6 +36,10 @@ CI checks both ends of the range on every code change:
   version (newest supported).
 - `Lowest supported drizzle-orm` installs the floor taken from
   `peerDependencies` and runs the type check, build and tests.
+- `Packed package on live CUBRID 11.4` runs the live suite on the packed
+  tarball with the lockfile versions and with both peer floors taken from
+  `peerDependencies`; the release gate in `publish.yml` runs it again on the
+  tag's tarball.
 
 ### drizzle-orm internals this package depends on
 
@@ -72,12 +76,53 @@ Measured the same way with `npm install --no-save cubrid-client@<version>`
 | 1.4.0 | pass | 94 passed | transaction isolation checks from #185 | verified |
 
 Passing unit tests and a clean install are not database compatibility. The
-live suite (`npm run integration`, CI job Live CUBRID 11.4) runs with the
-lockfile versions; other server versions and peer combinations are tracked in
-#164.
+live suite runs against a real server with both the lockfile version and the
+floor (1.4.0, read from `peerDependencies`); see
+[What is verified](#what-is-verified-and-what-is-not).
 
 ## Node.js
 
 `engines.node` is `>=18`. The Node 18 job installs the packed tarball with the
 lockfile's peer versions and imports it through CommonJS and ESM; see
 [CI validation](CI_VALIDATION.md).
+
+## What is verified, and what is not
+
+Every code change in CI (`.github/workflows/ci.yml`) and every release tag
+before publishing (`.github/workflows/publish.yml`) runs these checks. A
+release is published only if all of them pass, and what is published is the
+tarball they tested.
+
+| Check | Verified with |
+| --- | --- |
+| Live suite (`tests/integration.test.ts`) on the source | CUBRID 11.4 (`cubrid/cubrid:11.4`, pinned by digest), Node 22, `TZ=Asia/Seoul`, lockfile `drizzle-orm` and `cubrid-client` (CI only) |
+| Live suite on the packed npm tarball, ESM, both entry points | The same server and Node; once with the lockfile peers (`drizzle-orm` 0.45.4, `cubrid-client` 1.4.0) and once with the peer floors from `package.json` (`drizzle-orm` 0.44.1, `cubrid-client` 1.4.0) |
+| CommonJS live smoke on the packed tarball | `require('drizzle-cubrid')` and `require('drizzle-cubrid/native')` against the same server, in both peer lanes: generated keys, BIGINT beyond 2^53, SET values, rollback and error propagation |
+| Packed tarball imported on Node 18 | CommonJS and ESM, both entry points, lockfile peers, no database |
+| Type check, build and unit tests | Node 20 and 22 with the lockfile peers; Node 22 with the `drizzle-orm` floor |
+| Lint and the foreign-dialect boundary | `src` and the packed tarball |
+
+A live lane passes only if it ran a non-zero number of tests and none failed or
+was skipped (`scripts/check-live-results.mjs`), and the server's `version()`
+starts with `11.4`. Each packed lane records the server version, image digest,
+Node, `drizzle-orm`, `cubrid-client`, package version, Git SHA, tarball sha512
+and integrity, and test counts in the job summary and in an uploaded evidence
+artifact (`scripts/packed-live.mjs`). On a tag, the publish job checks that the
+tarball's integrity equals the one packed and its version equals the tag,
+then runs `npm publish <tarball>`.
+
+**Not verified:**
+
+- CUBRID server versions other than 11.4 (10.2, 11.0, 11.2 and later
+  releases): no test runs against them.
+- `cubrid-client` versions between the floor and the lockfile version other
+  than those two (today they are the same, 1.4.0), and `drizzle-orm` versions
+  other than 0.44.1 and 0.45.4 against a live server (the type-check sweep
+  above is offline).
+- Node 18 and Node 20 against a live server (Node 18 only imports the
+  package), and Node 24 or later.
+- Fault scenarios: broker or CAS restarts, broken connections, timeouts and
+  failover are pending (#164).
+- Windows and macOS: every job runs on Linux (`ubuntu-latest`).
+- A TypeScript consumer type-checking against the packed `.d.ts` files.
+- Migrations and schema reflection (#163).

@@ -5,67 +5,284 @@ on:
     tags:
       - "v*"
 
+# Least privilege for every job that installs and runs third-party code; only
+# the publish job below is granted more.
+permissions:
+  contents: read
+
+# Release gate (#164, docs/RELEASE_POLICY.md): the tarball is built and packed
+# once, tested against a real CUBRID 11.4 server and on Node 18, and that same
+# file is published. Nothing is published unless every job before it passed.
 jobs:
-  ci:
+  test:
+    name: Type check and unit tests (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
+      # Vitest 5 declares Node >=22.12; Node 20 runs it in practice (main CI does)
+      # but is outside its engines, and Node 18 cannot run it. Node 18 is checked
+      # on the packed tarball below.
       matrix:
-        node-version: [18, 20, 22]
-
+        node-version: [20, 22]
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: tsc --noEmit
-
+      - run: npm ci
+      - name: Type check
+        run: npm run typecheck
       - name: Test
         run: npx vitest run --reporter=verbose
 
-      - name: Build
-        run: npm run build
-
-  publish:
-    needs: ci
+  lint:
+    name: Lint and dialect boundary
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-
     steps:
       - uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
         with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
           cache: npm
+      - run: npm ci
+      - name: Biome
+        run: npm run lint
+      - name: Foreign-dialect boundary (src)
+        run: node scripts/check-dialect-boundary.mjs src
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
+  package:
+    name: Build and pack the release candidate
+    runs-on: ubuntu-latest
+    outputs:
+      tarball: ${{ steps.pack.outputs.tarball }}
+      integrity: ${{ steps.pack.outputs.integrity }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
       - name: Verify version matches tag
+        shell: bash
         run: |
+          set -euo pipefail
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
           PKG_VERSION=$(node -p "require('./package.json').version")
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
             echo "::error::Tag v$TAG_VERSION does not match package.json version $PKG_VERSION"
             exit 1
           fi
+      - run: npm ci
+      - run: npm run build
+      - name: Pack once and record the tarball and peer versions
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p packed
+          npm pack --ignore-scripts --pack-destination packed
+          shopt -s nullglob
+          tarballs=(packed/*.tgz)
+          test "${#tarballs[@]}" -eq 1
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const lock = require('./package-lock.json');
+          for (const name of ['drizzle-orm', 'cubrid-client']) {
+            const version = lock.packages?.[`node_modules/${name}`]?.version;
+            if (!version) throw new Error(`Cannot determine installed peer version: ${name}`);
+            fs.writeFileSync(`packed/${name}.version`, `${version}\n`);
+          }
+          NODE
+          integrity="sha512-$(openssl dgst -sha512 -binary "${tarballs[0]}" | base64 -w0)"
+          echo "tarball=$(basename "${tarballs[0]}")" >> "$GITHUB_OUTPUT"
+          echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
+          {
+            echo "Release candidate: $(basename "${tarballs[0]}")"
+            echo "Commit: $GITHUB_SHA"
+            echo "Integrity: $integrity"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Foreign-dialect boundary (packed ESM, CJS and .d.ts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/unpacked"
+          tar -xzf packed/*.tgz -C "$RUNNER_TEMP/unpacked"
+          node scripts/check-dialect-boundary.mjs package "$RUNNER_TEMP/unpacked/package"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-candidate
+          path: packed/
+          if-no-files-found: error
+          retention-days: 30
 
-      - name: Publish to npm
-        run: npm publish --access public
+  live-cubrid:
+    name: Release candidate on live CUBRID 11.4 (${{ matrix.peers }} peers)
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      # locked: the package-lock.json versions of drizzle-orm and cubrid-client;
+      # floor: the lowest versions the peer ranges in package.json admit.
+      matrix:
+        peers: [locked, floor]
+    services:
+      cubrid:
+        # Keep this digest the same as the Live CUBRID 11.4 job in ci.yml.
+        image: cubrid/cubrid:11.4@sha256:a8c8792f8092cb4ddf200cf0ab1bb6caac164194d9aec9d6ff2a828c3ec1b604
         env:
+          CUBRID_DB: testdb
+        ports:
+          - 33000:33000
+    env:
+      CUBRID_TEST_HOST: 127.0.0.1
+      CUBRID_TEST_PORT: 33000
+      CUBRID_TEST_DATABASE: testdb
+      CUBRID_TEST_EXPECT_VERSION: '11.4'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      # Only for scripts/wait-for-cubrid.mjs; the tests use the consumer's own install.
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/packed
+      - name: Check the tarball is the one packed
+        shell: bash
+        env:
+          TARBALL: ${{ runner.temp }}/packed/${{ needs.package.outputs.tarball }}
+          INTEGRITY: ${{ needs.package.outputs.integrity }}
+        run: |
+          set -euo pipefail
+          test "sha512-$(openssl dgst -sha512 -binary "$TARBALL" | base64 -w0)" = "$INTEGRITY"
+      - name: Wait for the CUBRID broker
+        run: node scripts/wait-for-cubrid.mjs 300
+      - name: Run the live suite against the installed tarball
+        # A non-UTC zone, so date and time handling cannot depend on TZ=UTC (#207).
+        env:
+          TZ: Asia/Seoul
+          CONTAINER: ${{ job.services.cubrid.id }}
+          TARBALL: ${{ runner.temp }}/packed/${{ needs.package.outputs.tarball }}
+          PEERS: ${{ matrix.peers }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The image the service container actually runs, with its registry digest.
+          image=$(docker inspect --format '{{.Image}}' "$CONTAINER")
+          CUBRID_IMAGE="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER") $(docker image inspect --format '{{join .RepoDigests ","}}' "$image")"
+          export CUBRID_IMAGE
+          node scripts/packed-live.mjs "$TARBALL" "$RUNNER_TEMP/consumer" "$PEERS" "$RUNNER_TEMP/evidence"
+      - name: Require every live test to run and pass
+        if: ${{ !cancelled() }}
+        run: node scripts/check-live-results.mjs "$RUNNER_TEMP/evidence/live-results.json"
+      - name: Upload the verification evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-live-evidence-${{ matrix.peers }}
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+  node18-consumer:
+    name: Node 18 consumer of the release candidate
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/packed-exports-smoke.cjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 18
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-candidate
+          path: packed/
+      - name: Check the tarball is the one packed
+        shell: bash
+        env:
+          TARBALL: packed/${{ needs.package.outputs.tarball }}
+          INTEGRITY: ${{ needs.package.outputs.integrity }}
+        run: |
+          set -euo pipefail
+          test "sha512-$(openssl dgst -sha512 -binary "$TARBALL" | base64 -w0)" = "$INTEGRITY"
+      - name: Install the tarball with the tested peer versions
+        shell: bash
+        env:
+          TARBALL: ${{ needs.package.outputs.tarball }}
+        run: |
+          set -euo pipefail
+          echo "Node runtime: $(node --version)"
+          mkdir consumer
+          cd consumer
+          npm init -y >/dev/null
+          npm install --ignore-scripts --no-audit --no-fund "../packed/$TARBALL" \
+            "drizzle-orm@$(cat ../packed/drizzle-orm.version)" "cubrid-client@$(cat ../packed/cubrid-client.version)"
+      - name: Exercise CJS and ESM exports on Node 18
+        working-directory: consumer
+        # Copied so that require() and import() resolve from the consumer.
+        run: cp ../scripts/packed-exports-smoke.cjs . && node packed-exports-smoke.cjs
+
+  publish:
+    name: Publish the tested tarball
+    needs: [test, lint, package, live-cubrid, node18-consumer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-candidate
+          path: packed/
+
+      - name: Verify the tarball, its version and the tag
+        shell: bash
+        env:
+          TARBALL: packed/${{ needs.package.outputs.tarball }}
+          INTEGRITY: ${{ needs.package.outputs.integrity }}
+        run: |
+          set -euo pipefail
+          test "sha512-$(openssl dgst -sha512 -binary "$TARBALL" | base64 -w0)" = "$INTEGRITY" || {
+            echo "::error::$TARBALL is not the tarball that passed the release gate"
+            exit 1
+          }
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          PKG_VERSION=$(tar -xzOf "$TARBALL" package/package.json | node -e "process.stdout.write(JSON.parse(require('fs').readFileSync(0, 'utf8')).version)")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag v$TAG_VERSION does not match the packed version $PKG_VERSION"
+            exit 1
+          fi
+
+      # The file itself, so npm cannot pack the working tree again.
+      - name: Publish to npm
+        run: npm publish "./packed/$TARBALL" --access public --ignore-scripts
+        env:
+          TARBALL: ${{ needs.package.outputs.tarball }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
