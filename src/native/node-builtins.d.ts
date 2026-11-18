@@ -16,10 +16,12 @@ declare module 'node:fs/promises' {
 		name: string;
 		isFile(): boolean;
 		isDirectory(): boolean;
+		isSymbolicLink(): boolean;
 	}
 	export function readdir(path: string, options: { withFileTypes: true }): Promise<DirectoryEntry[]>;
 	export function readdir(path: string): Promise<string[]>;
 	export function readFile(path: string, encoding: 'utf8'): Promise<string>;
+	export function stat(path: string): Promise<{ isFile(): boolean }>;
 }
 
 declare module 'node:path' {

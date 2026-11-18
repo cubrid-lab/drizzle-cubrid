@@ -75,11 +75,18 @@ keys on one table. Read the file before committing it.
 - **Numbering:** 1, 2, 3, … with no gap and no duplicate.
 - **Statements:** CUBRID SQL separated by `;`. A `;` inside a string literal, a
   quoted identifier (`"…"` or `[…]`) or a comment (`--`, `//`, `/* */`) does
-  not end a statement. The last statement may omit its `;`.
+  not end a statement. The last statement may omit its `;`. The splitter reads
+  string literals as CUBRID does by default (`no_backslash_escapes=yes`): `''`
+  is a quote and a backslash is an ordinary character. On a server set to
+  `no_backslash_escapes=no`, avoid `\'` in migration literals.
 - **Quoting:** use double quotes for identifiers, as drizzle-cubrid does.
   CUBRID stores table and column names in lower case even when quoted.
 - **Other files** in the folder (a README, `.gitkeep`) and subfolders are
-  ignored.
+  ignored. Symbolic links to files are followed, so a Kubernetes ConfigMap
+  mount works. A folder with no migration file at all is refused
+  (`'invalid-folder'`): it is most likely the wrong path.
+- **Encoding:** UTF-8. A leading byte order mark is ignored, like CRLF line
+  ends, for the checksum.
 - **Line ends:** the checksum reads CRLF as LF, so a checkout's line-end
   setting does not make an applied file look edited.
 
@@ -101,10 +108,26 @@ or pool, not a transaction.
    applied it meanwhile; then it is skipped), runs the statements in order,
    records the migration and commits.
 
-It resolves to `{ applied, pending }`: the migrations this call applied, and
-an empty `pending`. With nothing pending it runs no migration statement.
-With `dryRun: true` it does steps 1 and 3 (with no record table, nothing is
-applied yet), creates nothing, and resolves to `{ applied: [], pending }`.
+It resolves to `{ applied, pending, ahead }`: the migrations this call
+applied, an empty `pending`, and `ahead`. With nothing pending it runs no
+migration statement. With `dryRun: true` it does steps 1 and 3 (with no record
+table, nothing is applied yet), creates nothing, and resolves to
+`{ applied: [], pending, ahead }`.
+
+**A database ahead of the folder is accepted.** When the record table holds
+migrations beyond the folder's last file (a newer application version
+migrated, and an older one starts during a rolling deploy or a rollback),
+`migrate()` applies nothing and returns those records as `ahead` (`id`,
+`name`, `checksum`). The migrations the folder does have must still match
+their records, and a gap in the record is still refused. Check `ahead` if an
+older version must not run against a newer schema.
+
+> **Do not call `migrate()` inside a transaction of your own.** It refuses a
+> `tx`, but it cannot see a transaction that the same code holds open on
+> another connection (`await db.transaction(async () => migrate(db, …))`).
+> Its migrations then wait for that transaction's locks, and with CUBRID's
+> default `lock_timeout` (infinite) they wait forever. Run migrations before
+> the application starts its own work.
 
 The record table has `id`, `name`, `checksum` (SHA-256 hex) and `applied_at`
 (UTC `DATETIME`). Do not edit it by hand.
@@ -152,11 +175,12 @@ before applying anything. Nothing is rewritten.
 | --- | --- |
 | `` `name` `` (backticks) | MySQL quoting, the mark of SQL generated for MySQL. Use `"name"`. |
 | `--> statement-breakpoint`, a `meta/_journal.json` folder | drizzle-kit output, generated for another database |
-| `ENGINE=`, `UNSIGNED`, `ZEROFILL`, `DEFAULT CHARSET`, `DEFAULT CHARACTER SET` | MySQL options CUBRID does not have. CUBRID sets a table's character set with `CHARSET <name>` and `COLLATE <name>`. |
+| `ENGINE=` (as a table option of `CREATE TABLE`/`ALTER TABLE`; an `engine` column is fine), `UNSIGNED`, `ZEROFILL`, `DEFAULT CHARSET`, `DEFAULT CHARACTER SET` | MySQL options CUBRID does not have. CUBRID sets a table's character set with `CHARSET <name>` and `COLLATE <name>`. |
 | `/*! … */` | MySQL conditional comment: MySQL runs its content, CUBRID ignores it |
 | `#` comments | MySQL syntax; CUBRID uses `--`, `//` and `/* */` |
 | `USE`, `DELIMITER`, `LOCK`, `UNLOCK` | MySQL statements or client commands |
-| `BEGIN`, `START`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `SET TRANSACTION` | The migrator owns the transaction |
+| `BEGIN`, `START`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `XA`, `SET TRANSACTION` | The migrator owns the transaction |
+| `SET SYSTEM PARAMETERS` | Changes server or session settings; its effect inside a migration transaction was not measured. Set them outside `migrate()`. |
 | `CREATE [OR REPLACE] PROCEDURE` / `FUNCTION` | A PL/CSQL body contains `;`, which the splitter cannot tell from a statement end |
 | `?` | Migrations take no bound values |
 | Unterminated quote or comment, an empty migration, `*.down.sql`, a name that is not `<number>_<name>.sql`, gaps and duplicates | Not a valid migration folder |
@@ -175,9 +199,9 @@ Every refusal is a `CubridMigrationError` (exported from
 
 | `code` | When |
 | --- | --- |
-| `'invalid-config'` | Bad options, or a transaction or something other than the native database given as `db` |
-| `'invalid-folder'` | The folder cannot be read, holds a file that is not a migration, or is a drizzle-kit folder |
+| `'invalid-config'` | Bad options, or a cubrid-client client or pool, a transaction or anything else than `drizzle(client)` from `drizzle-cubrid/native` given as `db` |
+| `'invalid-folder'` | The folder cannot be read, holds no migration or a file that is not a migration, has a broken symbolic link, or is a drizzle-kit folder |
 | `'invalid-sequence'` | Numbers that do not go 1, 2, 3, … |
 | `'invalid-sql'` | Refused SQL or an empty migration |
-| `'applied-mismatch'` | The record table does not match the files |
+| `'applied-mismatch'` | The record table does not match the files it has (edited, renamed, gap) |
 | `'statement-failed'` | A statement failed; the migration was rolled back |

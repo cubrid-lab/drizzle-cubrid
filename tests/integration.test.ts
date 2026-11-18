@@ -4294,7 +4294,7 @@ describe('drizzle-cubrid/native/migrator on CUBRID (#163)', () => {
 		async () => {
 			const before = await records();
 			const result = await migrate(native.drizzle(pool), { migrationsFolder: dir, migrationsTable: table });
-			expect(result).toEqual({ applied: [], pending: [] });
+			expect(result).toEqual({ applied: [], pending: [], ahead: [] });
 			expect(await records()).toEqual(before);
 			expect(await client.query(`SELECT COUNT(*) n FROM "${users}" WHERE "name" = 'seed'`)).toEqual([{ n: 1n }]);
 		},
@@ -4362,6 +4362,53 @@ describe('drizzle-cubrid/native/migrator on CUBRID (#163)', () => {
 			expect((await records()).map((r) => r.id)).toEqual([1, 2, 3, 4]);
 			rmSync(join(dir, '0005_pending.sql'));
 			rmSync(join(dir, '0006_foreign.sql'));
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		'an older folder against a database that is ahead applies nothing and reports the newer migrations',
+		async () => {
+			const older = mkdtempSync(join(tmpdir(), 'dz-live-older-'));
+			try {
+				for (const file of ['0001_initial.sql', '0002_email_and_keys.sql', '0003_drop_and_seed.sql']) {
+					writeFileSync(join(older, file), files[file]!);
+				}
+				const before = await records();
+				const result = await migrate(native.drizzle(client), { migrationsFolder: older, migrationsTable: table });
+				expect(result.applied).toEqual([]);
+				expect(result.pending).toEqual([]);
+				expect(result.ahead.map(({ id, name: n }) => [id, n])).toEqual([[4, 'after']]);
+				expect(await records()).toEqual(before);
+			} finally {
+				rmSync(older, { recursive: true, force: true });
+			}
+		},
+		DDL_TIMEOUT,
+	);
+
+	it(
+		"ignores another owner's table of the same name as the record table",
+		async () => {
+			const owner = name('mgown');
+			const shared = name('mg_shared');
+			const folder = mkdtempSync(join(tmpdir(), 'dz-live-owner-'));
+			await client.query(`CREATE USER "${owner}"`);
+			try {
+				await client.query(`CREATE TABLE "${owner}"."${shared}" ("x" INT)`);
+				writeFileSync(join(folder, '0001_one.sql'), `CREATE TABLE "${name('mg_owned')}" ("id" INT);\n`);
+				created.push(`"${shared}"`, `"${shared}_lock"`, `"${name('mg_owned')}"`);
+				const config = { migrationsFolder: folder, migrationsTable: shared };
+				const plan = await migrate(native.drizzle(client), { ...config, dryRun: true });
+				expect(plan.pending.map((m) => m.id)).toEqual([1]);
+				const result = await migrate(native.drizzle(client), config);
+				expect(result.applied.map((m) => m.id)).toEqual([1]);
+				expect((await records(shared)).map((r) => r.id)).toEqual([1]);
+			} finally {
+				rmSync(folder, { recursive: true, force: true });
+				await client.query(`DROP TABLE IF EXISTS "${owner}"."${shared}"`);
+				await client.query(`DROP USER "${owner}"`);
+			}
 		},
 		DDL_TIMEOUT,
 	);

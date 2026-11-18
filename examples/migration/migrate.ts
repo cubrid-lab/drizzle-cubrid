@@ -1,5 +1,6 @@
 // Applies ./migrations to the database named by the CUBRID_* environment variables.
 // Run it with a TypeScript runner, for example: npx tsx examples/migration/migrate.ts
+import { fileURLToPath } from 'node:url';
 import { createClient } from 'cubrid-client';
 import { drizzle } from 'drizzle-cubrid/native';
 import { migrate } from 'drizzle-cubrid/native/migrator';
@@ -13,7 +14,7 @@ const client = createClient({
 });
 
 try {
-	const migrationsFolder = new URL('./migrations', import.meta.url).pathname;
+	const migrationsFolder = fileURLToPath(new URL('./migrations', import.meta.url));
 	const plan = await migrate(drizzle(client), { migrationsFolder, dryRun: true });
 	console.log(`pending: ${plan.pending.map((m) => m.fileName).join(', ') || 'none'}`);
 	const { applied } = await migrate(drizzle(client), { migrationsFolder });

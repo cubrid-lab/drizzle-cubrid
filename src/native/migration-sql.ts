@@ -31,7 +31,7 @@ interface Token {
 	column: number;
 }
 
-const TRANSACTION_CONTROL = new Set(['BEGIN', 'COMMIT', 'ROLLBACK', 'SAVEPOINT', 'START']);
+const TRANSACTION_CONTROL = new Set(['BEGIN', 'COMMIT', 'ROLLBACK', 'SAVEPOINT', 'START', 'XA']);
 const FOREIGN_STATEMENTS = new Set(['USE', 'DELIMITER', 'LOCK', 'UNLOCK']);
 const FOREIGN_TYPE_MODIFIERS = new Set(['UNSIGNED', 'ZEROFILL']);
 
@@ -185,6 +185,11 @@ function checkStatement(tokens: Token[], issue: (line: number, column: number, m
 			first,
 			`${first.text} controls the transaction, which migrate() owns: each migration runs in one transaction that it commits or rolls back`,
 		);
+	} else if (isWord(first, 'SET') && isWord(tokens[1], 'SYSTEM') && isWord(tokens[2], 'PARAMETERS')) {
+		at(
+			first,
+			'SET SYSTEM PARAMETERS changes server or session settings, whose effect inside a migration transaction was not measured; set them outside migrate()',
+		);
 	} else if (isWord(first, ...FOREIGN_STATEMENTS)) {
 		at(first, `${first.text} is a MySQL statement or client command, not CUBRID SQL`);
 	} else if (isWord(first, 'CREATE')) {
@@ -196,13 +201,32 @@ function checkStatement(tokens: Token[], issue: (line: number, column: number, m
 			);
 		}
 	}
+	// Table options (ENGINE=) only exist in CREATE TABLE and ALTER TABLE,
+	// outside the column list and before any AS SELECT.
+	const tableDdl =
+		(isWord(first, 'CREATE') && tokens.slice(1, 4).some((token) => isWord(token, 'TABLE'))) ||
+		(isWord(first, 'ALTER') && isWord(tokens[1], 'TABLE'));
+	let depth = 0;
+	let tableOptions = tableDdl;
 	for (let n = 0; n < tokens.length; n++) {
 		const token = tokens[n]!;
 		const following = tokens[n + 1];
+		if (token.kind === 'symbol') {
+			if (token.text === '(') depth++;
+			else if (token.text === ')') depth--;
+			continue;
+		}
 		if (token.kind !== 'word') continue;
+		if (depth === 0 && token.text === 'SELECT') tableOptions = false;
 		if (FOREIGN_TYPE_MODIFIERS.has(token.text)) {
 			at(token, `${token.text} is a MySQL type modifier; CUBRID has no unsigned or zero-filled numeric types`);
-		} else if (token.text === 'ENGINE' && following?.kind === 'symbol' && following.text === '=') {
+		} else if (
+			tableOptions &&
+			depth === 0 &&
+			token.text === 'ENGINE' &&
+			following?.kind === 'symbol' &&
+			following.text === '='
+		) {
 			at(token, 'ENGINE= is a MySQL table option; CUBRID has no storage engines');
 		} else if (token.text === 'DEFAULT' && isWord(following, 'CHARSET', 'CHARACTER')) {
 			at(

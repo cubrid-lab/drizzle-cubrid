@@ -5,7 +5,7 @@
 // tests/integration.test.ts. It lives outside tests/native because it needs
 // Node's fs types, which the native type-check project does not have.
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { relations } from 'drizzle-orm';
@@ -78,7 +78,9 @@ describe('parseMigrationSql', () => {
 					'-- a comment with ? and # and `ticks`',
 					'ALTER TABLE t CHANGE COLUMN q q VARCHAR(20)',
 					'CREATE OR REPLACE VIEW v AS SELECT id FROM t',
-					"SET SYSTEM PARAMETERS 'lock_timeout=5'",
+					"UPDATE cars SET engine = 'V8' WHERE engine = 'V6'",
+					'SELECT id FROM t WHERE (engine = 1)',
+					'CREATE TABLE t2 AS SELECT id FROM t WHERE engine = 1',
 				].join(';\n'),
 			),
 		).toEqual([]);
@@ -99,6 +101,9 @@ describe('parseMigrationSql', () => {
 		['USE testdb', /USE is a MySQL statement/],
 		['DELIMITER //', /DELIMITER is a MySQL statement/],
 		['LOCK TABLES t WRITE', /LOCK is a MySQL statement/],
+		["XA START 'x'", /XA controls the transaction/],
+		["SET SYSTEM PARAMETERS 'lock_timeout=5'", /SET SYSTEM PARAMETERS changes server or session settings/],
+		['ALTER TABLE t ENGINE = InnoDB', /ENGINE= is a MySQL table option/],
 		['CREATE PROCEDURE p() AS BEGIN NULL', /CREATE PROCEDURE is not supported in migrations/],
 		['create or replace function f() return int as begin return 1', /CREATE FUNCTION is not supported/],
 		['CREATE TABLE t (id INT UNSIGNED)', /UNSIGNED is a MySQL type modifier/],
@@ -206,6 +211,38 @@ describe('readMigrationFiles', () => {
 		expect(files[1]!.checksum).toBe(
 			createHash('sha256').update('ALTER TABLE "users" ADD COLUMN "email" VARCHAR(100);\n').digest('hex'),
 		);
+	});
+
+	it('follows symbolic links to migration files and ignores links to folders', async () => {
+		const target = folder({ 'real/0001_create.sql': twoMigrations['0001_create.sql'], 'real/sub/x.txt': '' });
+		const dir = folder({});
+		symlinkSync(join(target, 'real', '0001_create.sql'), join(dir, '0001_create.sql'));
+		symlinkSync(join(target, 'real', 'sub'), join(dir, '0002_dir.sql'));
+		const files = await readMigrationFiles(dir);
+		expect(files.map((f) => [f.fileName, f.checksum])).toEqual([
+			['0001_create.sql', sha(twoMigrations['0001_create.sql'])],
+		]);
+		symlinkSync(join(target, 'missing.sql'), join(dir, '0002_broken.sql'));
+		const broken = await rejection(readMigrationFiles(dir));
+		expect([broken.code, broken.message]).toEqual([
+			'invalid-folder',
+			expect.stringMatching(/0002_broken.sql in the migrations folder .* is a symbolic link that cannot be followed/),
+		]);
+	});
+
+	it('refuses a folder without any migration file, as a likely wrong path', async () => {
+		const error = await rejection(readMigrationFiles(folder({ 'README.md': 'x' })));
+		expect([error.code, error.message]).toEqual([
+			'invalid-folder',
+			expect.stringMatching(/holds no migration file .*; check the path/),
+		]);
+	});
+
+	it('ignores a leading UTF-8 byte order mark in the checksum and the SQL', async () => {
+		const plain = 'CREATE TABLE "t" ("id" INT);\n';
+		const [file] = await readMigrationFiles(folder({ '0001_bom.sql': `\uFEFF${plain.replace('\n', '\r\n')}` }));
+		expect(file!.checksum).toBe(sha(plain));
+		expect(file!.statements).toEqual([{ sql: 'CREATE TABLE "t" ("id" INT)', line: 1 }]);
 	});
 
 	it('refuses file names that are not migrations, including down migrations', async () => {
@@ -354,7 +391,7 @@ describe('migrate() over a fake client', () => {
 			'CREATE INDEX "ix_n" ON "t" ("n")',
 		]);
 		state.log.length = 0;
-		expect(await migrate(db, { migrationsFolder })).toEqual({ applied: [], pending: [] });
+		expect(await migrate(db, { migrationsFolder })).toEqual({ applied: [], pending: [], ahead: [] });
 		expect(state.log.some((s) => /^(CREATE|ALTER|update)/.test(s))).toBe(false);
 	});
 
@@ -372,7 +409,9 @@ describe('migrate() over a fake client', () => {
 		const migrationsFolder = folder(twoMigrations);
 		const plan = await migrate(db, { migrationsFolder, migrationsTable: 'app_migrations', dryRun: true });
 		expect([plan.applied, names(plan.pending)]).toEqual([[], ['0001_create.sql', '0002_alter.sql']]);
-		expect(state.log).toEqual(['select "class_name" from "db_class" where "class_name" = ?']);
+		expect(state.log).toEqual([
+			'select "class_name" from "db_class" where "class_name" = ? and "owner_name" = upper(current_user)',
+		]);
 		await migrate(db, { migrationsFolder, migrationsTable: 'app_migrations' });
 		state.records.pop();
 		const rest = await migrate(db, { migrationsFolder, migrationsTable: 'APP_migrations', dryRun: true });
@@ -406,9 +445,21 @@ describe('migrate() over a fake client', () => {
 			expect.stringMatching(/^The file changed after it was applied/),
 			expect.stringMatching(/records migration 4 where migration 3 was expected: the record has a gap/),
 		]);
-		state.records.splice(1);
-		const ahead = await rejection(migrate(db, { migrationsFolder: folder({}) }));
-		expect(ahead.issues[0]!.message).toMatch(/Migration 1 \(create\) is recorded as applied but has no file/);
+	});
+
+	it('applies nothing when the database is ahead of the folder, and reports the newer records', async () => {
+		const { db, state } = fakeDatabase();
+		await migrate(db, { migrationsFolder: folder(twoMigrations) });
+		// An older version of the application, whose folder ends at migration 1.
+		const older = folder({ '0001_create.sql': twoMigrations['0001_create.sql'] });
+		state.log.length = 0;
+		const expected = [{ id: 2, name: 'alter', checksum: sha(twoMigrations['0002_alter.sql']) }];
+		expect(await migrate(db, { migrationsFolder: older })).toEqual({ applied: [], pending: [], ahead: expected });
+		expect((await migrate(db, { migrationsFolder: older, dryRun: true })).ahead).toEqual(expected);
+		expect(state.log.some((s) => /^(CREATE|ALTER|update|insert)/.test(s))).toBe(false);
+		// Its own migrations are still checked.
+		const edited = folder({ '0001_create.sql': 'CREATE TABLE "t" ("id" BIGINT PRIMARY KEY);' });
+		expect((await rejection(migrate(db, { migrationsFolder: edited }))).code).toBe('applied-mismatch');
 	});
 
 	it('stops at a failing statement with its migration, statement and the driver error', async () => {
@@ -455,7 +506,12 @@ describe('migrate() over a fake client', () => {
 			[db, { migrationsFolder, migrationsTable: 'x'.repeat(101) }, /migrationsTable must be/],
 			[db, { migrationsFolder, dryRun: 'yes' }, /dryRun must be true or false/],
 			[db, { migrationsFolder, migrationsSchema: 'x' }, /Unknown migrate\(\) option 'migrationsSchema'/],
-			[{}, { migrationsFolder }, /not a transaction/],
+			[{}, { migrationsFolder }, /needs the database returned by drizzle\(client\) from drizzle-cubrid\/native/],
+			[
+				{ query: async () => [], transaction: async () => undefined },
+				{ migrationsFolder },
+				/not a cubrid-client client or pool/,
+			],
 		];
 		for (const [database, config, message] of cases) {
 			const error = await rejection(migrate(database as never, config as never));

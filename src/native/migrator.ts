@@ -14,7 +14,7 @@
 // caller's tables and database were built with.
 
 import { createHash } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type SQL, type SQLWrapper, sql } from 'drizzle-orm/sql/sql';
 import { type CubridMigrationIssue, type CubridMigrationStatement, parseMigrationSql } from './migration-sql.js';
@@ -74,7 +74,7 @@ export interface CubridMigrationFile {
 	/** The part after the first `_`, without `.sql`: `init`. */
 	name: string;
 	fileName: string;
-	/** SHA-256 (hex) of the file's text with CRLF line ends read as LF. */
+	/** SHA-256 (hex) of the file's text without a leading UTF-8 BOM and with CRLF line ends read as LF. */
 	checksum: string;
 	/** The statements, in order, without the `;` that ends them, with the line each starts on. */
 	statements: CubridMigrationStatement[];
@@ -98,6 +98,20 @@ export interface CubridMigrationResult {
 	applied: CubridMigrationFile[];
 	/** The migrations not applied yet: those a dry run would apply, and none after a run. */
 	pending: CubridMigrationFile[];
+	/**
+	 * Migrations recorded in the database beyond the last file of the folder,
+	 * as when an older application version starts after a newer one migrated
+	 * (rolling deploy, rollback). Nothing is applied then; the folder's own
+	 * migrations must still match their records.
+	 */
+	ahead: CubridAppliedMigration[];
+}
+
+/** A migration as the record table holds it. */
+export interface CubridAppliedMigration {
+	id: number;
+	name: string;
+	checksum: string;
 }
 
 /** A statement runner: the native `CubridTransaction`. */
@@ -123,11 +137,13 @@ const DEFAULT_TABLE = '__drizzle_cubrid_migrations';
 /**
  * Reads and checks every migration of `folder`, without a database: names,
  * numbering and SQL. Rejects with a `CubridMigrationError` listing every
- * problem. Files that do not end in `.sql` and subfolders are ignored, except
- * drizzle-kit's `meta/_journal.json`, which is refused.
+ * problem. Symbolic links are followed (a Kubernetes ConfigMap mount is made
+ * of them). Files that do not end in `.sql` and subfolders are ignored, except
+ * drizzle-kit's `meta/_journal.json`, which is refused. A folder without any
+ * migration file is refused too: it is most likely the wrong path.
  */
 export async function readMigrationFiles(folder: string): Promise<CubridMigrationFile[]> {
-	let entries: { name: string; isFile(): boolean; isDirectory(): boolean }[];
+	let entries: { name: string; isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }[];
 	try {
 		entries = await readdir(folder, { withFileTypes: true });
 	} catch (error) {
@@ -145,7 +161,21 @@ export async function readMigrationFiles(folder: string): Promise<CubridMigratio
 	const issues: CubridMigrationIssue[] = [];
 	const found: { id: number; name: string; fileName: string }[] = [];
 	for (const entry of entries) {
-		if (!entry.isFile() || !/\.sql$/i.test(entry.name)) continue;
+		if (!/\.sql$/i.test(entry.name)) continue;
+		if (!entry.isFile()) {
+			if (!entry.isSymbolicLink()) continue;
+			let target: { isFile(): boolean };
+			try {
+				target = await stat(join(folder, entry.name));
+			} catch (error) {
+				throw new CubridMigrationError(
+					'invalid-folder',
+					`${entry.name} in the migrations folder ${folder} is a symbolic link that cannot be followed`,
+					{ cause: error },
+				);
+			}
+			if (!target.isFile()) continue;
+		}
 		const match = FILE_NAME.exec(entry.name);
 		if (!match) {
 			issues.push({
@@ -167,6 +197,12 @@ export async function readMigrationFiles(folder: string): Promise<CubridMigratio
 			{
 				issues,
 			},
+		);
+	}
+	if (found.length === 0) {
+		throw new CubridMigrationError(
+			'invalid-folder',
+			`The migrations folder ${folder} holds no migration file (<number>_<name>.sql); check the path`,
 		);
 	}
 	found.sort((a, b) => a.id - b.id || a.fileName.localeCompare(b.fileName));
@@ -200,7 +236,7 @@ export async function readMigrationFiles(folder: string): Promise<CubridMigratio
 	}
 	const files: CubridMigrationFile[] = [];
 	for (const file of found) {
-		const text = (await readFile(join(folder, file.fileName), 'utf8')).replace(/\r\n/g, '\n');
+		const text = (await readFile(join(folder, file.fileName), 'utf8')).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
 		const parsed = parseMigrationSql(text, file.fileName);
 		issues.push(...parsed.issues);
 		if (parsed.statements.length === 0 && parsed.issues.length === 0) {
@@ -248,13 +284,7 @@ function checkConfig(config: CubridMigrationConfig): { folder: string; table: st
 	return { folder: migrationsFolder, table: migrationsTable, dryRun };
 }
 
-interface AppliedRecord {
-	id: number;
-	name: string;
-	checksum: string;
-}
-
-async function appliedRecords(session: CubridMigrationSession, table: string): Promise<AppliedRecord[]> {
+async function appliedRecords(session: CubridMigrationSession, table: string): Promise<CubridAppliedMigration[]> {
 	const rows = (await session.execute(
 		sql`select ${sql.identifier('id')}, ${sql.identifier('name')}, ${sql.identifier('checksum')} from ${sql.identifier(table)} order by ${sql.identifier('id')}`,
 	)) as Record<string, unknown>[];
@@ -263,13 +293,15 @@ async function appliedRecords(session: CubridMigrationSession, table: string): P
 
 /**
  * Compares the recorded migrations with the files: the records must be
- * migrations 1 to k of the folder, with the same names and checksums.
+ * numbered 1 to k without a gap, and those the folder has must have the same
+ * names and checksums. Returns the records beyond the folder's last file (the
+ * database is ahead of this folder, as after a newer version migrated).
  */
 function checkAppliedMigrations(
-	records: readonly AppliedRecord[],
+	records: readonly CubridAppliedMigration[],
 	files: readonly CubridMigrationFile[],
 	table: string,
-): void {
+): CubridAppliedMigration[] {
 	const issues: CubridMigrationIssue[] = [];
 	records.forEach((record, index) => {
 		const file = files[record.id - 1];
@@ -280,10 +312,7 @@ function checkAppliedMigrations(
 				message: `${table} records migration ${record.id} where migration ${index + 1} was expected: the record has a gap`,
 			});
 		} else if (file === undefined) {
-			issues.push({
-				...where,
-				message: `Migration ${record.id} (${record.name}) is recorded as applied but has no file in the folder`,
-			});
+			// Ahead of this folder: allowed, and reported in the result.
 		} else if (file.name !== record.name) {
 			issues.push({
 				...where,
@@ -303,11 +332,13 @@ function checkAppliedMigrations(
 			{ issues },
 		);
 	}
+	return records.slice(files.length);
 }
 
 async function tableExists(db: CubridMigrationSession, table: string): Promise<boolean> {
 	const rows = await db.execute(
-		sql`select ${sql.identifier('class_name')} from ${sql.identifier('db_class')} where ${sql.identifier('class_name')} = ${table.toLowerCase()}`,
+		// Only the current user's table: an unqualified name never resolves to another owner's.
+		sql`select ${sql.identifier('class_name')} from ${sql.identifier('db_class')} where ${sql.identifier('class_name')} = ${table.toLowerCase()} and ${sql.identifier('owner_name')} = upper(current_user)`,
 	);
 	return rows.length > 0;
 }
@@ -360,6 +391,13 @@ function utcNow(): string {
  * order, records the migration and commits. A failed statement rolls the
  * migration back and rejects with a `'statement-failed'` error; migrations
  * before it stay applied. Running it again when up to date changes nothing.
+ * Records beyond the folder's last file (a newer version migrated) are
+ * returned as `ahead` and nothing is applied.
+ *
+ * Never call it while the same process holds a transaction open on the
+ * tables it changes (inside `db.transaction()`, for example): its migrations
+ * run on connections of their own and wait for that transaction's locks,
+ * with CUBRID's default `lock_timeout`, forever.
  */
 export async function migrate(
 	db: CubridMigrationDatabase,
@@ -373,19 +411,19 @@ export async function migrate(
 	) {
 		throw new CubridMigrationError(
 			'invalid-config',
-			"migrate() needs the database from drizzle-cubrid/native's drizzle(), not a transaction: it runs each migration in a transaction of its own",
+			'migrate() needs the database returned by drizzle(client) from drizzle-cubrid/native, not a cubrid-client client or pool and not a transaction: it runs each migration in a transaction of its own',
 		);
 	}
 	const lock = `${table}_lock`;
 	const files = await readMigrationFiles(folder);
 	if (dryRun) {
 		const records = (await tableExists(db, table)) ? await appliedRecords(db, table) : [];
-		checkAppliedMigrations(records, files, table);
-		return { applied: [], pending: files.slice(records.length) };
+		const ahead = checkAppliedMigrations(records, files, table);
+		return { applied: [], pending: files.slice(records.length), ahead };
 	}
 	await prepareTables(db, table, lock);
 	const records = await appliedRecords(db, table);
-	checkAppliedMigrations(records, files, table);
+	const ahead = checkAppliedMigrations(records, files, table);
 
 	const applied: CubridMigrationFile[] = [];
 	for (const file of files.slice(records.length)) {
@@ -423,5 +461,5 @@ export async function migrate(
 		);
 		if (done) applied.push(file);
 	}
-	return { applied, pending: [] };
+	return { applied, pending: [], ahead };
 }
