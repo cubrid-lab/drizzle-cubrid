@@ -20,6 +20,8 @@ import {
 } from '../../src/native/index';
 import { NOT_UTC_MESSAGE } from '../../src/native/timezone';
 
+const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
+
 const users = cubridTable('users', {
 	id: bigint({ mode: 'bigint' }).primaryKey(),
 	name: varchar({ length: 50 }).notNull(),
@@ -422,8 +424,14 @@ describe('iterator() refusals before anything is sent', () => {
 	it('refuses a date or time read from a client that does not decode in UTC, on the first read', async () => {
 		const client = fakeClient([[1, at]], { timezone: 'local' });
 		const rows = drizzle(client, { binding: 'literal' }).select({ id: posts.id, at: posts.at }).from(posts).iterator();
-		await expect(collect(rows)).rejects.toThrow(NOT_UTC_MESSAGE);
-		expect(client.calls).toEqual([]);
+		const zone = env.TZ;
+		env.TZ = 'Asia/Seoul';
+		try {
+			await expect(collect(rows)).rejects.toThrow(NOT_UTC_MESSAGE);
+			expect(client.calls).toEqual([]);
+		} finally {
+			env.TZ = zone;
+		}
 	});
 
 	it('refuses an array parameter when iterator() is called', () => {
