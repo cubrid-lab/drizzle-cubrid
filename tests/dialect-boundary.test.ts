@@ -223,6 +223,124 @@ describe('internal rule (native code only)', () => {
 	});
 });
 
+describe('native-dynamic rule (native code only)', () => {
+	it.each([
+		["const r = eval('1');", 'native-dynamic:eval'],
+		["const r = (0, eval)('1');", 'native-dynamic:eval'],
+		["const e = eval; e('1');", 'native-dynamic:eval'],
+		["const r = globalThis.eval('1');", 'native-dynamic:eval'],
+		["const r = globalThis['eval']('1');", 'native-dynamic:["eval"]'],
+		["const f = new Function('return 1');", 'native-dynamic:Function'],
+		["const f = Function('return 1');", 'native-dynamic:Function'],
+		["const F = Function; F('return 1');", 'native-dynamic:Function'],
+		["const f = new globalThis.Function('return 1');", 'native-dynamic:Function'],
+		["const f = global['Function']('return 1');", 'native-dynamic:["Function"]'],
+		["const f = (() => 1).constructor('return process')();", 'native-dynamic:.constructor()'],
+		["const f = fn['constructor']('return process');", 'native-dynamic:.constructor()'],
+		['const m = await import(name);', 'native-dynamic:import(expression)'],
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: source text for the scanner
+		['const m = await import(`./${name}.js`);', 'native-dynamic:import(expression)'],
+		['const m = await import();', 'native-dynamic:import(expression)'],
+		['const m = require(name);', 'native-dynamic:require(expression)'],
+		["const m = require('./' + name);", 'native-dynamic:require(expression)'],
+		['const m = module.require(name);', 'native-dynamic:require(expression)'],
+		['const m = createRequire(url)(name);', 'native-dynamic:require(expression)'],
+		["const r = module['require']; ", 'native-dynamic:["require"]'],
+		['const r = module[`require`];', 'native-dynamic:["require"]'],
+		["const c = process['createRequire'];", 'native-dynamic:["createRequire"]'],
+		["const r = Reflect.get(module, 'require');", 'native-dynamic:["require"]'],
+		["const { ['require']: r } = module;", 'native-dynamic:["require"]'],
+		['const { eval: e } = globalThis; e(x);', 'native-dynamic:{ eval }'],
+		['const { Function: F } = globalThis;', 'native-dynamic:{ Function }'],
+		['const { Function } = globalThis;', 'native-dynamic:{ Function }'],
+		["const { 'eval': e } = globalThis;", 'native-dynamic:["eval"]'],
+		['const { constructor: C } = fn;', 'native-dynamic:{ constructor }'],
+		['globalThis["ev" + "al"]("1");', 'native-dynamic:global[expression]'],
+		['const k = "eval"; globalThis[k]("1");', 'native-dynamic:global[expression]'],
+		['global[k]("1");', 'native-dynamic:global[expression]'],
+		['Reflect.get(globalThis, "ev" + "al");', 'native-dynamic:global[expression]'],
+		['Reflect.get(globalThis, k);', 'native-dynamic:global[expression]'],
+		["setTimeout('doIt()', 1);", 'native-dynamic:setTimeout(string)'],
+		['globalThis.setInterval(`x`, 1);', 'native-dynamic:setInterval(string)'],
+	])('catches %s', (code, finding) => {
+		expect(native(code)).toContain(finding);
+	});
+
+	it('scans the packed native entries but no other packed file', () => {
+		for (const entry of ['dist/native.js', 'dist/native.cjs', 'dist/native-migrator.js', 'dist/native-migrator.cjs']) {
+			expect(found(entry, 'const r = eval(x);', 'package')).toEqual(['native-dynamic:eval']);
+			expect(found(entry, "const m = module['require'];", 'package')).toEqual(['native-dynamic:["require"]']);
+		}
+		expect(found('dist/index.js', 'const r = eval(x); const m = require(name);', 'package')).toEqual([]);
+		expect(found('src/session.ts', 'const r = eval(x); const m = import(name);')).toEqual([]);
+		expect(found('dist/native.d.ts', 'declare const f: Function;', 'package')).toEqual([]);
+	});
+
+	it.each(['node:vm', 'node:worker_threads', 'node:child_process', 'node:module'])(
+		'blocks %s through the native import allowlist',
+		(spec) => {
+			expect(native(`import x from '${spec}';`)).toEqual([`native-import:${spec}`]);
+			expect(native(`const x = await import('${spec}');`)).toEqual([`native-import:${spec}`]);
+		},
+	);
+
+	it('does not flag bundler require shims or ordinary computed keys in packed native entries', () => {
+		const shim = [
+			'var __require = typeof require !== "undefined" ? require : (x) => { throw Error(\'Dynamic require of "\' + x + \'" is not supported\'); };',
+			'var __require2 = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, { get: (a, b) => (typeof require !== "undefined" ? require : a)[b] }) : x)(function(x) { return x; });',
+			'__require("node:fs");',
+		].join('\n');
+		expect(found('dist/native.cjs', shim, 'package').filter((f) => f.startsWith('native-dynamic'))).toEqual([]);
+		expect(
+			found(
+				'dist/native.js',
+				'var a = obj[key]; var b = Reflect.get(obj, key); setTimeout(fn, 1); const { a: c } = o;',
+				'package',
+			),
+		).toEqual([]);
+		expect(
+			native('const a = obj[key]; const b = Reflect.get(obj, key); setTimeout(() => 1, 5); const { a: c } = o;'),
+		).toEqual([]);
+	});
+
+	it('does not flag literal loads, comments, messages, types or look-alike names', () => {
+		expect(native("const c = require('cubrid-client'); const m = await import('./internal.js');")).toEqual([]);
+		expect(native("const m = await import(`./internal.js`); const n = module.require('cubrid-client');")).toEqual([]);
+		expect(native("// eval(x) and new Function('y') and import(z)\n/* module['require'] */ export {};")).toEqual([]);
+		expect(native("throw new Error('eval is not allowed'); const s = 'Function'; const t = `require`;")).toEqual([]);
+		expect(
+			native("const o = { eval: 1, Function: 2, function: 3 }; o.eval; o.Function; o.function; o['function'];"),
+		).toEqual([]);
+		expect(native('class C { eval() {} Function = 1; static function() {} }')).toEqual([]);
+		expect(native('type F = Function; const g: Function | undefined = undefined; const h = typeof g;')).toEqual([]);
+		expect(native('const ok = value instanceof Function; const p = Function.prototype.toString;')).toEqual([]);
+		expect(native('const n = this.constructor.name; const c = new this.constructor(1);')).toEqual([]);
+		expect(native("const k = row['evaluate']; const v = label('eval', x); const w = map['required'];")).toEqual([]);
+	});
+
+	it('is never accepted by the baseline, in src or in the package', () => {
+		const f = scanText('dist/native.js', 'eval(x);', 'package');
+		expect(compare(f, summarize(f, 'package'), 'package')).toEqual([
+			'baseline entry for native code is not allowed: dist/native.js native-dynamic eval',
+			'dist/native.js:1 native-dynamic "eval" is not allowed in native code',
+		]);
+	});
+
+	it('fails the command and refuses --update-baseline for a packed native entry', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'boundary-'));
+		try {
+			mkdirSync(join(dir, 'pkg/dist'), { recursive: true });
+			writeFileSync(join(dir, 'pkg/dist/native.js'), 'export const f = new Function(code);\n');
+			const baselinePath = join(dir, 'b.json');
+			const args = [SCRIPT, 'package', join(dir, 'pkg'), `--baseline=${baselinePath}`];
+			expect(spawnSync(process.execPath, args, { encoding: 'utf8' }).status).toBe(1);
+			expect(spawnSync(process.execPath, [...args, '--update-baseline'], { encoding: 'utf8' }).status).toBe(1);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
 describe('baseline ratchet', () => {
 	const finding = (file: string, match = 'drizzle-orm/mysql-core') => ({ file, rule: 'import', match, line: 1 });
 

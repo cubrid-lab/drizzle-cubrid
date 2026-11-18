@@ -149,8 +149,18 @@ reports:
   `~/session.js`, `src/session.js`, `drizzle-cubrid`) can reach the 0.x modules
   built on Drizzle's MySQL classes. Adding a dependency to native code means
   adding it to the allowlist in the script, in a reviewed PR
+- in native code (`src/native/**`) and the packed native entries
+  (`dist/native*.{js,cjs,mjs}`), ways to load code that evade the checks above
+  (rule `native-dynamic`): `eval`, `Function` (`new Function`, `Function(...)`,
+  an alias or `globalThis.Function`), a call of `.constructor(...)`,
+  `import(expr)` or `require(expr)` with a non-literal argument, and `'eval'`,
+  `'Function'`, `'require'` or `'createRequire'` as a computed key
+  (`module['require']`, `Reflect.get(m, 'require')`). Strings, comments, types
+  and properties such as `.function` do not match. The 0.x code and the root
+  entry are not scanned for it, so the baseline is unchanged
 
-Native code may have no findings at all. The 0.x code's existing findings are
+Native code may have no findings at all (`native-dynamic` is refused in the
+baseline too). The 0.x code's existing findings are
 pinned by file, rule and count in `scripts/dialect-boundary-baseline.json`: a
 new or increased finding fails, and so does an entry that no longer occurs, so
 the baseline only shrinks as the native replacements land. Run
@@ -162,7 +172,9 @@ the baseline with
 
 Two limits are deliberate:
 - **Counts are per file.** The baseline counts findings per file, not per line, so replacing one 0.x use with another in the same file passes. Findings still cannot move between files or grow.
-- **Static strings only.** Module names and member names built or aliased at run time (`'drizzle-orm/' + name`, `const S = Symbol; S.for(…)`) are not recognised; reviewers watch for them.
+- **Static strings only.** Module names and member names built or aliased at run time (`'drizzle-orm/' + name`, `const S = Symbol; S.for(…)`) are not recognised; reviewers watch for them. In native code, run-time
+  loaders (`eval`, `Function`, non-literal `import()`/`require()`) are refused
+  outright rather than followed.
 
 ## Temporary scripts, probes and workflows
 
