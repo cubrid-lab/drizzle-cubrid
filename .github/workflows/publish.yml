@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
 
+# Least privilege for every job that installs and runs third-party code; only
+# the publish job below is granted more.
+permissions:
+  contents: read
+
 # Release gate (#164, docs/RELEASE_POLICY.md): the tarball is built and packed
 # once, tested against a real CUBRID 11.4 server and on Node 18, and that same
 # file is published. Nothing is published unless every job before it passed.
@@ -14,7 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      # Vitest needs Node 20 or later; Node 18 is checked on the packed tarball below.
+      # Vitest 5 declares Node >=22.12; Node 20 runs it in practice (main CI does)
+      # but is outside its engines, and Node 18 cannot run it. Node 18 is checked
+      # on the packed tarball below.
       matrix:
         node-version: [20, 22]
     steps:
@@ -208,6 +215,14 @@ jobs:
         with:
           name: release-candidate
           path: packed/
+      - name: Check the tarball is the one packed
+        shell: bash
+        env:
+          TARBALL: packed/${{ needs.package.outputs.tarball }}
+          INTEGRITY: ${{ needs.package.outputs.integrity }}
+        run: |
+          set -euo pipefail
+          test "sha512-$(openssl dgst -sha512 -binary "$TARBALL" | base64 -w0)" = "$INTEGRITY"
       - name: Install the tarball with the tested peer versions
         shell: bash
         env:

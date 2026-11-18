@@ -20,9 +20,18 @@
 // for `npm run integration`.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+	appendFileSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,7 +52,8 @@ if (!existsSync(tarball)) fail(`No tarball at ${tarball}`);
 // Inside the repository, a dependency missing from the consumer would resolve
 // from the repository's node_modules (and drizzle-cubrid from its dist).
 const inside = relative(repo, consumer);
-if (!inside.startsWith('..') && !isAbsolute(inside)) fail(`The consumer ${consumer} must be outside ${repo}`);
+if (inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside))
+	fail(`The consumer ${consumer} must be outside ${repo}`);
 if (existsSync(consumer) && readdirSync(consumer).length > 0) fail(`The consumer ${consumer} must be new or empty`);
 
 const manifest = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
@@ -114,7 +124,7 @@ const ddl = readFileSync(join(repo, 'src', 'native', 'ddl.ts'), 'utf8').replace(
 	/from '\.\/[^']+\.js';/g,
 	"from 'drizzle-cubrid/native';",
 );
-if (/from '\./.test(ddl)) fail('src/native/ddl.ts has a relative import that drizzle-cubrid/native cannot replace');
+if (/['"]\.\.?\//.test(ddl)) fail('src/native/ddl.ts has a relative import that drizzle-cubrid/native cannot replace');
 writeFileSync(join(consumer, 'tests', 'support', 'ddl.ts'), ddl);
 const chunk = /export const RELATIONAL_KEY_CHUNK = (\d+);/.exec(
 	readFileSync(join(repo, 'src', 'native', 'relational.ts'), 'utf8'),
@@ -148,6 +158,8 @@ export default defineConfig({
 copyFileSync(join(repo, 'scripts', 'packed-live-cjs.cjs'), join(consumer, 'packed-live-cjs.cjs'));
 
 const results = join(report, 'live-results.json');
+// A stale report from an earlier run must never be read as this run's result.
+rmSync(results, { force: true });
 const esm = spawnSync(
 	'npx',
 	[

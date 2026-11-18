@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Jobs run third-party code (npm install); they only need to read the repository.
+permissions:
+  contents: read
+
 jobs:
   impact:
     name: Classify CI impact
