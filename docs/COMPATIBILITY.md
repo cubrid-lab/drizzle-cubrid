@@ -86,6 +86,11 @@ floor (1.4.0, read from `peerDependencies`); see
 lockfile's peer versions and imports it through CommonJS and ESM; see
 [CI validation](CI_VALIDATION.md).
 
+The package does not depend on `@types/node`. The value type of the native
+`binary()` and `varbinary()` columns, `CubridBytes`, is Node's `Buffer` when
+the consumer has Node's types and `Uint8Array` when it does not; the published
+declarations never name `Buffer`, so they compile in both cases (#216).
+
 ## What is verified, and what is not
 
 Every code change in CI (`.github/workflows/ci.yml`) and every release tag

@@ -333,13 +333,6 @@
 			"scope": "package",
 			"file": "dist/index.cjs",
 			"rule": "import",
-			"match": "drizzle-orm/mysql-core/columns/binary",
-			"count": 1
-		},
-		{
-			"scope": "package",
-			"file": "dist/index.cjs",
-			"rule": "import",
 			"match": "drizzle-orm/mysql-core/columns/boolean",
 			"count": 1
 		},
@@ -460,13 +453,6 @@
 			"file": "dist/index.cjs",
 			"rule": "import",
 			"match": "drizzle-orm/mysql-core/columns/tinyint",
-			"count": 1
-		},
-		{
-			"scope": "package",
-			"file": "dist/index.cjs",
-			"rule": "import",
-			"match": "drizzle-orm/mysql-core/columns/varbinary",
 			"count": 1
 		},
 		{
@@ -634,13 +620,6 @@
 			"scope": "package",
 			"file": "dist/index.d.cts",
 			"rule": "import",
-			"match": "drizzle-orm/mysql-core/columns/binary",
-			"count": 1
-		},
-		{
-			"scope": "package",
-			"file": "dist/index.d.cts",
-			"rule": "import",
 			"match": "drizzle-orm/mysql-core/columns/boolean",
 			"count": 1
 		},
@@ -761,13 +740,6 @@
 			"file": "dist/index.d.cts",
 			"rule": "import",
 			"match": "drizzle-orm/mysql-core/columns/tinyint",
-			"count": 1
-		},
-		{
-			"scope": "package",
-			"file": "dist/index.d.cts",
-			"rule": "import",
-			"match": "drizzle-orm/mysql-core/columns/varbinary",
 			"count": 1
 		},
 		{
@@ -942,13 +914,6 @@
 			"scope": "package",
 			"file": "dist/index.d.ts",
 			"rule": "import",
-			"match": "drizzle-orm/mysql-core/columns/binary",
-			"count": 1
-		},
-		{
-			"scope": "package",
-			"file": "dist/index.d.ts",
-			"rule": "import",
 			"match": "drizzle-orm/mysql-core/columns/boolean",
 			"count": 1
 		},
@@ -1069,13 +1034,6 @@
 			"file": "dist/index.d.ts",
 			"rule": "import",
 			"match": "drizzle-orm/mysql-core/columns/tinyint",
-			"count": 1
-		},
-		{
-			"scope": "package",
-			"file": "dist/index.d.ts",
-			"rule": "import",
-			"match": "drizzle-orm/mysql-core/columns/varbinary",
 			"count": 1
 		},
 		{
@@ -1446,13 +1404,6 @@
 			"scope": "package",
 			"file": "dist/index.js",
 			"rule": "import",
-			"match": "drizzle-orm/mysql-core/columns/binary",
-			"count": 1
-		},
-		{
-			"scope": "package",
-			"file": "dist/index.js",
-			"rule": "import",
 			"match": "drizzle-orm/mysql-core/columns/boolean",
 			"count": 1
 		},
@@ -1579,13 +1530,6 @@
 			"scope": "package",
 			"file": "dist/index.js",
 			"rule": "import",
-			"match": "drizzle-orm/mysql-core/columns/varbinary",
-			"count": 1
-		},
-		{
-			"scope": "package",
-			"file": "dist/index.js",
-			"rule": "import",
 			"match": "drizzle-orm/mysql-core/columns/varchar",
 			"count": 1
 		},
@@ -1629,13 +1573,6 @@
 			"file": "src/columns.ts",
 			"rule": "import",
 			"match": "drizzle-orm/mysql-core/columns/bigint",
-			"count": 1
-		},
-		{
-			"scope": "src",
-			"file": "src/columns.ts",
-			"rule": "import",
-			"match": "drizzle-orm/mysql-core/columns/binary",
 			"count": 1
 		},
 		{
@@ -1734,13 +1671,6 @@
 			"file": "src/columns.ts",
 			"rule": "import",
 			"match": "drizzle-orm/mysql-core/columns/tinyint",
-			"count": 1
-		},
-		{
-			"scope": "src",
-			"file": "src/columns.ts",
-			"rule": "import",
-			"match": "drizzle-orm/mysql-core/columns/varbinary",
 			"count": 1
 		},
 		{

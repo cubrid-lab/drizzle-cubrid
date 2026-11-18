@@ -11,6 +11,7 @@
 export {
 	type AnyCubridColumnBuilder,
 	bigint,
+	binary,
 	boolean,
 	CubridAutoIncrementBuilder,
 	CubridBigInt,
@@ -18,8 +19,11 @@ export {
 	type CubridBigIntConfig,
 	CubridBigIntNumber,
 	CubridBigIntNumberBuilder,
+	CubridBinary,
+	CubridBinaryBuilder,
 	CubridBoolean,
 	CubridBooleanBuilder,
+	type CubridBytes,
 	CubridChar,
 	CubridCharBuilder,
 	CubridCollection,
@@ -52,6 +56,8 @@ export {
 	CubridTemporalDateBuilder,
 	CubridTemporalString,
 	CubridTemporalStringBuilder,
+	CubridVarbinary,
+	CubridVarbinaryBuilder,
 	CubridVarchar,
 	CubridVarcharBuilder,
 	char,
@@ -72,6 +78,7 @@ export {
 	string,
 	time,
 	timestamp,
+	varbinary,
 	varchar,
 } from './columns/index.js';
 export {
