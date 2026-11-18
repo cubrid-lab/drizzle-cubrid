@@ -87,6 +87,9 @@ const NATIVE_SHIM = 'src/native/internal.ts';
 const NATIVE_PACKED = /^dist\/native(?:-[\w-]+)?\.(?:js|cjs|mjs)$/;
 /** Names that load or build code when reached by a computed key. */
 const DYNAMIC_KEYS = new Set(['eval', 'Function', 'require', 'createRequire']);
+const CODE_RUNNING_BUILTINS = new Set(['node:module', 'node:vm', 'node:worker_threads', 'node:child_process']);
+const BINDING_KEYS = new Set(['eval', 'Function', 'constructor']);
+const TIMERS = new Set(['setTimeout', 'setInterval']);
 const GLOBAL_OBJECTS = new Set(['globalThis', 'global', 'window', 'self']);
 
 /** The banned specifier, or undefined when it is allowed. */
@@ -111,8 +114,9 @@ export function nativeMayImport(file, spec) {
 	if (spec.startsWith('~/')) return posix.normalize(`src/${spec.slice(2)}`).startsWith(NATIVE_DIR);
 	if (spec === 'drizzle-orm' || spec.startsWith('drizzle-orm/')) return bannedSpecifier(spec) === undefined;
 	if (spec === 'cubrid-client') return true;
-	// node:module is excluded: createRequire() would load anything.
-	return spec.startsWith('node:') && spec !== 'node:module';
+	// node:module (createRequire), node:vm, node:worker_threads and
+	// node:child_process can all run code the allowlist cannot see.
+	return spec.startsWith('node:') && !CODE_RUNNING_BUILTINS.has(spec);
 }
 
 function scriptKind(file) {
@@ -146,6 +150,8 @@ export function scanText(file, text, scope = 'src') {
 	for (const ref of [...source.typeReferenceDirectives, ...source.referencedFiles]) {
 		checkSpecifier(ref.fileName, ref.pos);
 	}
+
+	const isGlobalObject = (expr) => ts.isIdentifier(expr) && GLOBAL_OBJECTS.has(expr.text);
 
 	// An identifier that is a use of the global `eval` / `Function`, not a
 	// property name, declaration or type.
@@ -227,6 +233,18 @@ export function scanText(file, text, scope = 'src') {
 			} else if (ts.isElementAccessExpression(node) || ts.isComputedPropertyName(node)) {
 				const key = stringValue(ts.isElementAccessExpression(node) ? node.argumentExpression : node.expression);
 				if (key !== undefined && DYNAMIC_KEYS.has(key)) dyn(`["${key}"]`);
+				// globalThis["ev" + "al"], globalThis[k]: a computed key on a global object.
+				else if (key === undefined && ts.isElementAccessExpression(node) && isGlobalObject(node.expression))
+					dyn('global[expression]');
+			} else if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
+				// const { eval: e } = globalThis, const { Function } = globalThis
+				const property = node.propertyName ?? node.name;
+				if (ts.isIdentifier(property) && BINDING_KEYS.has(property.text)) dyn(`{ ${property.text} }`);
+				else if (
+					ts.isStringLiteralLike(property) &&
+					(DYNAMIC_KEYS.has(property.text) || BINDING_KEYS.has(property.text))
+				)
+					dyn(`["${property.text}"]`);
 			} else if (ts.isCallExpression(node)) {
 				const callee = node.expression;
 				const arg = node.arguments[0];
@@ -241,8 +259,19 @@ export function scanText(file, text, scope = 'src') {
 						ts.isIdentifier(callee.expression) &&
 						callee.expression.text === 'createRequire');
 				if (requireCall && stringValue(arg) === undefined) dyn('require(expression)');
-				if (callee.getText(source) === 'Reflect.get' && DYNAMIC_KEYS.has(stringValue(node.arguments[1]) ?? ''))
-					dyn(`["${stringValue(node.arguments[1])}"]`);
+				if (callee.getText(source) === 'Reflect.get') {
+					const key = stringValue(node.arguments[1]);
+					if (DYNAMIC_KEYS.has(key ?? '')) dyn(`["${key}"]`);
+					else if (key === undefined && node.arguments[0] && isGlobalObject(node.arguments[0]))
+						dyn('global[expression]');
+				}
+				// setTimeout('code') evaluates the string.
+				const timer = ts.isIdentifier(callee)
+					? callee
+					: ts.isPropertyAccessExpression(callee)
+						? callee.name
+						: undefined;
+				if (timer && TIMERS.has(timer.text) && arg && ts.isStringLiteralLike(arg)) dyn(`${timer.text}(string)`);
 			}
 		}
 

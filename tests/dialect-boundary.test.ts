@@ -250,6 +250,18 @@ describe('native-dynamic rule (native code only)', () => {
 		["const c = process['createRequire'];", 'native-dynamic:["createRequire"]'],
 		["const r = Reflect.get(module, 'require');", 'native-dynamic:["require"]'],
 		["const { ['require']: r } = module;", 'native-dynamic:["require"]'],
+		['const { eval: e } = globalThis; e(x);', 'native-dynamic:{ eval }'],
+		['const { Function: F } = globalThis;', 'native-dynamic:{ Function }'],
+		['const { Function } = globalThis;', 'native-dynamic:{ Function }'],
+		["const { 'eval': e } = globalThis;", 'native-dynamic:["eval"]'],
+		['const { constructor: C } = fn;', 'native-dynamic:{ constructor }'],
+		['globalThis["ev" + "al"]("1");', 'native-dynamic:global[expression]'],
+		['const k = "eval"; globalThis[k]("1");', 'native-dynamic:global[expression]'],
+		['global[k]("1");', 'native-dynamic:global[expression]'],
+		['Reflect.get(globalThis, "ev" + "al");', 'native-dynamic:global[expression]'],
+		['Reflect.get(globalThis, k);', 'native-dynamic:global[expression]'],
+		["setTimeout('doIt()', 1);", 'native-dynamic:setTimeout(string)'],
+		['globalThis.setInterval(`x`, 1);', 'native-dynamic:setInterval(string)'],
 	])('catches %s', (code, finding) => {
 		expect(native(code)).toContain(finding);
 	});
@@ -262,6 +274,33 @@ describe('native-dynamic rule (native code only)', () => {
 		expect(found('dist/index.js', 'const r = eval(x); const m = require(name);', 'package')).toEqual([]);
 		expect(found('src/session.ts', 'const r = eval(x); const m = import(name);')).toEqual([]);
 		expect(found('dist/native.d.ts', 'declare const f: Function;', 'package')).toEqual([]);
+	});
+
+	it.each(['node:vm', 'node:worker_threads', 'node:child_process', 'node:module'])(
+		'blocks %s through the native import allowlist',
+		(spec) => {
+			expect(native(`import x from '${spec}';`)).toEqual([`native-import:${spec}`]);
+			expect(native(`const x = await import('${spec}');`)).toEqual([`native-import:${spec}`]);
+		},
+	);
+
+	it('does not flag bundler require shims or ordinary computed keys in packed native entries', () => {
+		const shim = [
+			'var __require = typeof require !== "undefined" ? require : (x) => { throw Error(\'Dynamic require of "\' + x + \'" is not supported\'); };',
+			'var __require2 = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, { get: (a, b) => (typeof require !== "undefined" ? require : a)[b] }) : x)(function(x) { return x; });',
+			'__require("node:fs");',
+		].join('\n');
+		expect(found('dist/native.cjs', shim, 'package').filter((f) => f.startsWith('native-dynamic'))).toEqual([]);
+		expect(
+			found(
+				'dist/native.js',
+				'var a = obj[key]; var b = Reflect.get(obj, key); setTimeout(fn, 1); const { a: c } = o;',
+				'package',
+			),
+		).toEqual([]);
+		expect(
+			native('const a = obj[key]; const b = Reflect.get(obj, key); setTimeout(() => 1, 5); const { a: c } = o;'),
+		).toEqual([]);
 	});
 
 	it('does not flag literal loads, comments, messages, types or look-alike names', () => {
