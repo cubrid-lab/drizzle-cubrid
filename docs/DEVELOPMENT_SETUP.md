@@ -53,7 +53,7 @@ npm run build
 npm pack --dry-run
 ```
 
-Review emitted ESM/CJS and `.d.ts` with an external TypeScript consumer (required for release; **not yet established as an automated check**). `peerDependencies` are `drizzle-orm >=0.44.1 <0.46.0` and `cubrid-client >=1.4.0 <2.0.0`, bounded by the measurements in [peer dependency compatibility](COMPATIBILITY.md); CI checks the lockfile version and the `drizzle-orm` floor. MySQL-based `examples/migration/drizzle.config.ts` is not a validated CUBRID migrator.
+Review emitted ESM/CJS and `.d.ts` with an external TypeScript consumer (required for release; **not yet established as an automated check**). `peerDependencies` are `drizzle-orm >=0.44.1 <0.46.0` and `cubrid-client >=1.4.0 <2.0.0`, bounded by the measurements in [peer dependency compatibility](COMPATIBILITY.md); CI checks the lockfile version and the `drizzle-orm` floor offline, and runs the live CUBRID 11.4 suite on the packed tarball with the lockfile versions and with both peer floors (`scripts/packed-live.mjs`; [what is verified](COMPATIBILITY.md#what-is-verified-and-what-is-not)). MySQL-based `examples/migration/drizzle.config.ts` is not a validated CUBRID migrator.
 
 ## Setup exit criteria
 

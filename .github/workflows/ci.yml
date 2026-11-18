@@ -247,7 +247,7 @@ jobs:
           node scripts/check-dialect-boundary.mjs package "$RUNNER_TEMP/unpacked/package"
       - uses: actions/upload-artifact@v7
         with:
-          name: npm-package-for-node18
+          name: npm-package
           path: packed/
           if-no-files-found: error
           retention-days: 3
@@ -262,7 +262,7 @@ jobs:
           node-version: 18
       - uses: actions/download-artifact@v8
         with:
-          name: npm-package-for-node18
+          name: npm-package
           path: packed/
       - name: Install actual tarball and tested peer versions
         shell: bash
@@ -278,45 +278,92 @@ jobs:
           drizzle_version=$(cat ../packed/drizzle-orm.version)
           client_version=$(cat ../packed/cubrid-client.version)
           npm install --ignore-scripts --no-audit --no-fund "${tarballs[0]}" "drizzle-orm@${drizzle_version}" "cubrid-client@${client_version}"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/packed-exports-smoke.cjs
+          sparse-checkout-cone-mode: false
+          path: repo
       - name: Exercise CJS and ESM exports on Node 18
         working-directory: consumer
+        # Copied so that require() and import() resolve from the consumer.
+        run: cp ../repo/scripts/packed-exports-smoke.cjs . && node packed-exports-smoke.cjs
+
+  packed-live-cubrid:
+    # The release gate in publish.yml runs this on the tag's tarball; running it
+    # on every code change keeps tag day from being its first run (#164).
+    name: Packed package on live CUBRID 11.4 (${{ matrix.peers }} peers)
+    needs: package-artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      # locked: the package-lock.json versions of drizzle-orm and cubrid-client;
+      # floor: the lowest versions the peer ranges in package.json admit.
+      matrix:
+        peers: [locked, floor]
+    services:
+      cubrid:
+        # Keep this digest the same as the live-cubrid job and publish.yml.
+        image: cubrid/cubrid:11.4@sha256:a8c8792f8092cb4ddf200cf0ab1bb6caac164194d9aec9d6ff2a828c3ec1b604
+        env:
+          CUBRID_DB: testdb
+        ports:
+          - 33000:33000
+    env:
+      CUBRID_TEST_HOST: 127.0.0.1
+      CUBRID_TEST_PORT: 33000
+      CUBRID_TEST_DATABASE: testdb
+      CUBRID_TEST_EXPECT_VERSION: '11.4'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      # Only for scripts/wait-for-cubrid.mjs; the tests use the consumer's own install.
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/packed
+      - name: Wait for the CUBRID broker
+        run: node scripts/wait-for-cubrid.mjs 300
+      - name: Run the live suite against the installed tarball
+        # A non-UTC zone, so date and time handling cannot depend on TZ=UTC (#207).
+        env:
+          TZ: Asia/Seoul
+          CONTAINER: ${{ job.services.cubrid.id }}
+          PEERS: ${{ matrix.peers }}
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const assert = require('node:assert/strict');
-          (async () => {
-            const cjs = require('drizzle-cubrid');
-            const esm = await import('drizzle-cubrid');
-            for (const api of [cjs, esm]) {
-              assert.equal(typeof api.drizzle, 'function');
-              assert.equal(typeof api.cubridTable, 'function');
-              assert.equal(typeof api.cubridSet, 'function');
-              const table = api.cubridTable('node18_consumer_smoke', { tags: api.cubridSet('tags') });
-              assert.ok(table.tags, 'runtime table/column construction must work');
-            }
-            // Experimental native entry (#157): its own table and column builders.
-            const nativeCjs = require('drizzle-cubrid/native');
-            const nativeEsm = await import('drizzle-cubrid/native');
-            for (const api of [nativeCjs, nativeEsm]) {
-              assert.equal(typeof api.cubridTable, 'function');
-              const table = api.cubridTable('node18_native_smoke', {
-                id: api.integer().primaryKey().autoIncrement(),
-                big: api.bigint({ mode: 'bigint' }),
-                tags: api.set({ element: api.varchar({ length: 10 }) }),
-              });
-              assert.equal(table.id.name, 'id');
-              assert.equal(table.big.mapFromDriverValue(9223372036854775807n), 9223372036854775807n);
-              assert.equal(table.tags.getSQLType(), 'SET(VARCHAR(10))');
-            }
-            console.log('Node 18 packed CJS and ESM consumer assertions passed');
-          })().catch((error) => { console.error(error); process.exitCode = 1; });
-          NODE
+          shopt -s nullglob
+          tarballs=("$RUNNER_TEMP"/packed/*.tgz)
+          test "${#tarballs[@]}" -eq 1
+          # The image the service container actually runs, with its registry digest.
+          image=$(docker inspect --format '{{.Image}}' "$CONTAINER")
+          CUBRID_IMAGE="$(docker inspect --format '{{.Config.Image}}' "$CONTAINER") $(docker image inspect --format '{{join .RepoDigests ","}}' "$image")"
+          export CUBRID_IMAGE
+          node scripts/packed-live.mjs "${tarballs[0]}" "$RUNNER_TEMP/consumer" "$PEERS" "$RUNNER_TEMP/evidence"
+      - name: Require every live test to run and pass
+        if: ${{ !cancelled() }}
+        run: node scripts/check-live-results.mjs "$RUNNER_TEMP/evidence/live-results.json"
+      - name: Upload the verification evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: packed-live-evidence-${{ matrix.peers }}
+          path: ${{ runner.temp }}/evidence/
+          if-no-files-found: error
+          retention-days: 14
 
   ci-gate:
     name: CI gate
     if: always()
-    needs: [impact, docs-check, lint, lint-and-test, peer-floor, live-cubrid, package-artifact, node18-consumer]
+    needs: [impact, docs-check, lint, lint-and-test, peer-floor, live-cubrid, package-artifact, node18-consumer, packed-live-cubrid]
     runs-on: ubuntu-latest
     env:
       IMPACT: ${{ needs.impact.result }}
@@ -328,6 +375,7 @@ jobs:
       LIVE_CUBRID: ${{ needs.live-cubrid.result }}
       PACKAGE: ${{ needs.package-artifact.result }}
       NODE18: ${{ needs.node18-consumer.result }}
+      PACKED_LIVE: ${{ needs.packed-live-cubrid.result }}
     steps:
       - name: Fail closed on missing selected validation
         shell: bash
@@ -336,11 +384,11 @@ jobs:
           [[ "$IMPACT" == success ]] || { echo '::error::CI change classification failed'; exit 1; }
           if [[ "$DOCS_ONLY" == true ]]; then
             [[ "$DOCS_CHECK" == success ]] || { echo "::error::Docs checks: $DOCS_CHECK"; exit 1; }
-            for result in "$LINT" "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18"; do
+            for result in "$LINT" "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18" "$PACKED_LIVE"; do
               [[ "$result" == skipped ]] || { echo "::error::Unexpected runtime job on docs-only PR: $result"; exit 1; }
             done
           else
-            for result in "$LINT" "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18"; do
+            for result in "$LINT" "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18" "$PACKED_LIVE"; do
               [[ "$result" == success ]] || { echo "::error::Required runtime check: $result"; exit 1; }
             done
           fi
