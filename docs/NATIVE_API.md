@@ -980,11 +980,30 @@ are not in `drizzle-cubrid/native`:
 | `int({ unsigned: true })`, other `unsigned` options | The next wider signed type (`bigint` for unsigned `int`); CUBRID has no unsigned integers |
 | `serial` | `bigint({ mode: 'bigint' }).primaryKey().autoIncrement()` (or `integer()`) |
 | `year` | `smallint()` |
-| `mysqlEnum` | `varchar({ length }).$type<'a' \| 'b'>()`; CUBRID `ENUM` is not supported yet |
+| `mysqlEnum` | `varchar({ length }).$type<'a' \| 'b'>()`; CUBRID `ENUM` has no builder (see [Not supported in the native dialect](#not-supported-in-the-native-dialect)) |
 | `text`, `tinytext`, `mediumtext`, `longtext` | `string()` or `varchar({ length })` |
 | `real` | `double()` |
-| `binary`, `varbinary`, `blob` | Not available yet (#216) |
-| `json` | Not available yet |
+| `binary`, `varbinary` | Being added by [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216); not in a release yet |
+| `blob` | No builder; see [Not supported in the native dialect](#not-supported-in-the-native-dialect) |
+| `json` | No builder; see [Not supported in the native dialect](#not-supported-in-the-native-dialect) |
+
+## Not supported in the native dialect
+
+These CUBRID types have no column builder in `drizzle-cubrid/native`.
+`drizzle-cubrid/native` has no custom-type facility either, so there is no
+supported way to declare such a column in a `cubridTable()`. The only
+workaround is raw `sql` in queries on a table created outside the schema (for
+example by a [migration](MIGRATIONS.md)), which bypasses the column codecs: you
+read and write the driver's own values and nothing is range-checked or
+converted for you.
+
+| CUBRID type | Today | Status |
+| --- | --- | --- |
+| `TIMESTAMPTZ`, `DATETIMETZ`, `TIMESTAMPLTZ`, `DATETIMELTZ` (zone-aware temporal types) | No builder. The `datetime`, `timestamp`, `date` and `time` builders follow the UTC wall-clock rules in [Date and time](#date-and-time) and do not carry a zone. Raw `sql` only | Not planned for 1.0; open an issue to request |
+| `BLOB`, `CLOB` | No builder. Raw `sql` only | Not planned for 1.0; open an issue to request |
+| `ENUM` | No builder. Store the value in `varchar({ length }).$type<'a' \| 'b'>()` instead; that column is a `VARCHAR`, so CUBRID does not enforce the allowed values. Raw `sql` for a real `ENUM` column | Not planned for 1.0; open an issue to request |
+| `JSON` | No builder. Store text in `string()` and parse it in your code, or use raw `sql` | Not planned for 1.0; open an issue to request |
+| `BIT`, `BIT VARYING` (binary) | No builder yet | Being added by [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216); not in a release yet |
 
 ## Known CUBRID behaviors
 
