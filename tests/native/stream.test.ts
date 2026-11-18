@@ -3,7 +3,7 @@
 // literals through stream() with array rows, decodes each row as
 // execute() does, checks placeholders, options and the transaction before
 // anything is sent, and closes cubrid-client's stream whenever the loop ends.
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -234,15 +234,15 @@ describe('iterator()', () => {
 });
 
 describe('prepare() rendering', () => {
-	it('renders the literal form of a prepared select only on its first iterator(), from the SQL built at prepare()', async () => {
+	it('renders both forms at prepare(), from the SQL built then: a later builder change does not reach either', async () => {
 		const render = vi.spyOn(CubridDialect.prototype, 'sqlToQuery');
 		try {
 			const client = fakeClient();
 			const select = drizzle(client).select({ id: users.id }).from(users).where(eq(users.id, 1n));
 			const prepared = select.prepare();
-			expect(render).toHaveBeenCalledTimes(1);
-			await prepared.execute();
+			expect(render).toHaveBeenCalledTimes(2);
 			select.where(eq(users.id, 2n));
+			await prepared.execute();
 			await collect(prepared.iterator({}, { literal: true }));
 			await collect(prepared.iterator({}, { literal: true }));
 			expect(render).toHaveBeenCalledTimes(2);
@@ -254,6 +254,42 @@ describe('prepare() rendering', () => {
 		} finally {
 			render.mockRestore();
 		}
+	});
+
+	it('sends the values held at prepare() from execute() and iterator() alike when a Date or an array is changed afterwards', async () => {
+		const client = fakeClient();
+		const db = drizzle(client);
+		const since = new Date(Date.UTC(2024, 1, 29, 15, 0, 0, 10));
+		const codes = ['ab', 'cd'];
+		const prepared = db
+			.select({ id: posts.id })
+			.from(posts)
+			.where(and(lt(posts.at, since), sql`${posts.id} in ${codes}`))
+			.prepare();
+		since.setUTCFullYear(1990);
+		codes[0] = 'zz';
+		codes.push('yy');
+		await prepared.execute();
+		await collect(prepared.iterator({}, { literal: true }));
+		const [executed, streamed] = client.calls.map(({ params }) => params);
+		expect(streamed).toEqual(executed);
+		expect(executed).toHaveLength(3);
+		expect(executed?.slice(1)).toEqual(['ab', 'cd']);
+		expect(executed?.[0]).not.toEqual(since);
+	});
+
+	it('logs nothing for a stream whose signal was aborted before its first read', async () => {
+		const logged: unknown[] = [];
+		const client = fakeClient([[1n]]);
+		const db = drizzle(client, { binding: 'literal', logger: { logQuery: (query) => logged.push(query) } });
+		const reason = new Error('stop');
+		const rows = db
+			.select({ id: users.id })
+			.from(users)
+			.iterator({}, { signal: AbortSignal.abort(reason) });
+		await expect(collect(rows)).rejects.toBe(reason);
+		expect(logged).toEqual([]);
+		expect(client.calls).toEqual([]);
 	});
 });
 

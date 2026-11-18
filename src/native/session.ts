@@ -495,6 +495,8 @@ export class CubridSession {
 		const send = (sql: string, params: unknown[]) => this.send(sql, params);
 		return (async function* () {
 			if (readsTemporal) await assertUtcDecoding(zoneClient);
+			// Aborted before the first read: nothing is sent, so nothing is logged.
+			call.signal?.throwIfAborted();
 			send(sql, params);
 			// Driver errors are passed through unchanged; leaving this loop early
 			// calls return() on cubrid-client's stream.

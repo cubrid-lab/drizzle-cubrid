@@ -3890,6 +3890,24 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 		expect(pool.stats().active).toBe(0);
 	});
 
+	it('sends the values held at prepare() from execute() and iterator() alike when a Date or an array changes afterwards', async () => {
+		const db = native.drizzle(pool);
+		const since = new Date(base + 10);
+		const wanted = [2, 4, 6, 20];
+		const prepared = db
+			.select({ id: items.id })
+			.from(items)
+			.where(and(lt(items.ts, since), sql`${items.id} in ${wanted}`))
+			.orderBy(items.id)
+			.prepare();
+		since.setUTCFullYear(1990);
+		wanted[0] = 9000;
+		wanted.push(8);
+		const expected = [{ id: 2 }, { id: 4 }, { id: 6 }];
+		expect(await prepared.execute()).toEqual(expected);
+		expect(await collect(prepared.iterator({}, { literal: true }))).toEqual(expected);
+	});
+
 	it("refuses iterator() under the default binding 'prepared' before anything is sent", async () => {
 		const statements: string[] = [];
 		const db = native.drizzle(pool, { logger: { logQuery: (query) => statements.push(query) } });
