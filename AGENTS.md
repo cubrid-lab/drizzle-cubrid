@@ -111,6 +111,7 @@ npm run format        # Biome: rewrite formatting and safe fixes
 npm run typecheck     # tsc --noEmit
 npm run check:boundary # foreign-dialect guard on src and the packed tarball (#192)
 npm run integration   # Live CUBRID tests; needs CUBRID_TEST_HOST (see below)
+npm run integration:faults # Fault-injection tests; also needs CUBRID_TEST_CONTAINER
 ```
 
 ### Real CUBRID integration tests
@@ -129,6 +130,19 @@ it fails instead of skipping. It creates uniquely named tables and drops them at
 the end. CI runs it on every code change in the **Live CUBRID 11.4** job, which
 also fails if any test was skipped. Mock-only unit tests are not database
 evidence; cover database behavior here.
+
+Fault-injection tests (`tests/faults.test.ts`, `npm run integration:faults`)
+restart, pause and kill parts of the server, so they run on their own and
+need the container's name as well:
+
+```bash
+CUBRID_TEST_HOST=127.0.0.1 CUBRID_TEST_CONTAINER=cubrid-test npm run integration:faults
+```
+
+They fail instead of skipping without `CUBRID_TEST_HOST`, `CUBRID_TEST_CONTAINER`
+or the Docker CLI, take about a minute, and run in CI in the **CUBRID 11.4
+fault injection** job on a container of their own. Do not point them at a
+server other tests are using.
 
 ## Code Conventions
 

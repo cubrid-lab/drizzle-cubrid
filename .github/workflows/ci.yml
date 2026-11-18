@@ -211,6 +211,58 @@ jobs:
         if: ${{ !cancelled() }}
         run: node scripts/check-live-results.mjs live-results.json
 
+  fault-cubrid:
+    name: CUBRID 11.4 fault injection
+    needs: impact
+    if: ${{ needs.impact.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The tests restart the database server and broker, pause the container
+    # and kill CAS processes, which a services: container would not survive
+    # reliably; this job starts its own container with docker run instead.
+    env:
+      # Keep this digest the same as the live-cubrid job and publish.yml.
+      CUBRID_IMAGE: cubrid/cubrid:11.4@sha256:a8c8792f8092cb4ddf200cf0ab1bb6caac164194d9aec9d6ff2a828c3ec1b604
+      CUBRID_TEST_CONTAINER: cubrid-faults
+      CUBRID_TEST_HOST: 127.0.0.1
+      CUBRID_TEST_PORT: 33000
+      CUBRID_TEST_DATABASE: testdb
+      CUBRID_TEST_EXPECT_VERSION: '11.4'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Start the CUBRID container
+        run: docker run -d --name "$CUBRID_TEST_CONTAINER" -e CUBRID_DB=testdb -p 33000:33000 "$CUBRID_IMAGE"
+      - run: npm ci
+      - name: Record the database image and package versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "CUBRID image: $CUBRID_IMAGE"
+            echo "Node: $(node --version)"
+            echo "drizzle-orm: $(node -p "require('./node_modules/drizzle-orm/package.json').version")"
+            echo "cubrid-client: $(node -p "require('./node_modules/cubrid-client/package.json').version")"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Wait for the CUBRID broker
+        run: node scripts/wait-for-cubrid.mjs 300
+      - name: Run the fault-injection tests
+        run: npm run integration:faults -- --reporter=json --outputFile.json=fault-results.json
+      - name: Require every fault test to run and pass
+        if: ${{ !cancelled() }}
+        run: node scripts/check-live-results.mjs fault-results.json
+      - name: Show the CUBRID container log
+        if: ${{ failure() }}
+        run: docker logs --tail 200 "$CUBRID_TEST_CONTAINER"
+      - name: Remove the CUBRID container
+        if: ${{ always() }}
+        run: docker rm -f "$CUBRID_TEST_CONTAINER"
+
   package-artifact:
     name: Build packed npm package
     needs: impact
@@ -367,7 +419,7 @@ jobs:
   ci-gate:
     name: CI gate
     if: always()
-    needs: [impact, docs-check, lint, lint-and-test, peer-floor, live-cubrid, package-artifact, node18-consumer, packed-live-cubrid]
+    needs: [impact, docs-check, lint, lint-and-test, peer-floor, live-cubrid, fault-cubrid, package-artifact, node18-consumer, packed-live-cubrid]
     runs-on: ubuntu-latest
     env:
       IMPACT: ${{ needs.impact.result }}
@@ -377,6 +429,7 @@ jobs:
       TESTS: ${{ needs.lint-and-test.result }}
       PEER_FLOOR: ${{ needs.peer-floor.result }}
       LIVE_CUBRID: ${{ needs.live-cubrid.result }}
+      FAULT_CUBRID: ${{ needs.fault-cubrid.result }}
       PACKAGE: ${{ needs.package-artifact.result }}
       NODE18: ${{ needs.node18-consumer.result }}
       PACKED_LIVE: ${{ needs.packed-live-cubrid.result }}
@@ -388,11 +441,11 @@ jobs:
           [[ "$IMPACT" == success ]] || { echo '::error::CI change classification failed'; exit 1; }
           if [[ "$DOCS_ONLY" == true ]]; then
             [[ "$DOCS_CHECK" == success ]] || { echo "::error::Docs checks: $DOCS_CHECK"; exit 1; }
-            for result in "$LINT" "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18" "$PACKED_LIVE"; do
+            for result in "$LINT" "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$FAULT_CUBRID" "$PACKAGE" "$NODE18" "$PACKED_LIVE"; do
               [[ "$result" == skipped ]] || { echo "::error::Unexpected runtime job on docs-only PR: $result"; exit 1; }
             done
           else
-            for result in "$LINT" "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$PACKAGE" "$NODE18" "$PACKED_LIVE"; do
+            for result in "$LINT" "$TESTS" "$PEER_FLOOR" "$LIVE_CUBRID" "$FAULT_CUBRID" "$PACKAGE" "$NODE18" "$PACKED_LIVE"; do
               [[ "$result" == success ]] || { echo "::error::Required runtime check: $result"; exit 1; }
             done
           fi
