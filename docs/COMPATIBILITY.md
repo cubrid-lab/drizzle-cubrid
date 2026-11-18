@@ -147,7 +147,7 @@ then runs `npm publish <tarball>`.
   above is offline).
 - Node 18 and Node 20 against a live server (Node 18 only imports the
   package), and Node 24 or later.
-- Fault scenarios other than those listed below: HA failover and
+- Fault scenarios other than those listed above: HA failover and
   replication, a server crash during recovery, broken TLS sessions, killing a
   transaction with `cubrid killtran`, the 0.x API beyond a lost connection
   and a lost COMMIT reply, and fault behavior with any other server or

@@ -4,9 +4,10 @@
 //
 // It relies on the broker handing the client's socket to a CAS process (the
 // broker answers the client info exchange with port 0), so every byte of a
-// session passes through the proxy. `opened` counts accepted connections, and
-// a client that was redirected to another port would bypass the proxy: the
-// tests check that their faults actually fired.
+// session passes through the proxy. A client redirected to another port would
+// bypass it, so the tests check that their faults fired: `cutAll()` returns how
+// many connections it cut, and the promise of `failNextRequest()` resolves only
+// when the proxy saw the request.
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 
 interface Link {
@@ -38,9 +39,13 @@ export const isCommit: RequestMatcher = (payload) =>
 /**
  * The offset of the first request in `chunk` that `match` accepts, or -1.
  * A request is a 4-byte payload length, 4 bytes of CAS info and the payload.
- * The client writes each request with one write, so a chunk starts at a
- * request boundary; a chunk that does not parse as whole requests matches
- * nothing (the test then waits for a fault that never fires and times out).
+ * cubrid-client writes each request with one socket write and waits for its
+ * reply before the next, so on loopback a chunk starts at a request boundary.
+ * This proxy keeps no remainder buffer: a request split across TCP chunks
+ * (possible with a large request or a slow link) is not matched, and neither is
+ * a request after it in the same chunk sequence. The tests only arm faults for
+ * small requests (COMMIT, EXECUTE) and fail with a clear error when a fault
+ * does not fire.
  */
 function findRequest(chunk: Buffer, match: RequestMatcher): number {
 	let offset = 0;
@@ -59,8 +64,6 @@ export class FaultProxy {
 	private stalled = false;
 	private refusing = false;
 	private requestFault: { match: RequestMatcher; mode: RequestFault; fired: () => void } | undefined;
-	/** Connections the proxy accepted, refused ones included. */
-	opened = 0;
 
 	private constructor(
 		private readonly server: Server,
@@ -87,7 +90,6 @@ export class FaultProxy {
 	}
 
 	private accept(client: Socket): void {
-		this.opened++;
 		if (this.refusing) {
 			client.destroy();
 			return;
@@ -174,6 +176,11 @@ export class FaultProxy {
 	/** While on, closes every new connection at once, as a server that is down would. */
 	refuse(on: boolean): void {
 		this.refusing = on;
+	}
+
+	/** Disarms a `failNextRequest()` that has not fired; its promise never resolves. */
+	clearFaults(): void {
+		this.requestFault = undefined;
 	}
 
 	/**

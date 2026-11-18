@@ -17,7 +17,15 @@
 // the server; Docker is used only where the server itself has to fail.
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { type CubridPool, createClient, createPool, type PoolOptions, ReadTimeoutError } from 'cubrid-client';
+import {
+	type CubridPool,
+	createClient,
+	createPool,
+	DeadlockError,
+	LockTimeoutError,
+	type PoolOptions,
+	ReadTimeoutError,
+} from 'cubrid-client';
 import { eq, relations } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -71,6 +79,10 @@ const config = {
 	connectionTimeout: 5000,
 	timezone: 'utc' as const,
 };
+
+if (!/^[A-Za-z0-9_]+$/.test(config.database)) {
+	throw new Error(`CUBRID_TEST_DATABASE must be a plain database name, not ${JSON.stringify(config.database)}`);
+}
 
 const run = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 const items = native.cubridTable(`ft_items_${run}`, {
@@ -136,7 +148,7 @@ async function serverUp(started: number): Promise<number> {
 /** Restarts the database server process (the broker keeps running) and waits until it serves again. */
 async function restartServer(): Promise<number> {
 	const started = Date.now();
-	await asCubrid('cubrid server restart testdb');
+	await asCubrid(`cubrid server restart ${config.database}`);
 	return serverUp(started);
 }
 
@@ -170,6 +182,25 @@ function shape(error: unknown): Record<string, unknown> {
 /** Records an observation in the run log, as evidence of what each fault did. */
 function log(label: string, value: unknown): void {
 	console.log(`[fault] ${label}: ${JSON.stringify(value)}`);
+}
+
+/** Waits for a proxy fault to fire, failing clearly instead of hanging until the test timeout. */
+async function firedWithin(fired: Promise<void> | undefined, what: string, ms = 5000): Promise<void> {
+	if (fired === undefined) throw new Error(`The ${what} fault was never armed`);
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		await Promise.race([
+			fired,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(
+					() => reject(new Error(`The ${what} fault did not fire within ${ms} ms: the proxy never saw that request`)),
+					ms,
+				);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 const gate = () => {
@@ -227,6 +258,8 @@ beforeAll(async () => {
 }, 120_000);
 
 afterEach(async () => {
+	// A failed test must not leave a fault armed for the next one.
+	proxy.clearFaults();
 	proxy.resume();
 	proxy.refuse(false);
 	for (const pool of pools.splice(0)) await pool.close().catch(() => undefined);
@@ -254,7 +287,8 @@ describe('a connection lost in the middle of a transaction', () => {
 		);
 		log('cut between statements', { ...shape(outcome.error), ms: outcome.ms });
 		expect(cut).toBe(1);
-		expect(outcome.error).toMatchObject({ name: 'TransactionError', kind: 'connection-lost' });
+		// The next statement was written to the reset socket, so its outcome is unknown.
+		expect(outcome.error).toMatchObject({ name: 'TransactionError', kind: 'connection-lost', outcomeUnknown: true });
 		expect(outcome.ms).toBeLessThan(2000);
 		expect(await persisted()).toEqual([]);
 		// The dead connection is never handed out again.
@@ -276,7 +310,7 @@ describe('a connection lost in the middle of a transaction', () => {
 				await tx.update(items).set({ label: 'in flight' }).where(eq(items.id, 1));
 			}),
 		);
-		await fired;
+		await firedWithin(fired, 'statement reply');
 		log('statement reply lost', { ...shape(outcome.error), ms: outcome.ms });
 		expect(outcome.error).toMatchObject({ name: 'TransactionError', kind: 'connection-lost', outcomeUnknown: true });
 		expect(outcome.ms).toBeLessThan(2000);
@@ -348,7 +382,8 @@ describe('a connection lost in the middle of a transaction', () => {
 			}),
 		);
 		log('CAS killed', { ...shape(outcome.error), ms: outcome.ms });
-		expect(outcome.error).toMatchObject({ name: 'TransactionError', kind: 'connection-lost' });
+		// The driver saw the socket close before sending the next statement, so the outcome is known.
+		expect(outcome.error).toMatchObject({ name: 'TransactionError', kind: 'connection-lost', outcomeUnknown: false });
 		expect(await persisted()).toEqual([]);
 		await db.insert(items).values({ id: 3, label: 'after' });
 		expect(await persisted()).toEqual([{ id: 3, label: 'after' }]);
@@ -475,7 +510,7 @@ describe('a connection lost during COMMIT', () => {
 				fired = proxy.failNextRequest(isCommit, 'before-server');
 			}),
 		);
-		await fired;
+		await firedWithin(fired, 'COMMIT before the server');
 		log('COMMIT cut before the server', { ...shape(outcome.error), ms: outcome.ms });
 		expect(errors).toHaveLength(1);
 		expect(outcome.error).toBe(errors[0]);
@@ -496,7 +531,7 @@ describe('a connection lost during COMMIT', () => {
 				fired = proxy.failNextRequest(isCommit, 'after-server');
 			}),
 		);
-		await fired;
+		await firedWithin(fired, 'COMMIT reply');
 		log('COMMIT reply lost', { ...shape(outcome.error), ms: outcome.ms });
 		expect(errors).toHaveLength(1);
 		expect(outcome.error).toBe(errors[0]);
@@ -518,7 +553,7 @@ describe('a connection lost during COMMIT', () => {
 				fired = proxy.failNextRequest(isCommit, 'after-server');
 			}),
 		);
-		await fired;
+		await firedWithin(fired, '0.x COMMIT reply');
 		log('0.x COMMIT reply lost', { ...shape(outcome.error), ms: outcome.ms });
 		expect(outcome.error).toMatchObject({ name: 'TransactionError', kind: 'connection-lost', outcomeUnknown: true });
 		expect(await persisted()).toEqual([{ id: 1, label: null }]);
@@ -531,7 +566,7 @@ describe('a connection lost during COMMIT', () => {
 		const db = native.drizzle(pool);
 		const fired = proxy.failNextRequest(isCommit, 'after-server');
 		const outcome = await settle(db.insert(items).values({ id: 1, label: 'autocommit' }));
-		await fired;
+		await firedWithin(fired, 'autocommit COMMIT reply');
 		log('autocommit COMMIT reply lost', { ...shape(outcome.error), ms: outcome.ms });
 		expect(outcome.error).toMatchObject({ name: 'QueryError', kind: 'connection-lost', outcomeUnknown: true });
 		// Committed once: a resent INSERT would have failed on the primary key or added a row.
@@ -581,7 +616,13 @@ describe('lock timeouts and deadlocks inside db.transaction()', () => {
 		log('lock timeout', { ...shape(outcome.error), ms: outcome.ms });
 		// Inside a transaction cubrid-client reports a statement as its
 		// TransactionError, with the kind and code of the server error.
-		expect(outcome.error).toMatchObject({ name: 'TransactionError', kind: 'lock-timeout', outcomeUnknown: false });
+		expect(outcome.error).toMatchObject({
+			name: 'TransactionError',
+			kind: 'lock-timeout',
+			code: -75,
+			outcomeUnknown: false,
+		});
+		expect((outcome.error as Error).cause).toBeInstanceOf(LockTimeoutError);
 		expect(outcome.ms).toBeGreaterThanOrEqual(450);
 		expect(await persisted()).toEqual([{ id: 10, label: 'locked' }]);
 		await expectRecovered(pool, false);
@@ -609,7 +650,8 @@ describe('lock timeouts and deadlocks inside db.transaction()', () => {
 			await lock.release();
 		}
 		log('nested lock timeout', shape(nestedError));
-		expect(nestedError).toMatchObject({ name: 'TransactionError', kind: 'lock-timeout' });
+		expect(nestedError).toMatchObject({ name: 'TransactionError', kind: 'lock-timeout', code: -75 });
+		expect((nestedError as Error).cause).toBeInstanceOf(LockTimeoutError);
 		expect(await persisted()).toEqual([
 			{ id: 10, label: 'locked' },
 			{ id: 21, label: 'outer' },
@@ -662,6 +704,7 @@ describe('lock timeouts and deadlocks inside db.transaction()', () => {
 		const [lost, won] = await Promise.all([victim, survivor]);
 		log('deadlock', { victim: shape(lost.error), survivor: won.error ? shape(won.error) : 'committed' });
 		expect(lost.error).toMatchObject({ name: 'TransactionError', kind: 'deadlock', code: -72 });
+		expect((lost.error as Error).cause).toBeInstanceOf(DeadlockError);
 		expect(won.error).toBeUndefined();
 		expect(await persisted()).toEqual([
 			{ id: 1, label: 'survivor' },
@@ -703,9 +746,19 @@ describe('lock timeouts and deadlocks inside db.transaction()', () => {
 			survivor: won.error ? shape(won.error) : 'committed',
 		});
 		expect(nestedError).toMatchObject({ name: 'TransactionError', kind: 'deadlock', code: -72 });
+		expect((nestedError as Error).cause).toBeInstanceOf(DeadlockError);
 		expect(won.error).toBeUndefined();
-		// Never a commit of outer work the server already rolled back.
-		expect(lost.error).toBeInstanceOf(Error);
+		// The adapter's guard: rolling back to the savepoint failed, so the outer
+		// level refuses further statements before sending them and rejects with
+		// that refusal, whose cause is the nested deadlock error.
+		const refused = {
+			message: expect.stringMatching(/can only roll back/),
+			cause: expect.objectContaining({ kind: 'deadlock', code: -72 }),
+		};
+		expect(afterNested).toMatchObject(refused);
+		expect((afterNested as Error).cause).toBe(nestedError);
+		expect(nestedError).toHaveProperty('rollbackError');
+		expect(lost.error).toBe(afterNested);
 		const rows = await persisted();
 		expect(rows.filter((row) => row.id === 31 || row.id === 33)).toEqual([]);
 		expect(rows.filter((row) => row.id <= 2)).toEqual([
