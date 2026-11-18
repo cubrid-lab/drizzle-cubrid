@@ -40,6 +40,7 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage --reporter=verbose",
     "integration": "vitest run --config vitest.integration.config.ts --reporter=verbose",
+    "integration:faults": "vitest run --config vitest.faults.config.ts --reporter=verbose",
     "lint": "biome ci --error-on-warnings .",
     "format": "biome check --write .",
     "typecheck": "tsc --noEmit && tsc -p tests/native/tsconfig.json",

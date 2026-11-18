@@ -504,6 +504,57 @@ Refused before a connection is taken:
 | Two nested transactions of one level at the same time | They would roll back to the same point of one connection |
 | A config that is not a plain object (`null`, an array); only an own `isolationLevel` is read | |
 
+## Failures
+
+What a caller sees when the server or the network fails. Every row below is
+verified on CUBRID 11.4 with cubrid-client 1.4.0 by `tests/faults.test.ts`
+(`npm run integration:faults`), which checks the outcome the caller gets and
+then reads what the database actually holds through a new connection. The
+adapter adds no retry or reconnect of its own: it passes cubrid-client's
+errors through (see [Transactions](#transactions)), and cubrid-client never
+sends a statement or a COMMIT a second time.
+
+| Failure | What the caller sees | What the database holds |
+| --- | --- | --- |
+| Connection lost between two statements of `db.transaction()` (socket reset, CAS process killed) | The next statement, so the transaction, rejects at once with `TransactionError`, `kind: 'connection-lost'` | Nothing of the transaction: the server rolls it back when the connection closes |
+| Connection lost while a statement of the transaction was on the wire (the server ran it, the reply never came) | Same, with `outcomeUnknown: true` | Nothing: the statement was part of the transaction, which the server rolled back |
+| Database server restart (`cubrid server restart`) during a transaction | The next statement rejects with `TransactionError`, `code: -224` ("A database has not been restarted"), **no `kind`** in cubrid-client 1.4.0, `outcomeUnknown: false` | Nothing of the transaction |
+| Server or broker restart between queries on a pool or client | The next query succeeds: the CAS reconnects to a restarted server by itself, and cubrid-client checks an idle connection's CAS (`CHECK_CAS`) before each statement outside a transaction and opens a new connection when it is gone, before the statement is sent | The statement ran once |
+| Server unreachable (connections reset and new ones refused) | Queries reject at once with `kind: 'connection-lost'`, `outcomeUnknown: false` (a `QueryError` when an idle connection could not be replaced, a `ConnectionError` when a pool could not open one) | Nothing was sent; the next query after the server is back succeeds |
+| Connection lost during COMMIT of `db.transaction()` | Rejects with cubrid-client's error unchanged: `TransactionError`, `kind: 'connection-lost'`, `outcomeUnknown: true` | **Unknown to the caller.** Verified both ways: when the COMMIT never reached the server nothing is committed; when only its reply was lost the transaction **is committed**. The error is the same in both cases |
+| Connection lost during the COMMIT of an autocommit write (`db.insert()` outside a transaction) | `QueryError`, `kind: 'connection-lost'`, `outcomeUnknown: true` | The row can be committed (verified: committed once, never sent again) |
+| Lock wait longer than the client's `lockTimeout` | The statement rejects with `TransactionError`, `kind: 'lock-timeout'` (code -75), whose `cause` is cubrid-client's `LockTimeoutError`; only the statement failed. Uncaught, the transaction rolls back | Nothing of the transaction; caught in a nested `tx.transaction()`, only the nested work is rolled back and the outer work commits |
+| Deadlock victim | `TransactionError`, `kind: 'deadlock'`, `code: -72`, `cause` a `DeadlockError`. The server has already rolled back the **whole** transaction | Nothing of the victim; the other transaction commits |
+| Deadlock victim inside a nested `tx.transaction()` | The nested transaction rejects as above; rolling back to its savepoint then fails, so the outer level can only roll back: its next statement throws `… can only roll back`, and the outer transaction rejects even if the nested error was caught | Nothing of the outer transaction, never a commit of work the server already rolled back |
+| No reply within the client's `readTimeout` (stalled network, paused server, a lock wait longer than `readTimeout`) | `ReadTimeoutError`, `kind: 'read-timeout'`, `outcomeUnknown: true`, after `readTimeout` (1 s in the tests: 1.0–1.02 s); the connection is discarded and the transaction rejects | Nothing of the transaction, also when the server runs the statement after the lock is released |
+| Stalled network and no `readTimeout` | The statement waits; it completes when traffic resumes | Unchanged |
+| Connection lost between the statements of a relational query with `with` | Rejects with no partial result: `QueryError`, `kind: 'connection-lost'` (the class it has outside a transaction, cubrid-client's `TransactionError` as `transactionError`) | Nothing written; the same query succeeds afterwards |
+
+After every failure above the pool served the next statement, with no
+connection left leased and no socket left open that it does not count.
+
+**Commit outcome unknown.** When a COMMIT fails with `outcomeUnknown: true`
+(or the property is absent), the transaction may or may not have been
+committed, and nothing in the error tells which. Do not retry the transaction
+blindly: read the database to find out (for example by a key the transaction
+wrote), or make the transaction idempotent so that running it twice is
+harmless. `outcomeUnknown: false` means cubrid-client knows which requests
+the server answered; it is no permission to retry either.
+
+Recommendations:
+
+- Set `readTimeout` on the client or pool above your longest statement, so a
+  stalled network or a hung server rejects instead of waiting forever (it is
+  off by default), and `lockTimeout` for lock waits.
+- Inside `db.transaction()`, classify errors by `kind` (or by `cause`), not by
+  class: a failed statement is a `TransactionError` whose `cause` is the class
+  it has outside a transaction (`LockTimeoutError`, `DeadlockError`, …), while
+  a read timeout is a `ReadTimeoutError` itself.
+- After a deadlock (`kind: 'deadlock'`) retry the whole transaction, not the
+  statement: the server rolled all of it back.
+- A `code: -224` statement error after a server restart has no `kind` in
+  cubrid-client 1.4.0; treat it as a lost transaction.
+
 ## Relational queries
 
 ```ts

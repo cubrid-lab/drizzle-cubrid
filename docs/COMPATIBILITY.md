@@ -101,6 +101,32 @@ tarball they tested.
 | Packed tarball imported on Node 18 | CommonJS and ESM, both entry points, lockfile peers, no database |
 | Type check, build and unit tests | Node 20 and 22 with the lockfile peers; Node 22 with the `drizzle-orm` floor |
 | Lint and the foreign-dialect boundary | `src` and the packed tarball |
+| Fault injection (`tests/faults.test.ts`, `npm run integration:faults`) on the source | CUBRID 11.4 (same pinned digest) in a container of its own that the tests restart, pause and kill, Node 22, lockfile peers (CI only, not in the release gate) |
+
+**Fault scenarios verified** (CUBRID 11.4, cubrid-client 1.4.0, mostly
+`drizzle-cubrid/native`; each test checks the persisted rows through a new
+connection and that the pool recovers; what callers see is in
+[Failures](NATIVE_API.md#failures)):
+
+- A connection lost in a transaction (socket reset between statements, the
+  reply of a statement lost, every CAS process killed with `kill -9`, a
+  database server restart): rejects, commits nothing. Also through a single
+  `CubridClient` and through the 0.x API (lost connection).
+- A database server restart and a broker restart between queries on a pool,
+  and a server that refuses connections: the next query succeeds, or fails at
+  once with `kind: 'connection-lost'` while the server is unreachable.
+- A connection lost during COMMIT, before the COMMIT reached the server and
+  after (reply lost), for `db.transaction()`, for the 0.x API (reply lost)
+  and for an autocommit write: the driver's error is passed through unchanged
+  with `outcomeUnknown: true`, and the real outcome (not committed / committed)
+  is checked.
+- Lock timeout in a transaction and in a nested transaction, a deadlock
+  between two transactions and with a nested transaction as the victim, and
+  a lock wait longer than `readTimeout`.
+- A network stall with and without `readTimeout`, and the server container
+  paused with `docker pause`.
+- A relational query with `with` whose connection is lost between the root
+  and the child statement.
 
 A live lane passes only if it ran a non-zero number of tests and none failed or
 was skipped (`scripts/check-live-results.mjs`), and the server's `version()`
@@ -121,8 +147,11 @@ then runs `npm publish <tarball>`.
   above is offline).
 - Node 18 and Node 20 against a live server (Node 18 only imports the
   package), and Node 24 or later.
-- Fault scenarios: broker or CAS restarts, broken connections, timeouts and
-  failover are pending (#164).
+- Fault scenarios other than those listed below: HA failover and
+  replication, a server crash during recovery, broken TLS sessions, killing a
+  transaction with `cubrid killtran`, the 0.x API beyond a lost connection
+  and a lost COMMIT reply, and fault behavior with any other server or
+  `cubrid-client` version.
 - Windows and macOS: every job runs on Linux (`ubuntu-latest`).
 - A TypeScript consumer type-checking against the packed `.d.ts` files.
 - Migrations and schema reflection (#163).

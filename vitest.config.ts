@@ -5,7 +5,7 @@ export default defineConfig({
 		globals: true,
 		environment: 'node',
 		include: ['tests/**/*.test.ts'],
-		exclude: ['tests/integration.test.ts'],
+		exclude: ['tests/integration.test.ts', 'tests/faults.test.ts'],
 		// Type-level tests of drizzle-cubrid/native, checked with tsc (tests/ is outside the root tsconfig).
 		typecheck: {
 			enabled: true,
