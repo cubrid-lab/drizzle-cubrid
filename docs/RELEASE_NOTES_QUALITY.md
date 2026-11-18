@@ -16,4 +16,6 @@ The read-only CI gate checks Markdown structure, summaries, obvious duplicates, 
 
 The current `sync-release-notes.yml` has **separate write privileges**. Do not assume passing this quality check grants permission to edit older GitHub Release bodies. Before any historical public-body sync, separately review the exact canonical note, back up the current remote body, check remote concurrency, update **body only** with explicit approval, and verify it by a fresh GitHub API read. Retain tag, published date, title, draft/prerelease status, assets and registry artifacts. This PR does not dispatch or change the existing publishing workflow.
 
+The claim-by-claim audit of v0.1.0–v0.2.1 against tags, npm artifacts and commits is in [RELEASE_NOTES_AUDIT.md](RELEASE_NOTES_AUDIT.md).
+
 Tracked in #233.
