@@ -370,6 +370,19 @@ describe('execution', () => {
 		expect(logQuery).toHaveBeenCalledWith('delete from "users" where "users"."id" > ?', [0]);
 	});
 
+	it('reuses a prepared write and refuses a missing placeholder value before sending (#165)', async () => {
+		const client = fakeClient([{ affectedRows: 1 }, { affectedRows: 1 }]);
+		const insert = drizzle(client)
+			.insert(users)
+			.values({ name: sql.placeholder('name') })
+			.prepare();
+		await insert.execute({ name: 'a' });
+		await insert.execute({ name: 'b', extra: 'ignored' });
+		await expect(insert.execute({})).rejects.toThrow('No value for placeholder "name" was provided');
+		await expect(insert.execute('a' as never)).rejects.toThrow(/Placeholder values must be an object/);
+		expect(client.calls.map(({ params }) => params)).toEqual([['a'], ['b']]);
+	});
+
 	it('refuses an array parameter before sending', async () => {
 		const client = fakeClient();
 		await expect(

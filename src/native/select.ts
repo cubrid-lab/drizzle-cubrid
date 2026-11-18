@@ -21,7 +21,6 @@ import type {
 import { QueryPromise } from 'drizzle-orm/query-promise';
 import {
 	type ColumnsSelection,
-	fillPlaceholders,
 	noopDecoder,
 	type Placeholder,
 	type Query,
@@ -44,6 +43,7 @@ import {
 	type CubridSetOperator,
 	compoundFields,
 	compoundSelects,
+	fillPlaceholderValues,
 	mapRow,
 	markSubqueryField,
 	markSubquerySources,
@@ -55,7 +55,7 @@ import {
 	subqueryFieldSource,
 } from './dialect.js';
 import { getSqlDecoder } from './internal.js';
-import type { CubridSession } from './session.js';
+import type { CubridSession, CubridStreamOptions } from './session.js';
 import { CubridTable } from './table.js';
 
 /**
@@ -497,7 +497,8 @@ interface CubridSelectState extends CubridSelectConfig {
 /**
  * A SELECT. Methods change the query and return it, as Drizzle's builders do;
  * a join returns a new object over the same query, since it changes the
- * result type. Await it, or call `execute()`, `prepare()` or `toSQL()`.
+ * result type. Await it, or call `execute()`, `prepare()`, `iterator()` or
+ * `toSQL()`.
  */
 export class CubridSelect<
 		TTableName extends string | undefined,
@@ -653,17 +654,62 @@ export class CubridSelect<
 		) as SubqueryOf<TSelection, TNullabilityMap, TAlias>;
 	}
 
-	/** Builds the SQL once; `execute()` takes the values of `sql.placeholder()`s. */
+	/**
+	 * Builds the SQL once, for `execute()` and, rendered for literals, for
+	 * `iterator()` (see `CubridPreparedSelect`): both forms are rendered now,
+	 * so they hold the same values even if a value given to the builder (a
+	 * `Date`, an array) is changed afterwards. Both take the values of
+	 * `sql.placeholder()`s. Nothing is prepared on the server.
+	 */
 	prepare(): CubridPreparedSelect<SelectResult<TSelection, TSelectMode, TNullabilityMap>> {
+		return this.prepared('both');
+	}
+
+	private prepared(
+		use: 'execute' | 'stream' | 'both',
+	): CubridPreparedSelect<SelectResult<TSelection, TSelectMode, TNullabilityMap>> {
 		const fields = orderSelectedFields(this.config.fields);
-		const query = this.toSQL();
 		const nullability = this.config.joins.length > 0 ? { ...this.config.nullability } : undefined;
-		return new CubridPreparedSelect(this.session, query, fields, nullability);
+		const [query, streamQuery] = renderBoth(this.dialect, this.session, this.getSQL(), use);
+		return new CubridPreparedSelect(this.session, query, fields, nullability, undefined, streamQuery);
 	}
 
 	override execute(): Promise<SelectResult<TSelection, TSelectMode, TNullabilityMap>[]> {
-		return this.prepare().execute();
+		return this.prepared('execute').execute();
 	}
+
+	/**
+	 * Streams the rows with cubrid-client's `stream()`, decoded as `execute()`
+	 * decodes them; see `CubridPreparedSelect.iterator()`.
+	 */
+	iterator(
+		placeholderValues: Record<string, unknown> = {},
+		options?: CubridStreamOptions,
+	): AsyncGenerator<SelectResult<TSelection, TSelectMode, TNullabilityMap>, void, undefined> {
+		return this.prepared('stream').iterator(placeholderValues, options);
+	}
+}
+
+/**
+ * The query of `execute()` (for the session's binding) and of `iterator()`
+ * (for `'literal'`, since cubrid-client's `stream()` sends literals), both
+ * rendered now from `statement`, the SQL built when the query was prepared,
+ * so neither changes with the builder or with a value changed later. Under
+ * `'literal'` they are one rendering; a query run once (`use` `'execute'` or
+ * `'stream'`) renders only the form it sends.
+ */
+function renderBoth(
+	dialect: CubridDialect,
+	session: CubridSession,
+	statement: SQL,
+	use: 'execute' | 'stream' | 'both',
+): [Query, Query] {
+	if (session.binding === 'literal' || use === 'stream') {
+		const literal = dialect.sqlToQuery(statement, 'literal');
+		return [literal, literal];
+	}
+	const typed = dialect.sqlToQuery(statement);
+	return [typed, use === 'both' ? dialect.sqlToQuery(statement, 'literal') : typed];
 }
 
 /**
@@ -729,23 +775,50 @@ export class CubridSetOperation<
 		) as SubqueryOf<TSelection, TNullabilityMap, TAlias>;
 	}
 
-	/** Builds the SQL once; `execute()` takes the values of `sql.placeholder()`s. */
+	/** Builds the SQL once, as `CubridSelect.prepare()` does. */
 	prepare(): CubridPreparedSelect<SelectResult<TSelection, TSelectMode, TNullabilityMap>> {
-		const query = this.toSQL();
+		return this.prepared('both');
+	}
+
+	private prepared(
+		use: 'execute' | 'stream' | 'both',
+	): CubridPreparedSelect<SelectResult<TSelection, TSelectMode, TNullabilityMap>> {
+		const [query, streamQuery] = renderBoth(this.dialect, this.session, this.getSQL(), use);
 		const first = firstSelect(this.config);
 		const nullability = first.joins.length > 0 ? { ...first.nullability } : undefined;
 		const temporal = compoundSelects(this.config).some((select) =>
 			orderSelectedFields(select.fields).some(({ field }) => readsTemporal(field)),
 		);
-		return new CubridPreparedSelect(this.session, query, compoundFields(this.config), nullability, temporal);
+		return new CubridPreparedSelect(
+			this.session,
+			query,
+			compoundFields(this.config),
+			nullability,
+			temporal,
+			streamQuery,
+		);
 	}
 
 	override execute(): Promise<SelectResult<TSelection, TSelectMode, TNullabilityMap>[]> {
-		return this.prepare().execute();
+		return this.prepared('execute').execute();
+	}
+
+	/** Streams the result rows; see `CubridPreparedSelect.iterator()`. */
+	iterator(
+		placeholderValues: Record<string, unknown> = {},
+		options?: CubridStreamOptions,
+	): AsyncGenerator<SelectResult<TSelection, TSelectMode, TNullabilityMap>, void, undefined> {
+		return this.prepared('stream').iterator(placeholderValues, options);
 	}
 }
 
-/** A SELECT built once; run it with `execute(placeholderValues)`. */
+/**
+ * A SELECT built once: the SQL text, its parameters and the row mapping are
+ * kept, and each `execute(placeholderValues)` or `iterator(placeholderValues)`
+ * fills the `sql.placeholder()` values and sends the statement again. It is
+ * not a server-side prepared statement: cubrid-client prepares, runs and
+ * closes a statement on the server for every execution.
+ */
 export class CubridPreparedSelect<TRow> {
 	static readonly [entityKind]: string = 'CubridPreparedSelect';
 
@@ -756,11 +829,43 @@ export class CubridPreparedSelect<TRow> {
 		private readonly nullability: Record<string, boolean> | undefined,
 		/** Whether any select reads a date or time column (see `readsTemporal`). */
 		private readonly temporal = fields.some(({ field }) => readsTemporal(field)),
+		/** The query rendered for literals, which `iterator()` sends. */
+		private readonly streamQuery: Query = query,
 	) {}
 
+	/**
+	 * Runs the statement with these placeholder values. A placeholder without
+	 * a value is refused before anything is sent.
+	 */
 	async execute(placeholderValues: Record<string, unknown> = {}): Promise<TRow[]> {
-		const params = fillPlaceholders(this.query.params, placeholderValues);
-		const rows = await this.session.selectRows(this.query.sql, params, this.temporal);
+		const { sql, params: kept } = this.query;
+		const params = fillPlaceholderValues(kept, placeholderValues);
+		const rows = await this.session.selectRows(sql, params, this.temporal);
 		return rows.map((row) => mapRow(this.fields, row, this.nullability) as TRow);
+	}
+
+	/**
+	 * The rows one at a time from cubrid-client's `stream()`, decoded as
+	 * `execute()` decodes them. cubrid-client sends a stream's values as SQL
+	 * literals whatever the binding, so the SQL is the one `binding: 'literal'`
+	 * gives. Placeholders, options and the transaction are checked when it is
+	 * called, before anything is sent; the statement is sent on the first
+	 * read. The stream holds its connection (a pool's, or a client's shared
+	 * one) until the rows run out, the loop ends early (`break`, `return()`,
+	 * a throw) or a read fails; each of those closes the cursor and releases
+	 * the connection. Refused inside `db.transaction()`. See docs/NATIVE_API.md.
+	 */
+	iterator(
+		placeholderValues: Record<string, unknown> = {},
+		options?: CubridStreamOptions,
+	): AsyncGenerator<TRow, void, undefined> {
+		const { sql, params: kept } = this.streamQuery;
+		const params = fillPlaceholderValues(kept, placeholderValues);
+		const rows = this.session.streamRows(sql, params, this.temporal, options);
+		const { fields, nullability } = this;
+		return (async function* () {
+			// A row that fails to decode ends the loop, which closes the stream.
+			for await (const row of rows) yield mapRow(fields, row, nullability) as TRow;
+		})();
 	}
 }

@@ -83,6 +83,113 @@ export interface CubridArrayRowOptions {
 }
 
 /**
+ * Options of `iterator()` on a native select, set operation or prepared
+ * select. `signal`, `fetchSize` and `consumerTimeout` are passed to
+ * cubrid-client's `stream()` (see its `StreamOptions`); `literal` is the
+ * dialect's own. Any other key is refused. All are checked when `iterator()`
+ * is called, before anything is sent.
+ */
+export interface CubridStreamOptions {
+	/**
+	 * Under `binding: 'prepared'` (the default), `true` accepts that this
+	 * stream sends its values as SQL literals, which cubrid-client 1.4's
+	 * `stream()` always does: CUBRID compares some values differently as
+	 * literals than as typed binds (a NULL in `OR` under `NOT`, trailing spaces
+	 * in `LIKE`), so the stream can return other rows than `execute()`.
+	 * Without it, `iterator()` is refused under that binding. Under
+	 * `binding: 'literal'` it changes nothing.
+	 */
+	literal?: boolean;
+	/**
+	 * Stops the stream: the next read rejects with `signal.reason` and the
+	 * cursor (and a pool's connection) is released. Aborted before the stream
+	 * took a connection, nothing is sent.
+	 */
+	signal?: AbortSignal;
+	/** Rows asked for in each FETCH (1 to 2^31 − 1); CUBRID 10.2 to 11.4 answer about 16 KiB of rows per FETCH whatever it says. */
+	fetchSize?: number;
+	/**
+	 * Milliseconds (0 to 2^31 − 1) another statement on the stream's
+	 * connection waits while the consumer reads no row, before cubrid-client
+	 * rejects it with `kind: 'stream-busy'` (default 5000). Only a
+	 * `CubridClient`'s shared connection is affected: a pool streams on a
+	 * connection of its own.
+	 */
+	consumerTimeout?: number;
+}
+
+const STREAM_OPTIONS: ReadonlySet<string> = new Set(['literal', 'signal', 'fetchSize', 'consumerTimeout']);
+const MAX_INT32 = 2 ** 31 - 1;
+
+/** What this session passes to `stream()`: cubrid-client's options and positional rows. */
+export interface CubridStreamCallOptions {
+	signal?: AbortSignal;
+	fetchSize?: number;
+	consumerTimeout?: number;
+	rowMode: 'array';
+}
+
+/**
+ * Checks `iterator()` options as cubrid-client 1.4 checks them (and `signal`
+ * as an `AbortSignal`), so a bad value is refused when `iterator()` is
+ * called rather than at the first read.
+ */
+function streamOptions(options: CubridStreamOptions | undefined): {
+	literal: boolean;
+	call: CubridStreamCallOptions;
+} {
+	if (options === undefined) return { literal: false, call: { rowMode: 'array' } };
+	if (typeof options !== 'object' || options === null || Array.isArray(options)) {
+		throw new TypeError(`iterator() options must be an object, not ${describeValue(options)}`);
+	}
+	for (const key of Object.keys(options)) {
+		if (!STREAM_OPTIONS.has(key)) {
+			throw new Error(
+				`Unknown iterator() option '${key}'; drizzle-cubrid/native accepts literal, signal, fetchSize and consumerTimeout`,
+			);
+		}
+	}
+	const { literal, signal, fetchSize, consumerTimeout } = options;
+	if (literal !== undefined && typeof literal !== 'boolean') {
+		throw new TypeError(`iterator() option literal must be a boolean, not ${describeValue(literal)}`);
+	}
+	if (signal !== undefined && !(signal instanceof AbortSignal)) {
+		throw new TypeError(`iterator() option signal must be an AbortSignal, not ${describeValue(signal)}`);
+	}
+	if (fetchSize !== undefined && !(Number.isInteger(fetchSize) && fetchSize > 0 && fetchSize <= MAX_INT32)) {
+		throw new RangeError(
+			`iterator() option fetchSize must be an integer from 1 to ${MAX_INT32}, not ${describeValue(fetchSize)}`,
+		);
+	}
+	if (
+		consumerTimeout !== undefined &&
+		!(Number.isInteger(consumerTimeout) && consumerTimeout >= 0 && consumerTimeout <= MAX_INT32)
+	) {
+		throw new RangeError(
+			`iterator() option consumerTimeout must be an integer from 0 to ${MAX_INT32} milliseconds, not ${describeValue(consumerTimeout)}`,
+		);
+	}
+	const call: CubridStreamCallOptions = { rowMode: 'array' };
+	if (signal !== undefined) call.signal = signal;
+	if (fetchSize !== undefined) call.fetchSize = fetchSize;
+	if (consumerTimeout !== undefined) call.consumerTimeout = consumerTimeout;
+	return { literal: literal === true, call };
+}
+
+/** Refuses an array parameter, which cubrid-client cannot bind. */
+function refuseArrayParams(params: unknown[]): void {
+	const index = params.findIndex(Array.isArray);
+	if (index >= 0) {
+		// cubrid-client cannot bind an array; a collection value is written as
+		// the typed collection literal by insert and update, and a list needs
+		// one placeholder per value.
+		throw new TypeError(
+			`Parameter ${index + 1} is an array, which cannot be bound; collection values can be written only as an insert or update value of a collection column, and inArray() takes a list of values, not one placeholder`,
+		);
+	}
+}
+
+/**
  * The outcome of an INSERT, UPDATE or DELETE, as cubrid-client's `execute()`
  * and `executePrepared()` report it: `affectedRows`, and `lastInsertId` only
  * when an INSERT made the session hold a new AUTO_INCREMENT value (a `number`
@@ -122,6 +229,12 @@ export interface CubridNativeClient {
 	queryPrepared?(sql: string, params?: readonly unknown[], options?: CubridArrayRowOptions): Promise<unknown[]>;
 	execute?(sql: string, params?: readonly unknown[], options?: CubridWriteOptions): Promise<CubridDmlResult>;
 	executePrepared?(sql: string, params?: readonly unknown[], options?: CubridWriteOptions): Promise<CubridDmlResult>;
+	/**
+	 * Reads a SELECT's rows one server reply at a time, writing the values
+	 * into the SQL text as escaped literals (cubrid-client 1.4's `stream()`);
+	 * `iterator()` needs it.
+	 */
+	stream?(sql: string, params: readonly unknown[], options: CubridStreamCallOptions): AsyncIterable<unknown[]>;
 	/**
 	 * Runs `callback` on a connection the driver owns for the whole
 	 * transaction, commits when it resolves and rolls back when it rejects
@@ -312,15 +425,7 @@ export class CubridSession {
 	/** Refuses a statement of an ended transaction or an array parameter, then logs the statement. */
 	private send(sql: string, params: unknown[], forNested = false): void {
 		this.options.scope?.assertActive(forNested);
-		const index = params.findIndex(Array.isArray);
-		if (index >= 0) {
-			// cubrid-client cannot bind an array; a collection value is written as
-			// the typed collection literal by insert and update, and a list needs
-			// one placeholder per value.
-			throw new TypeError(
-				`Parameter ${index + 1} is an array, which cannot be bound; collection values can be written only as an insert or update value of a collection column, and inArray() takes a list of values, not one placeholder`,
-			);
-		}
+		refuseArrayParams(params);
 		this.options.logger?.logQuery(sql, params);
 	}
 
@@ -345,6 +450,58 @@ export class CubridSession {
 		this.assertActive();
 		if (readsTemporal) await assertUtcDecoding(this.options.zoneClient ?? this.client);
 		return this.run(sql, params, ARRAY_ROWS);
+	}
+
+	/**
+	 * The rows of a SELECT one at a time, as arrays in select-list order, from
+	 * cubrid-client's `stream()`, which sends the values as SQL literals. When
+	 * called it refuses, before anything is sent: a transaction level that
+	 * ended; anything inside `db.transaction()` (cubrid-client 1.4's
+	 * transaction client has no `stream()`); a client without `stream()`; bad
+	 * options or an array parameter; and, under `binding: 'prepared'`, a
+	 * stream without `{ literal: true }`, since literals can match other rows
+	 * than typed binds (cubrid-lab/cubrid-client#307). The statement is sent,
+	 * and the UTC-decoding check made, on the first read; ending the iteration
+	 * early (`break`, `return()`, a throw) closes cubrid-client's stream, which
+	 * releases the cursor and a pool's connection.
+	 */
+	streamRows(
+		sql: string,
+		params: unknown[],
+		readsTemporal: boolean,
+		options?: CubridStreamOptions,
+	): AsyncGenerator<unknown[], void, undefined> {
+		this.assertActive();
+		const { literal, call } = streamOptions(options);
+		if (this.options.scope !== undefined) {
+			throw new Error(
+				"iterator() is not supported inside db.transaction(): cubrid-client 1.4's transaction client has no stream(); await the select in the transaction, or stream with db outside it",
+			);
+		}
+		const stream = this.client.stream;
+		if (typeof stream !== 'function') {
+			throw new Error(
+				'The CUBRID client has no stream() for iterator() (a cubrid-client 1.4 client or pool has one; its transaction clients do not)',
+			);
+		}
+		if (this.binding === 'prepared' && !literal) {
+			throw new Error(
+				"iterator() is refused under binding 'prepared': cubrid-client 1.4's stream() sends values only as SQL literals, and CUBRID compares some values differently as literals than as typed binds (a NULL inside OR under NOT, trailing spaces in LIKE), so the stream could return other rows than execute(). Create the database with drizzle(client, { binding: 'literal' }) so that execute() and iterator() both send literals, or pass { literal: true } to iterator() to accept literal semantics for this stream (cubrid-lab/cubrid-client#307)",
+			);
+		}
+		refuseArrayParams(params);
+		const client = this.client;
+		const zoneClient = this.options.zoneClient ?? client;
+		const send = (sql: string, params: unknown[]) => this.send(sql, params);
+		return (async function* () {
+			if (readsTemporal) await assertUtcDecoding(zoneClient);
+			// Aborted before the first read: nothing is sent, so nothing is logged.
+			call.signal?.throwIfAborted();
+			send(sql, params);
+			// Driver errors are passed through unchanged; leaving this loop early
+			// calls return() on cubrid-client's stream.
+			yield* stream.call(client, sql, params, call);
+		})();
 	}
 
 	/**

@@ -7,7 +7,7 @@
 // stitched in JS. Every value is decoded by its column codec, as in `select()`.
 // Result types are Drizzle's neutral `BuildQueryResult`. See docs/NATIVE_API.md.
 
-import { and } from 'drizzle-orm';
+import { and, Subquery } from 'drizzle-orm';
 import { Column } from 'drizzle-orm/column';
 import { entityKind, is } from 'drizzle-orm/entity';
 import { QueryPromise } from 'drizzle-orm/query-promise';
@@ -22,8 +22,8 @@ import {
 	type TableRelationalConfig,
 	type TablesRelationalConfig,
 } from 'drizzle-orm/relations';
-import { fillPlaceholders, SQL, sql } from 'drizzle-orm/sql/sql';
-import { getTableName, getTableUniqueName } from 'drizzle-orm/table';
+import { Param, Placeholder, SQL, sql } from 'drizzle-orm/sql/sql';
+import { getTableName, getTableUniqueName, Table } from 'drizzle-orm/table';
 import type { KnownKeysOnly } from 'drizzle-orm/utils';
 import { CubridCollection } from './columns/collections.js';
 import { describeValue } from './columns/common.js';
@@ -31,6 +31,7 @@ import {
 	type CubridDialect,
 	type CubridOrderByItem,
 	type CubridSelectConfig,
+	fillPlaceholderValues,
 	mapRow,
 	type OrderedField,
 	readsTemporal,
@@ -66,6 +67,8 @@ interface RelationPlan {
 
 /** One table of a relational query: what it selects, filters and loads next. */
 interface LevelPlan {
+	/** The level's place in the query (`users.posts`), for errors. */
+	path: string;
 	table: CubridTable;
 	/** The select list: result columns, extras, then the key columns the result does not show. */
 	fields: (Column | SQL)[];
@@ -75,10 +78,13 @@ interface LevelPlan {
 	keyIndex: Map<Column | SQL, number>;
 	where?: SQL;
 	orderBy: CubridOrderByItem[];
-	limit?: number;
+	/** A `sql.placeholder()` until `execute()` gives its value (see resolvePlan). */
+	limit?: number | Placeholder;
 	/** Only at the root: Drizzle's types take no nested offset. */
-	offset?: number;
+	offset?: number | Placeholder;
 	relations: RelationPlan[];
+	/** Whether the select list, `where` or `orderBy` holds a `sql.placeholder()`. */
+	placeholders: boolean;
 }
 
 interface LoadedRow {
@@ -86,14 +92,77 @@ interface LoadedRow {
 	related: Record<string, LoadedRow[]>;
 }
 
-function limitValue(value: unknown, name: string, path: string): number | undefined {
-	if (value === undefined) return undefined;
+/** A `limit` or `offset`: a non-negative integer, or a `sql.placeholder()` for `prepare()`. */
+function limitValue(value: unknown, name: string, path: string): number | Placeholder | undefined {
+	if (value === undefined || is(value, Placeholder)) return value;
+	return limitNumber(value, name, path);
+}
+
+function limitNumber(value: unknown, name: string, path: string): number {
 	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-		throw new Error(
-			`${path}: ${name} must be a non-negative integer, not ${describeValue(value)}; relational queries take no sql.placeholder() (prepared relational queries are #165)`,
-		);
+		throw new Error(`${path}: ${name} must be a non-negative integer, not ${describeValue(value)}`);
 	}
 	return value;
+}
+
+/**
+ * Whether `value` (a select-list item, condition or ordering) holds a
+ * `sql.placeholder()`, looking through nested SQL, aliased expressions,
+ * lists, subqueries and query builders (by their public `getSQL()`).
+ */
+function containsPlaceholder(value: unknown, seen: Set<unknown> = new Set()): boolean {
+	if (typeof value !== 'object' || value === null || seen.has(value)) return false;
+	seen.add(value);
+	if (is(value, Placeholder)) return true;
+	if (is(value, Param)) return containsPlaceholder(value.value, seen);
+	if (is(value, Column) || is(value, Table)) return false;
+	if (is(value, SQL)) return value.queryChunks.some((chunk) => containsPlaceholder(chunk, seen));
+	if (is(value, SQL.Aliased)) return containsPlaceholder(value.sql, seen);
+	if (is(value, Subquery)) return containsPlaceholder(value._.sql, seen);
+	if (Array.isArray(value)) return value.some((item) => containsPlaceholder(item, seen));
+	if ('getSQL' in value && typeof value.getSQL === 'function') return containsPlaceholder(value.getSQL(), seen);
+	return false;
+}
+
+/** The value of a `limit` or `offset` placeholder, checked as a number given in the config would be. */
+function placeholderLimit(
+	value: number | Placeholder | undefined,
+	values: Record<string, unknown>,
+	name: string,
+	path: string,
+): number | undefined {
+	if (value === undefined || typeof value === 'number') return value;
+	if (!(value.name in values)) throw new Error(`No value for placeholder "${value.name}" was provided`);
+	return limitNumber(values[value.name], `${name} (placeholder "${value.name}")`, path);
+}
+
+/**
+ * `plan` with the values of its `limit` and `offset` placeholders, checked
+ * before anything is sent. The other placeholders of a query that loads
+ * relations are checked here too, by rendering each level that has any once
+ * without its key filter: a nested level is sent only after its parents, and
+ * the root only after a transaction began. A level without placeholders is
+ * not rendered here.
+ */
+function resolvePlan(
+	dialect: CubridDialect,
+	plan: LevelPlan,
+	values: Record<string, unknown>,
+	references: readonly Column[] = [],
+): LevelPlan {
+	const resolved: LevelPlan = {
+		...plan,
+		limit: placeholderLimit(plan.limit, values, 'limit', plan.path),
+		offset: placeholderLimit(plan.offset, values, 'offset', plan.path) || undefined,
+		relations: plan.relations.map((relation) => ({
+			...relation,
+			plan: resolvePlan(dialect, relation.plan, values, relation.references),
+		})),
+	};
+	if (plan.placeholders && (references.length > 0 || plan.relations.length > 0)) {
+		fillPlaceholderValues(dialect.sqlToQuery(buildLevelQuery(dialect, resolved, undefined, references)).params, values);
+	}
+	return resolved;
 }
 
 /** An object option of a query config (`columns`, `with`, or what `extras` gives) as entries. */
@@ -278,7 +347,8 @@ function planLevel(
 	if (offset !== undefined && limit === undefined) {
 		throw new Error(`${path}: CUBRID needs a limit with offset; add limit or remove offset`);
 	}
-	return { table, fields, shown, keyIndex, where, orderBy, limit, offset, relations };
+	const placeholders = containsPlaceholder([fields, where, orderBy]);
+	return { path, table, fields, shown, keyIndex, where, orderBy, limit, offset, relations, placeholders };
 }
 
 /** A key as one string, comparing values the way their codecs decoded them (`1` and `1n` are one key). */
@@ -362,11 +432,12 @@ async function loadLevel(
 	plan: LevelPlan,
 	filter: SQL | undefined,
 	references: readonly Column[],
+	values: Record<string, unknown>,
 ): Promise<LoadedRow[]> {
 	const query = dialect.sqlToQuery(buildLevelQuery(dialect, plan, filter, references));
 	const ordered: OrderedField[] = plan.fields.map((field, index) => ({ path: [`f${index}`], field }));
 	const temporal = ordered.some(({ field }) => readsTemporal(field));
-	const rows = await session.selectRows(query.sql, fillPlaceholders(query.params, {}), temporal);
+	const rows = await session.selectRows(query.sql, fillPlaceholderValues(query.params, values), temporal);
 	return rows.map((row) => {
 		const mapped = mapRow(ordered, row, undefined);
 		return { values: ordered.map(({ path }) => mapped[path[0] as string]), related: {} };
@@ -379,6 +450,7 @@ async function loadRelations(
 	dialect: CubridDialect,
 	plan: LevelPlan,
 	rows: LoadedRow[],
+	values: Record<string, unknown>,
 ): Promise<void> {
 	for (const relation of plan.relations) {
 		const parentKey = (row: LoadedRow) =>
@@ -392,11 +464,18 @@ async function loadRelations(
 		const all = [...keys.values()];
 		for (let start = 0; start < all.length; start += RELATIONAL_KEY_CHUNK) {
 			const chunk = all.slice(start, start + RELATIONAL_KEY_CHUNK);
-			const loaded = await loadLevel(session, dialect, relation.plan, keyFilter(relation, chunk), relation.references);
+			const loaded = await loadLevel(
+				session,
+				dialect,
+				relation.plan,
+				keyFilter(relation, chunk),
+				relation.references,
+				values,
+			);
 			// One chunk can return very many rows: no spread into push().
 			for (const child of loaded) children.push(child);
 		}
-		await loadRelations(session, dialect, relation.plan, children);
+		await loadRelations(session, dialect, relation.plan, children, values);
 		const groups = new Map<string, LoadedRow[]>();
 		for (const child of children) {
 			const key = keyString(relation.stitch.map((key) => child.values[relation.plan.keyIndex.get(key) as number]));
@@ -428,10 +507,10 @@ function materialize(plan: LevelPlan, row: LoadedRow): Record<string, unknown> {
 }
 
 /**
- * `db.query.<table>.findMany()` or `findFirst()`. Await it or call
- * `execute()`. Its statements run on one connection: the transaction's inside
- * `db.transaction()`, otherwise a `'repeatable read'` transaction of its own
- * when it loads relations (see docs/NATIVE_API.md).
+ * `db.query.<table>.findMany()` or `findFirst()`. Await it, or call
+ * `execute()` or `prepare()`. Its statements run on one connection: the
+ * transaction's inside `db.transaction()`, otherwise a `'repeatable read'`
+ * transaction of its own when it loads relations (see docs/NATIVE_API.md).
  */
 export class CubridRelationalQuery<TResult> extends QueryPromise<TResult> {
 	static override readonly [entityKind]: string = 'CubridNativeRelationalQuery';
@@ -447,20 +526,57 @@ export class CubridRelationalQuery<TResult> extends QueryPromise<TResult> {
 		super();
 	}
 
-	/** Not supported yet: relational queries run several statements, and prepared ones are #165. */
-	prepare(): never {
+	/**
+	 * Checks and plans the query once: options, relations, key types, the
+	 * `where`/`orderBy`/`extras` callbacks. Each `execute(placeholderValues)`
+	 * then builds and runs its statements as an awaited query does; the key
+	 * lists of related levels are values read from the parent rows, never
+	 * placeholders. Nothing is prepared on the server.
+	 */
+	prepare(): CubridPreparedRelationalQuery<TResult> {
+		const config = this.mode === 'first' ? { ...this.config, limit: 1 } : this.config;
+		const plan = planLevel(this.schema, this.tableConfig, config, this.tableConfig.tsName, []);
+		return new CubridPreparedRelationalQuery(this.session, this.dialect, plan, this.mode);
+	}
+
+	/**
+	 * Not supported: a relational query loads each level after its parents and
+	 * joins the rows in JavaScript, so no row is complete before the last
+	 * statement. Stream a `select()` instead.
+	 */
+	iterator(): never {
 		throw new Error(
-			'prepare() is not supported on relational queries yet (#165); await the query, or use select().prepare()',
+			'iterator() is not supported on relational queries: their rows are complete only after every level is loaded; stream a select() instead',
 		);
 	}
 
 	override async execute(): Promise<TResult> {
-		const root = this.tableConfig.tsName;
-		const config = this.mode === 'first' ? { ...this.config, limit: 1 } : this.config;
-		const plan = planLevel(this.schema, this.tableConfig, config, root, []);
+		return this.prepare().execute();
+	}
+}
+
+/** A relational query planned once; run it with `execute(placeholderValues)`. */
+export class CubridPreparedRelationalQuery<TResult> {
+	static readonly [entityKind]: string = 'CubridNativePreparedRelationalQuery';
+
+	constructor(
+		private readonly session: CubridSession,
+		private readonly dialect: CubridDialect,
+		private readonly plan: LevelPlan,
+		private readonly mode: 'many' | 'first',
+	) {}
+
+	/**
+	 * Fills the `sql.placeholder()` values (also a placeholder `limit` or
+	 * `offset`, checked as a non-negative integer) of every level, refusing a
+	 * missing one before anything is sent, then runs the statements.
+	 */
+	async execute(placeholderValues: Record<string, unknown> = {}): Promise<TResult> {
+		fillPlaceholderValues([], placeholderValues);
+		const plan = resolvePlan(this.dialect, this.plan, placeholderValues);
 		const run = async (session: CubridSession) => {
-			const rows = await loadLevel(session, this.dialect, plan, undefined, []);
-			await loadRelations(session, this.dialect, plan, rows);
+			const rows = await loadLevel(session, this.dialect, plan, undefined, [], placeholderValues);
+			await loadRelations(session, this.dialect, plan, rows, placeholderValues);
 			return rows.map((row) => materialize(plan, row));
 		};
 		const rows = plan.relations.length > 0 ? await this.session.consistentRead(run) : await run(this.session);

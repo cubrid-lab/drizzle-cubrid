@@ -5,7 +5,7 @@
 
 import { QueryError, SqlSyntaxError, TransactionError } from 'cubrid-client';
 import { desc, relations, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	bigint,
 	type CubridNativeClient,
@@ -645,6 +645,79 @@ describe('findFirst', () => {
 	});
 });
 
+describe('prepare() (#165)', () => {
+	it('plans once and runs every execution with its own placeholder values, limits included', async () => {
+		const client = fakeClient([[[1n], [2n]], [[11, 1n]], [[3n]], [[31, 3n]]]);
+		const db = drizzle(client, { schema });
+		let planned = 0;
+		const prepared = db.query.users
+			.findMany({
+				columns: { id: true },
+				where: (u, { gt }) => {
+					planned++;
+					return gt(u.id, sql.placeholder('min'));
+				},
+				limit: sql.placeholder('n'),
+				offset: sql.placeholder('skip'),
+				with: {
+					posts: {
+						columns: { id: true },
+						where: (p, { ne }) => ne(p.title, sql.placeholder('title')),
+						limit: sql.placeholder('per'),
+					},
+				},
+			})
+			.prepare();
+		expect(await prepared.execute({ min: 0n, n: 2, skip: 0, title: 'x', per: 1, unused: true })).toEqual([
+			{ id: 1n, posts: [{ id: 11 }] },
+			{ id: 2n, posts: [] },
+		]);
+		expect(await prepared.execute({ min: 2n, n: 5, skip: 1, title: 'y', per: 3 })).toEqual([
+			{ id: 3n, posts: [{ id: 31 }] },
+		]);
+		expect(planned).toBe(1);
+		const selects = client.calls.filter((call) => call.method === 'queryPrepared');
+		expect(selects.map(({ sql, params }) => [sql, params])).toEqual([
+			['select "users"."id" from "users" where "users"."id" > ? limit ?', [0n, 2]],
+			[
+				'select "__rq"."f0", "__rq"."f1" from (select "posts"."id" as "f0", "posts"."author_id" as "f1", row_number() over (partition by "posts"."author_id") as "__rn" from "posts" where ("posts"."author_id" in (?, ?) and "posts"."title" <> ?)) "__rq" where "__rq"."__rn" <= ? order by "__rq"."__rn"',
+				[1n, 2n, 'x', 1],
+			],
+			['select "users"."id" from "users" where "users"."id" > ? limit ? offset ?', [2n, 5, 1]],
+			[
+				'select "__rq"."f0", "__rq"."f1" from (select "posts"."id" as "f0", "posts"."author_id" as "f1", row_number() over (partition by "posts"."author_id") as "__rn" from "posts" where ("posts"."author_id" in (?) and "posts"."title" <> ?)) "__rq" where "__rq"."__rn" <= ? order by "__rq"."__rn"',
+				[3n, 'y', 3],
+			],
+		]);
+		// One repeatable read transaction per execution.
+		expect(client.calls.filter((call) => call.method === 'begin')).toHaveLength(2);
+	});
+
+	it('renders each statement once when the query has no placeholders', async () => {
+		const { CubridDialect } = await import('../../src/native/index');
+		const render = vi.spyOn(CubridDialect.prototype, 'sqlToQuery');
+		try {
+			const client = fakeClient([[[1n]], []]);
+			await drizzle(client, { schema }).query.users.findMany({ columns: { id: true }, with: { posts: true } });
+			expect(render).toHaveBeenCalledTimes(2);
+		} finally {
+			render.mockRestore();
+		}
+	});
+
+	it('prepares findFirst with limit 1', async () => {
+		const client = fakeClient([[[1n, 'Ann', null]], []]);
+		const db = drizzle(client, { schema });
+		const prepared = db.query.users.findFirst({ where: (u, { eq }) => eq(u.name, sql.placeholder('name')) }).prepare();
+		expect(await prepared.execute({ name: 'Ann' })).toEqual({ id: 1n, name: 'Ann', managerId: null });
+		expect(await prepared.execute({ name: 'Nobody' })).toBeUndefined();
+		expect(client.calls.map(({ params }) => params)).toEqual([
+			['Ann', 1],
+			['Nobody', 1],
+		]);
+	});
+});
+
 describe('refusals before anything is sent', () => {
 	type Db = ReturnType<typeof drizzle<ReturnType<typeof fakeClient>, typeof schema>>;
 	const refused = async (run: (db: Db) => Promise<unknown>) => {
@@ -661,9 +734,45 @@ describe('refusals before anything is sent', () => {
 			/CUBRID needs a limit with offset/,
 		],
 		[
-			'a placeholder limit',
+			'a placeholder limit without a value',
 			(db) => db.query.users.findMany({ limit: sql.placeholder('n') }),
-			/users: limit must be a non-negative integer.*#165/,
+			/No value for placeholder "n" was provided/,
+		],
+		[
+			'a placeholder limit that is not a non-negative integer',
+			(db) =>
+				db.query.users
+					.findMany({ limit: sql.placeholder('n') })
+					.prepare()
+					.execute({ n: -1 }),
+			/users: limit \(placeholder "n"\) must be a non-negative integer, not number -1/,
+		],
+		[
+			'a nested placeholder limit without a value, before the root is sent',
+			(db) =>
+				db.query.users
+					.findMany({ with: { posts: { limit: sql.placeholder('n') } } })
+					.prepare()
+					.execute(),
+			/No value for placeholder "n" was provided/,
+		],
+		[
+			'a nested where placeholder without a value, before the root is sent',
+			(db) =>
+				db.query.users
+					.findMany({ with: { posts: { where: (p, { eq }) => eq(p.title, sql.placeholder('t')) } } })
+					.prepare()
+					.execute({}),
+			/No value for placeholder "t" was provided/,
+		],
+		[
+			'placeholder values that are not an object',
+			(db) =>
+				db.query.users
+					.findMany()
+					.prepare()
+					.execute(1 as never),
+			/Placeholder values must be an object keyed by placeholder name, not number 1/,
 		],
 		[
 			'a placeholder in where',
@@ -721,10 +830,18 @@ describe('refusals before anything is sent', () => {
 		expect(await refused(run)).toMatchObject({ message: expect.stringMatching(message) });
 	});
 
-	it('refuses prepare() on a relational query (#165)', () => {
+	it('refuses iterator() on a relational query (#165)', () => {
+		const client = fakeClient();
+		const db = drizzle(client, { schema });
+		expect(() => db.query.users.findMany().iterator()).toThrow(/iterator\(\) is not supported on relational queries/);
+		expect(client.calls).toEqual([]);
+	});
+
+	it('refuses at prepare() what an awaited query refuses', () => {
 		const db = drizzle(fakeClient(), { schema });
-		expect(() => db.query.users.findMany().prepare()).toThrow(
-			/prepare\(\) is not supported on relational queries yet \(#165\)/,
+		expect(() => db.query.users.findMany({ offset: 2 }).prepare()).toThrow(/CUBRID needs a limit with offset/);
+		expect(() => db.query.users.findMany({ limit: 'x' as never }).prepare()).toThrow(
+			/limit must be a non-negative integer/,
 		);
 	});
 

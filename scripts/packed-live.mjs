@@ -72,8 +72,10 @@ const floor = (name) => {
 const wanted = {
 	'drizzle-orm': peers === 'floor' ? floor('drizzle-orm') : locked('drizzle-orm'),
 	'cubrid-client': peers === 'floor' ? floor('cubrid-client') : locked('cubrid-client'),
-	vitest: locked('vitest'),
 };
+// The test runner is installed in a second step (see below), at the versions
+// this repository's own tests run with.
+const runner = { vitest: locked('vitest'), vite: locked('vite') };
 
 const bytes = readFileSync(tarball);
 const sha512 = createHash('sha512').update(bytes);
@@ -97,12 +99,27 @@ npm([
 	tarball,
 	...Object.entries(wanted).map(([name, version]) => `${name}@${version}`),
 ]);
+// Only the package and its peers go through npm's peer resolution above. The
+// runner's own optional peers (@vitest/browser-*, @vitest/ui, ...) are not
+// part of what is verified, and npm 10 (Node 22's npm) crashes resolving them
+// for vitest 5.1.0 once a newer vitest is published ("Cannot read properties
+// of null (reading 'edgesOut')"). vite, the runner's one required peer, is
+// therefore pinned explicitly.
+npm([
+	'install',
+	'--save-exact',
+	'--ignore-scripts',
+	'--no-audit',
+	'--no-fund',
+	'--legacy-peer-deps',
+	...Object.entries(runner).map(([name, version]) => `${name}@${version}`),
+]);
 
 // Prove what is installed: the tarball itself, byte for byte, and the peers asked for.
 const require = createRequire(join(consumer, 'package.json'));
 const installedVersion = (name) =>
 	JSON.parse(readFileSync(join(consumer, 'node_modules', name, 'package.json'), 'utf8')).version;
-for (const [name, version] of Object.entries(wanted)) {
+for (const [name, version] of Object.entries({ ...wanted, ...runner })) {
 	if (installedVersion(name) !== version) fail(`${name} ${installedVersion(name)} installed, ${version} wanted`);
 }
 const consumerLock = JSON.parse(readFileSync(join(consumer, 'package-lock.json'), 'utf8'));

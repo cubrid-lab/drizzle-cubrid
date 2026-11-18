@@ -132,6 +132,42 @@ describe('select shapes', () => {
 	});
 });
 
+describe('iterator() and prepared queries (#165)', () => {
+	it('streams rows typed as the select result', async () => {
+		const rows = db.select().from(users).iterator();
+		expectTypeOf(rows).toEqualTypeOf<AsyncGenerator<User, void, undefined>>();
+		for await (const row of db
+			.select({ id: users.id, at: posts.at })
+			.from(users)
+			.leftJoin(posts, eq(users.id, posts.authorId))
+			.iterator()) {
+			expectTypeOf(row).toEqualTypeOf<{ id: bigint; at: Date | null }>();
+		}
+		const prepared = db
+			.select({ title: posts.title, tags: posts.tags })
+			.from(posts)
+			.where(eq(posts.id, sql.placeholder('id')))
+			.prepare();
+		expectTypeOf(
+			prepared.iterator(
+				{ id: 1 },
+				{ literal: true, fetchSize: 500, consumerTimeout: 0, signal: AbortSignal.timeout(1) },
+			),
+		).toEqualTypeOf<AsyncGenerator<{ title: string; tags: (string | null)[] | null }, void, undefined>>();
+		expectTypeOf(prepared.execute).parameters.toEqualTypeOf<[placeholderValues?: Record<string, unknown>]>();
+		const union = db
+			.select({ id: users.id })
+			.from(users)
+			.union(db.select({ id: users.id }).from(users));
+		expectTypeOf(union.iterator()).toEqualTypeOf<AsyncGenerator<{ id: bigint }, void, undefined>>();
+		expectTypeOf(drizzle(pool).select().from(users).iterator()).toEqualTypeOf<AsyncGenerator<User, void, undefined>>();
+		// @ts-expect-error rowMode is the dialect's own
+		db.select().from(users).iterator({}, { rowMode: 'array' });
+		// @ts-expect-error a write has no iterator()
+		db.delete(users).iterator;
+	});
+});
+
 describe('set operations', () => {
 	const names = () => db.select({ id: users.id, name: users.name }).from(users);
 	const titles = () => db.select({ id: sql<bigint>`${posts.authorId}`, name: posts.title }).from(posts);
@@ -230,5 +266,13 @@ describe('refusals at the type level', () => {
 		db.select().from(sql`users`);
 		// @ts-expect-error wrong type in a condition
 		q.where(eq(users.id, 'one'));
+	});
+});
+
+describe('iterator() options (#165)', () => {
+	it('types literal as a boolean', () => {
+		db.select().from(users).iterator({}, { literal: true });
+		// @ts-expect-error literal is a boolean
+		db.select().from(users).iterator({}, { literal: 'yes' });
 	});
 });

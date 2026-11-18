@@ -96,7 +96,11 @@ export {
 	CubridUpdateBuilder,
 	type CubridUpdateSet,
 } from './dml.js';
-export { CubridRelationalQuery, CubridRelationalQueryBuilder } from './relational.js';
+export {
+	CubridPreparedRelationalQuery,
+	CubridRelationalQuery,
+	CubridRelationalQueryBuilder,
+} from './relational.js';
 export {
 	type CubridAliasedSelection,
 	CubridPreparedSelect,
@@ -125,6 +129,7 @@ export {
 	type CubridNativeClient,
 	type CubridRelationalReads,
 	CubridSession,
+	type CubridStreamOptions,
 	type CubridTransactionConfig,
 	CubridTransactionScope,
 } from './session.js';
