@@ -240,7 +240,7 @@ describe('readMigrationFiles', () => {
 
 	it('ignores a leading UTF-8 byte order mark in the checksum and the SQL', async () => {
 		const plain = 'CREATE TABLE "t" ("id" INT);\n';
-		const [file] = await readMigrationFiles(folder({ '0001_bom.sql': `\uFEFF${plain.replace('\n', '\r\n')}` }));
+		const [file] = await readMigrationFiles(folder({ '0001_bom.sql': `\uFEFF${plain.replaceAll('\n', '\r\n')}` }));
 		expect(file!.checksum).toBe(sha(plain));
 		expect(file!.statements).toEqual([{ sql: 'CREATE TABLE "t" ("id" INT)', line: 1 }]);
 	});
