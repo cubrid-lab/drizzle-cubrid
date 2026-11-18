@@ -149,7 +149,10 @@ describe('iterator() and prepared queries (#165)', () => {
 			.where(eq(posts.id, sql.placeholder('id')))
 			.prepare();
 		expectTypeOf(
-			prepared.iterator({ id: 1 }, { fetchSize: 500, consumerTimeout: 0, signal: AbortSignal.timeout(1) }),
+			prepared.iterator(
+				{ id: 1 },
+				{ literal: true, fetchSize: 500, consumerTimeout: 0, signal: AbortSignal.timeout(1) },
+			),
 		).toEqualTypeOf<AsyncGenerator<{ title: string; tags: (string | null)[] | null }, void, undefined>>();
 		expectTypeOf(prepared.execute).parameters.toEqualTypeOf<[placeholderValues?: Record<string, unknown>]>();
 		const union = db
@@ -263,5 +266,13 @@ describe('refusals at the type level', () => {
 		db.select().from(sql`users`);
 		// @ts-expect-error wrong type in a condition
 		q.where(eq(users.id, 'one'));
+	});
+});
+
+describe('iterator() options (#165)', () => {
+	it('types literal as a boolean', () => {
+		db.select().from(users).iterator({}, { literal: true });
+		// @ts-expect-error literal is a boolean
+		db.select().from(users).iterator({}, { literal: 'yes' });
 	});
 });

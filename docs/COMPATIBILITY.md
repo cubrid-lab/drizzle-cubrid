@@ -138,13 +138,21 @@ connection and that the pool recovers; what callers see is in
   updates and deletes, and prepared relational queries with placeholder
   `where`, `limit` and `offset` at the root and a nested level; a missing
   value is refused before any statement.
-- `iterator()` over 10,000 rows on one pool connection, each row equal to
-  what `execute()` returns (BIGINT beyond 2^53, CHAR padding, DATETIME,
-  SET), a set operation and placeholder filters (bigint, `Date`, CHAR
-  `IN` lists) under both bindings.
+- `iterator()` refused under the default `binding: 'prepared'` with no
+  statement sent; with `{ literal: true }`, the documented differences from
+  `execute()` (a NULL inside `OR` under `NOT`, trailing spaces in `LIKE`)
+  pinned.
+- Under `binding: 'literal'`: the same rows, or the same error, from
+  `execute()`, a prepared `iterator()` and a direct `iterator()` over a
+  matrix of 90+ conditions (quoted, escaped, Unicode and blank strings,
+  NULL/`undefined` placeholders under `NOT`/`OR`, CHAR `IN` lists, BIGINT
+  extremes, doubles, dates); 10,000 streamed rows on one pool connection,
+  each equal to what `execute()` returns (BIGINT beyond 2^53, CHAR padding,
+  DATETIME, SET); a set operation.
 - The pool connection released (`stats().active` back to 0) after `break`,
   a throw in the loop, `return()` and an `AbortSignal`; three interleaved
-  streams on three connections; a statement awaited inside the loop refused
+  streams on three connections; a third stream on a pool of `max: 2`
+  rejected with `kind: 'pool-timeout'`; a statement awaited inside the loop refused
   with `kind: 'stream-busy'` on a `CubridClient` and run on another
   connection of a pool; a server error at the first read and a decode error
   mid-stream releasing the connection; `iterator()` refused inside

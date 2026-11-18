@@ -5,7 +5,7 @@
 
 import { QueryError, SqlSyntaxError, TransactionError } from 'cubrid-client';
 import { desc, relations, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	bigint,
 	type CubridNativeClient,
@@ -691,6 +691,18 @@ describe('prepare() (#165)', () => {
 		]);
 		// One repeatable read transaction per execution.
 		expect(client.calls.filter((call) => call.method === 'begin')).toHaveLength(2);
+	});
+
+	it('renders each statement once when the query has no placeholders', async () => {
+		const { CubridDialect } = await import('../../src/native/index');
+		const render = vi.spyOn(CubridDialect.prototype, 'sqlToQuery');
+		try {
+			const client = fakeClient([[[1n]], []]);
+			await drizzle(client, { schema }).query.users.findMany({ columns: { id: true }, with: { posts: true } });
+			expect(render).toHaveBeenCalledTimes(2);
+		} finally {
+			render.mockRestore();
+		}
 	});
 
 	it('prepares findFirst with limit 1', async () => {

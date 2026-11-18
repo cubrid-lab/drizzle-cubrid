@@ -776,9 +776,19 @@ trips as an awaited one; what it saves is the client-side work. See
 | Query | What `prepare()` keeps | Each `execute(values)` |
 | --- | --- | --- |
 | `select()`, `selectDistinct()`, set operations | The SQL text for the binding, the parameters with their placeholders, the row mapping; also the SQL rendered for literals that `iterator()` sends | Fills the placeholders and sends the statement through the session's binding; returns decoded rows |
-| `insert()`, `update()`, `delete()` | The SQL text and parameters, and the `$defaultFn()`/`$onUpdateFn()` values generated once (every execution writes the same ones) | Fills the placeholders and runs the statement; resolves to `{ affectedRows, lastInsertId? }` |
+| `insert()`, `update()`, `delete()` | The SQL text and parameters, and the `$defaultFn()`/`$onUpdateFn()` values generated once (every execution writes the same ones: see the warning below) | Fills the placeholders and runs the statement; resolves to `{ affectedRows, lastInsertId? }` |
 | `insert(…).$returningId()` | As for `insert()`, plus which keys to report (checked once) | Fills the placeholders; a key written as a placeholder is reported with that execution's value, an AUTO_INCREMENT key from the server's generated keys |
 | `db.query.<t>.findMany()`/`findFirst()` | The checked plan: options, relations, key types, the results of the `where`/`orderBy`/`extras` callbacks | Checks every placeholder (and each placeholder `limit`/`offset` as a non-negative integer) before anything is sent, then builds and runs its statements as an awaited query does, in one transaction when it loads relations (see [Consistency and connections](#consistency-and-connections)). The key lists of related levels are values read from the parent rows, never placeholders |
+
+> **`$defaultFn()` and `$onUpdateFn()` run once per `prepare()`, not once per
+> `execute()`.** A prepared insert of a table with `id: varchar().$defaultFn(() => randomUUID())`
+> or `createdAt: datetime().$defaultFn(() => new Date())` writes the **same**
+> UUID or timestamp on every execution (a repeated primary key then fails as a
+> duplicate). Drizzle's own dialects do the same: their `prepare()` builds the
+> INSERT, and calls the functions, once (drizzle-orm 0.45 `MySqlInsertBase.prepare()` → `buildInsertQuery()`).
+> Pass such values as placeholders, `.values({ id: sql.placeholder('id') })`,
+> or let the database generate them (`.default()`, `AUTO_INCREMENT`). An
+> awaited insert builds the statement each time, so it gets new values.
 
 Placeholders:
 
@@ -805,7 +815,7 @@ Placeholders:
 ## Streaming
 
 ```ts
-const db = drizzle(pool);
+const db = drizzle(pool, { binding: 'literal' }); // see "Binding" below
 for await (const row of db.select().from(events).where(gt(events.id, 0)).orderBy(events.id).iterator()) {
   await send(row); // rows decoded as execute() decodes them
   if (done(row)) break; // closes the cursor and gives the connection back to the pool
@@ -816,6 +826,12 @@ const controller = new AbortController();
 for await (const row of prepared.iterator({ kind: 'click' }, { signal: controller.signal, fetchSize: 1000 })) {
   // ...
 }
+
+// Under the default binding: refused unless this stream opts in to literal semantics.
+const typedDb = drizzle(pool);
+for await (const row of typedDb.select().from(events).iterator({}, { literal: true })) {
+  // ...
+}
 ```
 
 `iterator(placeholderValues?, options?)` on a select, a set operation or a
@@ -824,22 +840,54 @@ prepared select reads the rows through cubrid-client's `stream()` with
 `execute()` (bigint, CHAR padding, dates, collections, `mapWith()`). It
 returns an `AsyncGenerator` of the select's row type.
 
+**Binding: a stream never silently differs from `execute()`.** cubrid-client
+1.4's `stream()` can send values only as SQL literals, and CUBRID compares
+some values differently as literals than as typed binds. Verified on 11.4:
+
+| Condition | Typed binds (`execute()` under `'prepared'`) | Literals (a stream) |
+| --- | --- | --- |
+| `not(or(eq(t.c, sql.placeholder('p')), eq(t.id, 1)))` with `p: null` (also `undefined`, a plain `eq(col, null)`, VARCHAR columns) | `c = NULL` is unknown, so no row | `c = NULL` inside `OR` is false, so every row but `id = 1` |
+| `like(t.s, sql.placeholder('p'))` with `p: 'ab'` | Matches `'ab'` and `'ab  '`: trailing spaces are ignored | Matches `'ab'` only |
+| `like(t.s, …)` with `p: ''` | Matches `'  '` | Matches `''` |
+| A denormal double such as `5e-324` | Bound | Its literal is a syntax error (`SqlSyntaxError`) |
+
+So:
+
+- Under `binding: 'literal'`, `execute()` and `iterator()` both send
+  literals and return the same rows; `iterator()` works without options.
+  Verified live with a matrix of 90+ conditions (strings with quotes,
+  backslashes, `%`/`_`, Unicode and spaces, NULL and `undefined`
+  placeholders under `NOT`/`OR`, CHAR `IN` lists, BIGINT extremes, doubles,
+  dates): each returned the same rows, or the same error, from `execute()`,
+  a prepared `iterator()` and a direct `iterator()`.
+- Under `binding: 'prepared'` (the default), `iterator()` is **refused**
+  before anything is sent, with an error naming the two ways out: create the
+  database with `drizzle(client, { binding: 'literal' })`, or pass
+  `{ literal: true }` to that `iterator()` call to accept literal semantics
+  for that stream, with the differences above. The stream's SQL is then
+  rendered as for `binding: 'literal'`: a CHAR placeholder list is not
+  expanded (#239), since literal lists compare padded already.
+- This is revisited when cubrid-client can stream with typed binds
+  (cubrid-lab/cubrid-client#307).
+
 | Behavior | Details |
 | --- | --- |
-| When it is sent | Placeholders, options and the transaction are checked when `iterator()` is called, before anything is sent; the statement is sent, and a pool's connection taken, on the first read |
+| When it is sent | The binding, placeholders (also an array value), options (`fetchSize`, `consumerTimeout`, `signal`, `literal`) and the transaction are checked when `iterator()` is called, before anything is sent; the statement is sent, the UTC-decoding check made and a pool's connection taken on the first read |
 | Memory and backpressure | cubrid-client holds one server reply of rows at a time and asks for the next only when the loop wants more rows (CUBRID 10.2–11.4 send about 16 KiB of rows per reply whatever `fetchSize` says). The dialect decodes one row at a time and keeps none. Verified live with 10,000 rows on one pool connection |
 | Connection | A pool's stream holds one connection from the first read until it ends; a statement awaited inside the loop takes another connection of the pool (or waits for one). A `CubridClient`'s stream holds the client's shared connection: its other statements wait, and one awaited inside the loop is refused with cubrid-client's `kind: 'stream-busy'` `QueryError` after `consumerTimeout` (5000 ms by default) since it could never run. Stream next to other work with a pool |
 | Ending early | `break`, a `return`, a throw in the loop body or `iterator.return()` closes the server cursor and releases the connection (verified live: `pool.stats().active` back to 0). Drive it with `for await`; code that calls `next()` by hand must call `return()`, or the connection stays held |
 | Cancellation | `options.signal`: aborting it makes the next read reject with `signal.reason`, closes the cursor and releases the connection; already aborted, nothing is sent. A reply already awaited is not interrupted (cubrid-client's `readTimeout` limits it) |
 | Errors | cubrid-client's errors pass through unchanged. CUBRID evaluates a result when the statement runs, so a server error (division by zero, a failed cast) rejects the first read, before any row (verified on 11.4). A row that fails to decode (a codec or `mapWith()` error) rejects that read and closes the stream |
-| Binding | cubrid-client 1.4's `stream()` writes values into the SQL text as escaped literals, so a stream sends literals under both bindings, and its SQL is rendered as for `binding: 'literal'`: a CHAR placeholder list is not expanded (#239), since literal lists compare padded already. BLOB/CLOB values are refused by cubrid-client |
-| `options` | `signal`, `fetchSize` and `consumerTimeout`, passed to cubrid-client unchanged (it checks their values). Any other key, `rowMode` included, is refused |
-| Concurrency | Several streams on a pool each hold a connection (verified live with three interleaved streams). Several on one `CubridClient` take turns on its connection |
+| Binding | Always literals; see above. Rows equal `execute()`'s when the database uses `binding: 'literal'`; under `'prepared'` only with `{ literal: true }`, and then they can differ as the table above shows |
+| `options` | `literal` (see above), and `signal`, `fetchSize` (an integer from 1 to 2^31 − 1) and `consumerTimeout` (an integer from 0 to 2^31 − 1 ms), passed to cubrid-client. Any other key, `rowMode` included, is refused |
+| Concurrency | Several streams on a pool each hold a connection (verified live with three interleaved streams). **More open streams than the pool's `max`, read in lockstep, cannot all start**: the first read of the extra one waits for a connection that only the streams beside it, which the same code is not reading, could release. It does not hang forever: it rejects with cubrid-client's `ConnectionError`, `kind: 'pool-timeout'`, after `acquireTimeoutMs` (30 s by default; verified live with `max: 2`, `acquireTimeoutMs: 1000`), and the open streams keep their connections until they end. Keep the number of streams open at once at or below `max`, or end one before starting another. Several streams on one `CubridClient` take turns on its connection |
 
 Refused, before anything is sent:
 
 | Refused | Why |
 | --- | --- |
+| `iterator()` under `binding: 'prepared'` without `{ literal: true }` | See Binding above |
+| A prepared select of a `tx` iterated after its transaction ended | `This transaction has ended …`, as for its `execute()` |
 | `iterator()` inside `db.transaction()` (on `tx` or a nested `tx`) | cubrid-client 1.4's transaction client has no `stream()`. It is refused even for a client that has one: an open cursor's interaction with savepoints and with a callback that returns has no defined behavior yet. Await the select in the transaction, or stream with `db`, which runs outside it and sees only committed rows |
 | `iterator()` on a client without `stream()` (such as a cubrid-client transaction client passed to `drizzle()`) | Nothing to stream with |
 | `iterator()` on a relational query | Its rows are complete only after every level is loaded; stream a `select()` |

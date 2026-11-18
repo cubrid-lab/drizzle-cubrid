@@ -1,11 +1,23 @@
-// Native streaming (#165) with a fake client: iterator() sends the SQL
-// rendered for literals through stream() with array rows, decodes each row as
+// Native streaming (#165) with a fake client: iterator() is refused under
+// binding 'prepared' without { literal: true }, sends the SQL rendered for
+// literals through stream() with array rows, decodes each row as
 // execute() does, checks placeholders, options and the transaction before
 // anything is sent, and closes cubrid-client's stream whenever the loop ends.
 import { eq, inArray, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { bigint, char, cubridTable, datetime, drizzle, integer, set, union, varchar } from '../../src/native/index';
+import {
+	bigint,
+	CubridDialect,
+	char,
+	cubridTable,
+	datetime,
+	drizzle,
+	integer,
+	set,
+	union,
+	varchar,
+} from '../../src/native/index';
 import { NOT_UTC_MESSAGE } from '../../src/native/timezone';
 
 const users = cubridTable('users', {
@@ -76,7 +88,7 @@ describe('iterator()', () => {
 			[9007199254740993n, 'Ann', 'ab  ', 10, '2024-02-29 23:59:58.123', ['x', null]],
 			[2n, 'Bob', null, null, null, null],
 		]);
-		const db = drizzle(client);
+		const db = drizzle(client, { binding: 'literal' });
 		const rows = db
 			.select({
 				id: users.id,
@@ -104,7 +116,7 @@ describe('iterator()', () => {
 		expect(client.state.ended).toBe('done');
 	});
 
-	it('renders the stream for literals: CHAR placeholder lists are not expanded (#239)', async () => {
+	it('with { literal: true } under binding prepared, renders the stream for literals: CHAR placeholder lists are not expanded (#239)', async () => {
 		const client = fakeClient();
 		const db = drizzle(client);
 		const query = db
@@ -113,13 +125,13 @@ describe('iterator()', () => {
 			.where(inArray(users.code, [sql.placeholder('a'), sql.placeholder('b')]))
 			.prepare();
 		await query.execute({ a: 'ab', b: 'cd' });
-		await collect(query.iterator({ a: 'ab', b: 'cd' }));
+		await collect(query.iterator({ a: 'ab', b: 'cd' }, { literal: true }));
 		await collect(
 			db
 				.select({ id: users.id })
 				.from(users)
 				.where(inArray(users.code, [sql.placeholder('a'), sql.placeholder('b')]))
-				.iterator({ a: 'ab', b: 'cd' }),
+				.iterator({ a: 'ab', b: 'cd' }, { literal: true }),
 		);
 		expect(client.calls.map(({ method, sql, params }) => [method, sql, params])).toEqual([
 			[
@@ -151,7 +163,7 @@ describe('iterator()', () => {
 
 	it('streams a set operation', async () => {
 		const client = fakeClient([[1n, 'a']]);
-		const db = drizzle(client);
+		const db = drizzle(client, { binding: 'literal' });
 		const names = () => db.select({ id: users.id, name: users.name }).from(users);
 		const rows = await collect(
 			union(names(), names()).orderBy(users.name).limit(sql.placeholder('n')).iterator({ n: 5 }),
@@ -167,20 +179,22 @@ describe('iterator()', () => {
 	it('closes the stream when the loop breaks, throws or the iterator is returned', async () => {
 		const rows = [[1n], [2n], [3n]];
 		const broken = fakeClient(rows);
-		for await (const _ of drizzle(broken).select({ id: users.id }).from(users).iterator()) break;
+		for await (const _ of drizzle(broken, { binding: 'literal' }).select({ id: users.id }).from(users).iterator())
+			break;
 		expect(broken.state).toEqual({ reads: 1, ended: 'closed' });
 
 		const thrown = fakeClient(rows);
 		const boom = new Error('consumer failed');
 		await expect(
 			(async () => {
-				for await (const _ of drizzle(thrown).select({ id: users.id }).from(users).iterator()) throw boom;
+				for await (const _ of drizzle(thrown, { binding: 'literal' }).select({ id: users.id }).from(users).iterator())
+					throw boom;
 			})(),
 		).rejects.toBe(boom);
 		expect(thrown.state).toEqual({ reads: 1, ended: 'closed' });
 
 		const returned = fakeClient(rows);
-		const iterator = drizzle(returned).select({ id: users.id }).from(users).iterator();
+		const iterator = drizzle(returned, { binding: 'literal' }).select({ id: users.id }).from(users).iterator();
 		expect(await iterator.next()).toEqual({ value: { id: 1n }, done: false });
 		expect(await iterator.return()).toEqual({ value: undefined, done: true });
 		expect(returned.state).toEqual({ reads: 1, ended: 'closed' });
@@ -191,7 +205,9 @@ describe('iterator()', () => {
 			[1, 'not a date'],
 			[2, null],
 		]);
-		const decode = collect(drizzle(bad).select({ id: posts.id, at: posts.at }).from(posts).iterator());
+		const decode = collect(
+			drizzle(bad, { binding: 'literal' }).select({ id: posts.id, at: posts.at }).from(posts).iterator(),
+		);
 		await expect(decode).rejects.toThrow();
 		expect(bad.state).toEqual({ reads: 1, ended: 'closed' });
 
@@ -199,7 +215,8 @@ describe('iterator()', () => {
 		const failing = fakeClient([[1n], driverError]);
 		const seen: unknown[] = [];
 		const error = await (async () => {
-			for await (const row of drizzle(failing).select({ id: users.id }).from(users).iterator()) seen.push(row);
+			for await (const row of drizzle(failing, { binding: 'literal' }).select({ id: users.id }).from(users).iterator())
+				seen.push(row);
 		})().catch((e: unknown) => e);
 		expect(error).toBe(driverError);
 		expect(seen).toEqual([{ id: 1n }]);
@@ -207,9 +224,36 @@ describe('iterator()', () => {
 
 	it('logs the statement', async () => {
 		const logged: unknown[] = [];
-		const db = drizzle(fakeClient(), { logger: { logQuery: (query, params) => logged.push([query, params]) } });
+		const db = drizzle(fakeClient(), {
+			binding: 'literal',
+			logger: { logQuery: (query, params) => logged.push([query, params]) },
+		});
 		await collect(db.select({ id: users.id }).from(users).where(eq(users.id, 5n)).iterator());
 		expect(logged).toEqual([['select "users"."id" from "users" where "users"."id" = ?', [5n]]]);
+	});
+});
+
+describe('prepare() rendering', () => {
+	it('renders the literal form of a prepared select only on its first iterator(), from the SQL built at prepare()', async () => {
+		const render = vi.spyOn(CubridDialect.prototype, 'sqlToQuery');
+		try {
+			const client = fakeClient();
+			const select = drizzle(client).select({ id: users.id }).from(users).where(eq(users.id, 1n));
+			const prepared = select.prepare();
+			expect(render).toHaveBeenCalledTimes(1);
+			await prepared.execute();
+			select.where(eq(users.id, 2n));
+			await collect(prepared.iterator({}, { literal: true }));
+			await collect(prepared.iterator({}, { literal: true }));
+			expect(render).toHaveBeenCalledTimes(2);
+			expect(client.calls.map(({ method, params }) => [method, params])).toEqual([
+				['queryPrepared', [1n]],
+				['stream', [1n]],
+				['stream', [1n]],
+			]);
+		} finally {
+			render.mockRestore();
+		}
 	});
 });
 
@@ -254,13 +298,74 @@ describe('iterator() refusals before anything is sent', () => {
 		],
 	])('%s', (_, run, message) => {
 		const client = fakeClient([[1n]]);
-		expect(() => run(drizzle(client))).toThrow(message);
+		expect(() => run(drizzle(client, { binding: 'literal' }))).toThrow(message);
 		expect(client.calls).toEqual([]);
 	});
 
 	it('refuses a client without stream()', () => {
 		const { stream: _, ...client } = fakeClient();
-		expect(() => drizzle(client).select().from(users).iterator()).toThrow(/has no stream\(\) for iterator\(\)/);
+		expect(() => drizzle(client, { binding: 'literal' }).select().from(users).iterator()).toThrow(
+			/has no stream\(\) for iterator\(\)/,
+		);
+	});
+
+	it("refuses iterator() under binding 'prepared' without { literal: true }, naming both ways out", () => {
+		const client = fakeClient([[1n]]);
+		const db = drizzle(client);
+		for (const options of [undefined, {}, { literal: false }]) {
+			expect(() => db.select({ id: users.id }).from(users).iterator({}, options)).toThrow(
+				/iterator\(\) is refused under binding 'prepared'.*binding: 'literal'.*\{ literal: true \}.*#307/,
+			);
+			expect(() => db.select({ id: users.id }).from(users).prepare().iterator({}, options)).toThrow(
+				/refused under binding 'prepared'/,
+			);
+		}
+		expect(client.calls).toEqual([]);
+		// The opt-in is not passed to cubrid-client.
+		const rows = db.select({ id: users.id }).from(users).iterator({}, { literal: true, consumerTimeout: 0 });
+		return collect(rows).then(() =>
+			expect(client.calls).toEqual([
+				{
+					method: 'stream',
+					sql: 'select "users"."id" from "users"',
+					params: [],
+					options: { consumerTimeout: 0, rowMode: 'array' },
+				},
+			]),
+		);
+	});
+
+	it.each([
+		[{ fetchSize: 0 }, /fetchSize must be an integer from 1/],
+		[{ fetchSize: 1.5 }, /fetchSize must be an integer from 1/],
+		[{ fetchSize: 2 ** 31 }, /fetchSize must be an integer from 1/],
+		[{ consumerTimeout: -1 }, /consumerTimeout must be an integer from 0/],
+		[{ consumerTimeout: 'soon' }, /consumerTimeout must be an integer from 0/],
+		[{ signal: {} }, /signal must be an AbortSignal/],
+		[{ literal: 'yes' }, /literal must be a boolean/],
+	])('refuses option %o when iterator() is called', (options, message) => {
+		const client = fakeClient();
+		expect(() =>
+			drizzle(client, { binding: 'literal' })
+				.select()
+				.from(users)
+				.iterator({}, options as never),
+		).toThrow(message);
+		expect(client.calls).toEqual([]);
+	});
+
+	it('says that the transaction ended for a prepared select of a tx iterated afterwards', async () => {
+		const inner = fakeClient();
+		const client = {
+			...fakeClient(),
+			transaction: async <T>(callback: (tx: typeof inner) => Promise<T>) => callback(inner),
+		};
+		let prepared!: { iterator(): unknown };
+		await drizzle(client, { binding: 'literal' }).transaction(async (tx) => {
+			prepared = tx.select({ id: users.id }).from(users).prepare();
+		});
+		expect(() => prepared.iterator()).toThrow(/This transaction has ended/);
+		expect(inner.calls).toEqual([]);
 	});
 
 	it('refuses iterator() inside db.transaction(), even on a transaction client with stream()', async () => {
@@ -269,7 +374,7 @@ describe('iterator() refusals before anything is sent', () => {
 			...fakeClient(),
 			transaction: async <T>(callback: (tx: typeof inner) => Promise<T>) => callback(inner),
 		};
-		const db = drizzle(client);
+		const db = drizzle(client, { binding: 'literal' });
 		await expect(
 			db.transaction(async (tx) => {
 				tx.select({ id: users.id }).from(users).iterator();
@@ -280,19 +385,18 @@ describe('iterator() refusals before anything is sent', () => {
 
 	it('refuses a date or time read from a client that does not decode in UTC, on the first read', async () => {
 		const client = fakeClient([[1, at]], { timezone: 'local' });
-		const rows = drizzle(client).select({ id: posts.id, at: posts.at }).from(posts).iterator();
+		const rows = drizzle(client, { binding: 'literal' }).select({ id: posts.id, at: posts.at }).from(posts).iterator();
 		await expect(collect(rows)).rejects.toThrow(NOT_UTC_MESSAGE);
 		expect(client.calls).toEqual([]);
 	});
 
-	it('refuses an array parameter on the first read', async () => {
+	it('refuses an array parameter when iterator() is called', () => {
 		const client = fakeClient();
-		const rows = drizzle(client)
+		const select = drizzle(client, { binding: 'literal' })
 			.select({ id: users.id })
 			.from(users)
-			.where(eq(users.id, sql.placeholder('id')))
-			.iterator({ id: [1, 2] });
-		await expect(collect(rows)).rejects.toThrow(/Parameter 1 is an array/);
+			.where(eq(users.id, sql.placeholder('id')));
+		expect(() => select.iterator({ id: [1, 2] })).toThrow(/Parameter 1 is an array/);
 		expect(client.calls).toEqual([]);
 	});
 });

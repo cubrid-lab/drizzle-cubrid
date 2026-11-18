@@ -33,6 +33,7 @@ import {
 	ne,
 	not,
 	notInArray,
+	or,
 	relations,
 	sql,
 	sum,
@@ -3510,6 +3511,15 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 		label: native.varchar({ length: 20 }).notNull(),
 		n: native.integer().notNull(),
 	});
+	// Rows whose values compare differently as literals than as typed binds.
+	const odd = native.cubridTable(name('nodd'), {
+		id: native.integer().primaryKey(),
+		c: native.char({ length: 4 }),
+		s: native.varchar({ length: 20 }),
+		b: native.bigint({ mode: 'bigint' }),
+		n: native.double(),
+		d: native.datetime(),
+	});
 	/** Row `id` of items as select() decodes it. */
 	const item = (id: number) => ({
 		id,
@@ -3526,7 +3536,7 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 	};
 
 	beforeAll(async () => {
-		for (const table of [items, counters]) {
+		for (const table of [items, counters, odd]) {
 			await client.query(createTableSql(table));
 			created.push(`"${native.getTableConfig(table).name}"`);
 		}
@@ -3538,6 +3548,22 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 			.update(items)
 			.set({ tags: ['x', 'y'] })
 			.where(lte(items.id, 3));
+		const at = (ms: number) => new Date(Date.UTC(2024, 1, 29, 15, 0, 0, ms));
+		await native
+			.drizzle(client)
+			.insert(odd)
+			.values([
+				{ id: 1, c: 'ab', s: 'ab', b: 1n, n: 1.5, d: at(1) },
+				{ id: 2, c: 'cd', s: 'ab  ', b: -9223372036854775808n, n: -0, d: at(2) },
+				{ id: 3, c: null, s: 'x', b: 9223372036854775807n, n: 1e300, d: null },
+				{ id: 4, c: 'zz', s: "it's", b: 0n, n: null, d: at(4) },
+				{ id: 5, c: null, s: null, b: null, n: 5, d: null },
+				{ id: 6, c: '%_', s: '%_', b: 6n, n: 6, d: at(6) },
+				{ id: 7, c: 'ef', s: '', b: 7n, n: 7, d: at(7) },
+				{ id: 8, c: 'gh', s: '  ', b: 8n, n: 8, d: at(8) },
+				{ id: 9, c: 'ij', s: 'back\\slash', b: 9n, n: 9, d: at(9) },
+				{ id: 10, c: 'kl', s: '한글😀', b: 10n, n: 10, d: at(10) },
+			]);
 	}, DDL_TIMEOUT);
 
 	it('reuses a prepared select with different values under both bindings, refusing a missing one before sending', async () => {
@@ -3602,7 +3628,7 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 	}, 120_000);
 
 	it('streams 10,000 rows through one pool connection, decoded as execute() decodes them', async () => {
-		const db = native.drizzle(pool);
+		const db = native.drizzle(pool, { binding: 'literal' });
 		const all = await db.select().from(items).orderBy(items.id);
 		expect(all).toHaveLength(ROWS);
 		expect([all[0], all[2], all[3], all[ROWS - 1]]).toEqual([item(1), item(3), item(4), item(ROWS)]);
@@ -3635,13 +3661,15 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 	it('filters a stream by bigint, Date and CHAR values, bound or placeholders, under both bindings (#239)', async () => {
 		for (const binding of ['prepared', 'literal'] as const) {
 			const db = native.drizzle(client, { binding });
+			// Under 'prepared' the stream needs the literal opt-in; these values match alike.
+			const opt = { literal: true };
 			expect(
 				await collect(
 					db
 						.select({ id: items.id })
 						.from(items)
 						.where(and(eq(items.big, big + 5n), eq(items.ts, new Date(base + 5))))
-						.iterator(),
+						.iterator({}, opt),
 				),
 			).toEqual([{ id: 5 }]);
 			const prepared = db
@@ -3658,18 +3686,18 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 				.prepare();
 			const values = { a: 'ab', b: 'zz', max: 8, since: new Date(base + 3) };
 			expect(await prepared.execute(values)).toEqual([{ id: 4 }, { id: 6 }, { id: 8 }]);
-			expect(await collect(prepared.iterator(values))).toEqual([{ id: 4 }, { id: 6 }, { id: 8 }]);
+			expect(await collect(prepared.iterator(values, opt))).toEqual([{ id: 4 }, { id: 6 }, { id: 8 }]);
 			const excluded = db
 				.select({ id: items.id })
 				.from(items)
 				.where(and(notInArray(items.code, [sql.placeholder('a'), sql.placeholder('b')]), lte(items.id, 4)))
 				.orderBy(items.id);
-			expect(await collect(excluded.iterator({ a: 'ab', b: 'zz' }))).toEqual([{ id: 1 }, { id: 3 }]);
+			expect(await collect(excluded.iterator({ a: 'ab', b: 'zz' }, opt))).toEqual([{ id: 1 }, { id: 3 }]);
 		}
 	});
 
 	it('releases the pool connection when the loop breaks, throws or the iterator is returned', async () => {
-		const db = native.drizzle(pool);
+		const db = native.drizzle(pool, { binding: 'literal' });
 		const ids = () => db.select({ id: items.id }).from(items).orderBy(items.id);
 		expect(pool.stats().active).toBe(0);
 		for await (const row of ids().iterator()) {
@@ -3696,7 +3724,7 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 	});
 
 	it('runs concurrent streams on a pool, each on a connection of its own', async () => {
-		const db = native.drizzle(pool);
+		const db = native.drizzle(pool, { binding: 'literal' });
 		const streams = [0, 1, 2].map((k) =>
 			db
 				.select({ id: items.id })
@@ -3723,10 +3751,29 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 		expect(pool.stats().active).toBe(0);
 	});
 
+	it('rejects the first read of a stream beyond the pool max with pool-timeout, not a hang', async () => {
+		const small = createPool({ ...config, timezone: 'utc', max: 2, acquireTimeoutMs: 1000 });
+		try {
+			const db = native.drizzle(small, { binding: 'literal' });
+			const streams = [0, 1, 2].map(() => db.select({ id: items.id }).from(items).orderBy(items.id).iterator());
+			expect((await (streams[0] as AsyncGenerator<{ id: number }>).next()).value).toEqual({ id: 1 });
+			expect((await (streams[1] as AsyncGenerator<{ id: number }>).next()).value).toEqual({ id: 1 });
+			const started = Date.now();
+			const error = await (streams[2] as AsyncGenerator<{ id: number }>).next().catch((e: unknown) => e);
+			expect(error).toMatchObject({ kind: 'pool-timeout' });
+			expect(Date.now() - started).toBeLessThan(10_000);
+			expect(small.stats().active).toBe(2);
+			for (const stream of streams) await stream.return(undefined);
+			expect(small.stats().active).toBe(0);
+		} finally {
+			await small.close();
+		}
+	});
+
 	it('refuses a statement awaited inside the loop on a CubridClient (stream-busy); a pool runs it on another connection', async () => {
 		const shared = createClient({ ...config, timezone: 'utc' });
 		try {
-			const db = native.drizzle(shared);
+			const db = native.drizzle(shared, { binding: 'literal' });
 			let refused: unknown;
 			for await (const _ of db
 				.select({ id: items.id })
@@ -3747,7 +3794,7 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 		} finally {
 			await shared.close();
 		}
-		const db = native.drizzle(pool);
+		const db = native.drizzle(pool, { binding: 'literal' });
 		for await (const row of db.select({ id: items.id }).from(items).orderBy(items.id).iterator()) {
 			expect(row).toEqual({ id: 1 });
 			expect(await db.select({ id: items.id }).from(items).where(eq(items.id, 5))).toEqual([{ id: 5 }]);
@@ -3759,7 +3806,7 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 
 	it('refuses iterator() inside db.transaction() before anything is sent; a stream outside sees only committed rows', async () => {
 		const statements: string[] = [];
-		const db = native.drizzle(pool, { logger: { logQuery: (query) => statements.push(query) } });
+		const db = native.drizzle(pool, { binding: 'literal', logger: { logQuery: (query) => statements.push(query) } });
 		const labels = () =>
 			collect(
 				db
@@ -3791,7 +3838,7 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 	});
 
 	it('stops a stream with an AbortSignal and releases its connection', async () => {
-		const db = native.drizzle(pool);
+		const db = native.drizzle(pool, { binding: 'literal' });
 		const reason = new Error('enough');
 		const controller = new AbortController();
 		let n = 0;
@@ -3816,7 +3863,7 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 	});
 
 	it('passes a server error through at the first read; a row that fails to decode ends the stream and releases it', async () => {
-		const db = native.drizzle(pool);
+		const db = native.drizzle(pool, { binding: 'literal' });
 		// CUBRID evaluates the result when the statement runs, so its errors come before any row.
 		let rows = 0;
 		const server = await (async () => {
@@ -3841,5 +3888,109 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 		expect(decode).toMatchObject({ message: 'row 500 cannot be decoded' });
 		expect(rows).toBe(499);
 		expect(pool.stats().active).toBe(0);
+	});
+
+	it("refuses iterator() under the default binding 'prepared' before anything is sent", async () => {
+		const statements: string[] = [];
+		const db = native.drizzle(pool, { logger: { logQuery: (query) => statements.push(query) } });
+		const before = pool.stats();
+		const select = db
+			.select({ id: items.id })
+			.from(items)
+			.where(eq(items.id, sql.placeholder('id')));
+		expect(() => select.iterator({ id: 1 })).toThrow(
+			/iterator\(\) is refused under binding 'prepared'.*binding: 'literal'.*\{ literal: true \}/,
+		);
+		expect(() => select.prepare().iterator({ id: 1 })).toThrow(/refused under binding 'prepared'/);
+		expect(() => select.prepare().iterator({ id: 1 }, { literal: false })).toThrow(/refused under binding 'prepared'/);
+		expect(statements).toEqual([]);
+		expect(pool.stats()).toEqual(before);
+	});
+
+	it('with { literal: true } under binding prepared, a stream can return other rows than execute(): pinned', async () => {
+		const db = native.drizzle(pool);
+		const P = sql.placeholder('p');
+		const ids = (rows: { id: number }[]) => rows.map((row) => row.id);
+		const both = async (where: unknown, values: Record<string, unknown>) => {
+			const query = db
+				.select({ id: odd.id })
+				.from(odd)
+				.where(where as never)
+				.orderBy(odd.id)
+				.prepare();
+			return {
+				execute: ids(await query.execute(values)),
+				stream: ids(await collect(query.iterator(values, { literal: true }))),
+			};
+		};
+		// A NULL inside OR under NOT: typed `c = ?` with NULL is unknown, a literal `c = NULL` is false.
+		expect(await both(not(or(eq(odd.c, P), eq(odd.id, 1)) as never), { p: null })).toEqual({
+			execute: [],
+			stream: [2, 3, 4, 5, 6, 7, 8, 9, 10],
+		});
+		// LIKE: a typed bind matched values with trailing spaces, a literal does not.
+		expect(await both(like(odd.s, P), { p: 'ab' })).toEqual({ execute: [1, 2], stream: [1] });
+		expect(await both(like(odd.s, P), { p: '' })).toEqual({ execute: [8], stream: [7] });
+	});
+
+	it("under binding 'literal', a stream returns what execute() returns over a matrix of values", async () => {
+		const db = native.drizzle(pool, { binding: 'literal' });
+		const P = sql.placeholder('p');
+		const Q = sql.placeholder('q');
+		const strings = ['ab', 'ab  ', "it's", 'back\\slash', "' or 1=1 --", '%_', '', '  ', '한글😀', 'x'];
+		const cases: [string, unknown, Record<string, unknown>][] = [];
+		for (const v of strings) {
+			cases.push([`eq s ${v}`, eq(odd.s, v), {}]);
+			cases.push([`eq s placeholder ${v}`, eq(odd.s, P), { p: v }]);
+			cases.push([`like s ${v}`, like(odd.s, P), { p: v }]);
+			if (v.length <= 4) {
+				cases.push([`eq c ${v}`, eq(odd.c, P), { p: v }]);
+				cases.push([`in c ${v}`, inArray(odd.c, [P, Q]), { p: v, q: 'zz' }]);
+				cases.push([`not in c ${v}`, notInArray(odd.c, [P, Q]), { p: v, q: 'zz' }]);
+				cases.push([`not(in) c ${v}`, not(inArray(odd.c, [P, Q])), { p: v, q: 'zz' }]);
+			}
+		}
+		for (const p of [null, undefined, 'ab']) {
+			cases.push([`not or c ${p}`, not(or(eq(odd.c, P), eq(odd.id, 1)) as never), { p }]);
+			cases.push([`ne s ${p}`, ne(odd.s, P), { p }]);
+			cases.push([`in c [${p}, ab]`, inArray(odd.c, [P, Q]), { p, q: 'ab' }]);
+			cases.push([`not(in) c [${p}, ab]`, not(inArray(odd.c, [P, Q])), { p, q: 'ab' }]);
+		}
+		for (const p of [0n, -1n, 9223372036854775807n, -9223372036854775808n, 2n ** 53n + 1n]) {
+			cases.push([`eq b ${p}`, eq(odd.b, P), { p }]);
+			cases.push([`gt b ${p}`, gt(odd.b, P), { p }]);
+		}
+		for (const p of [0, -0, 1.5, 1e300, 5e-324]) cases.push([`lt n ${p}`, lt(odd.n, P), { p }]);
+		for (const p of [new Date(Date.UTC(2024, 1, 29, 15, 0, 0, 2)), new Date(Date.UTC(1999, 11, 31))]) {
+			cases.push([`eq d ${p.toISOString()}`, eq(odd.d, P), { p }]);
+			cases.push([`gt d ${p.toISOString()}`, gt(odd.d, P), { p }]);
+		}
+		const outcome = async (run: () => Promise<unknown>) => {
+			try {
+				return await run();
+			} catch (error) {
+				return `${(error as Error).constructor.name}: ${(error as Error).message}`;
+			}
+		};
+		// bigint, Date and -0 survive, so a difference in any of them shows.
+		const ser = (value: unknown) =>
+			JSON.stringify(value, (_, x) => (typeof x === 'bigint' ? `${x}n` : Object.is(x, -0) ? '-0' : x));
+		const isDeepEqual = (a: unknown, b: unknown) => ser(a) === ser(b);
+		const differing: unknown[] = [];
+		for (const [label, where, values] of cases) {
+			const query = db
+				.select({ id: odd.id, c: odd.c, s: odd.s, b: odd.b, n: odd.n, d: odd.d })
+				.from(odd)
+				.where(where as never)
+				.orderBy(odd.id);
+			const executed = await outcome(() => query.prepare().execute(values));
+			const streamed = await outcome(() => collect(query.prepare().iterator(values)));
+			const direct = await outcome(() => collect(query.iterator(values)));
+			if (!isDeepEqual(executed, streamed) || !isDeepEqual(executed, direct)) {
+				differing.push({ label, executed, streamed, direct });
+			}
+		}
+		expect({ cases: cases.length, differing }).toEqual({ cases: cases.length, differing: [] });
+		expect(cases.length).toBeGreaterThan(80);
 	});
 });

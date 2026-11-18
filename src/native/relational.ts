@@ -7,7 +7,7 @@
 // stitched in JS. Every value is decoded by its column codec, as in `select()`.
 // Result types are Drizzle's neutral `BuildQueryResult`. See docs/NATIVE_API.md.
 
-import { and } from 'drizzle-orm';
+import { and, Subquery } from 'drizzle-orm';
 import { Column } from 'drizzle-orm/column';
 import { entityKind, is } from 'drizzle-orm/entity';
 import { QueryPromise } from 'drizzle-orm/query-promise';
@@ -22,8 +22,8 @@ import {
 	type TableRelationalConfig,
 	type TablesRelationalConfig,
 } from 'drizzle-orm/relations';
-import { Placeholder, SQL, sql } from 'drizzle-orm/sql/sql';
-import { getTableName, getTableUniqueName } from 'drizzle-orm/table';
+import { Param, Placeholder, SQL, sql } from 'drizzle-orm/sql/sql';
+import { getTableName, getTableUniqueName, Table } from 'drizzle-orm/table';
 import type { KnownKeysOnly } from 'drizzle-orm/utils';
 import { CubridCollection } from './columns/collections.js';
 import { describeValue } from './columns/common.js';
@@ -83,6 +83,8 @@ interface LevelPlan {
 	/** Only at the root: Drizzle's types take no nested offset. */
 	offset?: number | Placeholder;
 	relations: RelationPlan[];
+	/** Whether the select list, `where` or `orderBy` holds a `sql.placeholder()`. */
+	placeholders: boolean;
 }
 
 interface LoadedRow {
@@ -103,6 +105,25 @@ function limitNumber(value: unknown, name: string, path: string): number {
 	return value;
 }
 
+/**
+ * Whether `value` (a select-list item, condition or ordering) holds a
+ * `sql.placeholder()`, looking through nested SQL, aliased expressions,
+ * lists, subqueries and query builders (by their public `getSQL()`).
+ */
+function containsPlaceholder(value: unknown, seen: Set<unknown> = new Set()): boolean {
+	if (typeof value !== 'object' || value === null || seen.has(value)) return false;
+	seen.add(value);
+	if (is(value, Placeholder)) return true;
+	if (is(value, Param)) return containsPlaceholder(value.value, seen);
+	if (is(value, Column) || is(value, Table)) return false;
+	if (is(value, SQL)) return value.queryChunks.some((chunk) => containsPlaceholder(chunk, seen));
+	if (is(value, SQL.Aliased)) return containsPlaceholder(value.sql, seen);
+	if (is(value, Subquery)) return containsPlaceholder(value._.sql, seen);
+	if (Array.isArray(value)) return value.some((item) => containsPlaceholder(item, seen));
+	if ('getSQL' in value && typeof value.getSQL === 'function') return containsPlaceholder(value.getSQL(), seen);
+	return false;
+}
+
 /** The value of a `limit` or `offset` placeholder, checked as a number given in the config would be. */
 function placeholderLimit(
 	value: number | Placeholder | undefined,
@@ -118,9 +139,10 @@ function placeholderLimit(
 /**
  * `plan` with the values of its `limit` and `offset` placeholders, checked
  * before anything is sent. The other placeholders of a query that loads
- * relations are checked here too, by rendering each level once without its
- * key filter: a nested level is sent only after its parents, and the root
- * only after a transaction began.
+ * relations are checked here too, by rendering each level that has any once
+ * without its key filter: a nested level is sent only after its parents, and
+ * the root only after a transaction began. A level without placeholders is
+ * not rendered here.
  */
 function resolvePlan(
 	dialect: CubridDialect,
@@ -137,7 +159,7 @@ function resolvePlan(
 			plan: resolvePlan(dialect, relation.plan, values, relation.references),
 		})),
 	};
-	if (references.length > 0 || plan.relations.length > 0) {
+	if (plan.placeholders && (references.length > 0 || plan.relations.length > 0)) {
 		fillPlaceholderValues(dialect.sqlToQuery(buildLevelQuery(dialect, resolved, undefined, references)).params, values);
 	}
 	return resolved;
@@ -325,7 +347,8 @@ function planLevel(
 	if (offset !== undefined && limit === undefined) {
 		throw new Error(`${path}: CUBRID needs a limit with offset; add limit or remove offset`);
 	}
-	return { path, table, fields, shown, keyIndex, where, orderBy, limit, offset, relations };
+	const placeholders = containsPlaceholder([fields, where, orderBy]);
+	return { path, table, fields, shown, keyIndex, where, orderBy, limit, offset, relations, placeholders };
 }
 
 /** A key as one string, comparing values the way their codecs decoded them (`1` and `1n` are one key). */
