@@ -6,6 +6,7 @@
 // CUBRID_TEST_PASSWORD (empty). Without CUBRID_TEST_HOST the run fails instead
 // of skipping, so a missing database can never look like a pass.
 // CUBRID_TEST_EXPECT_VERSION, when set, must prefix the server version.
+
 import {
 	TransactionError as ClientTransactionError,
 	type CubridClient,
@@ -27,6 +28,7 @@ import {
 	inArray,
 	like,
 	lt,
+	lte,
 	max,
 	ne,
 	not,
@@ -3149,11 +3151,63 @@ describe('drizzle-cubrid/native relational queries (#158)', () => {
 		expect((withRelations as { transactionError?: unknown }).transactionError).toBeInstanceOf(ClientTransactionError);
 	});
 
-	it('refuses prepare() and a placeholder limit before sending anything', async () => {
+	it('reuses a prepared relational query with placeholders, limits included, and refuses iterator() (#165)', async () => {
 		statements = [];
-		expect(() => db().query.users.findMany().prepare()).toThrow(/#165/);
-		await expect(db().query.users.findMany({ limit: sql.placeholder('n') })).rejects.toThrow(/non-negative integer/);
+		expect(() => db().query.users.findMany().iterator()).toThrow(/iterator\(\) is not supported on relational queries/);
+		await expect(db().query.users.findMany({ limit: sql.placeholder('n') })).rejects.toThrow(
+			'No value for placeholder "n" was provided',
+		);
+		const prepared = db()
+			.query.users.findMany({
+				columns: { id: true, name: true },
+				where: (u, { gte }) => gte(u.id, sql.placeholder('min')),
+				orderBy: (u, { asc }) => asc(u.id),
+				limit: sql.placeholder('n'),
+				offset: sql.placeholder('skip'),
+				with: {
+					posts: {
+						columns: { id: true, day: true },
+						orderBy: (p, { asc }) => asc(p.id),
+						limit: sql.placeholder('per'),
+					},
+				},
+			})
+			.prepare();
+		// A nested placeholder without a value is refused before the root statement.
+		await expect(prepared.execute({ min: 1n, n: 2, skip: 0 })).rejects.toThrow(
+			'No value for placeholder "per" was provided',
+		);
 		expect(statements).toEqual([]);
+		expect(await prepared.execute({ min: 1n, n: 2, skip: 0, per: 2 })).toEqual([
+			{
+				id: 1n,
+				name: 'Ann',
+				posts: [
+					{ id: 10, day: new Date(Date.UTC(2024, 0, 2)) },
+					{ id: 11, day: null },
+				],
+			},
+			{ id: 3n, name: 'Cy', posts: [] },
+		]);
+		expect(await prepared.execute({ min: 4n, n: 5, skip: 1, per: 1 })).toEqual([
+			{ id: big, name: 'Bob', posts: [{ id: 20, day: new Date(Date.UTC(9999, 11, 31)) }] },
+		]);
+		expect(await prepared.execute({ min: 1n, n: 1, skip: 0, per: 5 })).toEqual([
+			{
+				id: 1n,
+				name: 'Ann',
+				posts: [
+					{ id: 10, day: new Date(Date.UTC(2024, 0, 2)) },
+					{ id: 11, day: null },
+					{ id: 12, day: null },
+				],
+			},
+		]);
+		const first = db()
+			.query.users.findFirst({ columns: { name: true }, where: (u, { eq }) => eq(u.id, sql.placeholder('id')) })
+			.prepare();
+		expect(await first.execute({ id: big })).toEqual({ name: 'Bob' });
+		expect(await first.execute({ id: 99n })).toBeUndefined();
 	});
 });
 
@@ -3437,4 +3491,355 @@ describe('CHAR columns compared with sql.placeholder() values (#239)', () => {
 			}
 		});
 	}
+});
+
+describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
+	const ROWS = 10_000;
+	const big = 9007199254740993n; // 2^53 + 1
+	const base = Date.UTC(2024, 1, 29, 23, 59, 58, 123);
+	const items = native.cubridTable(name('nstream'), {
+		id: native.integer().primaryKey(),
+		big: native.bigint({ mode: 'bigint' }).notNull(),
+		code: native.char({ length: 4 }).notNull(),
+		ts: native.datetime().notNull(),
+		tags: native.set({ element: native.varchar({ length: 10 }) }),
+		label: native.varchar({ length: 40 }).notNull(),
+	});
+	const counters = native.cubridTable(name('ncounters'), {
+		id: native.integer().primaryKey().autoIncrement(),
+		label: native.varchar({ length: 20 }).notNull(),
+		n: native.integer().notNull(),
+	});
+	/** Row `id` of items as select() decodes it. */
+	const item = (id: number) => ({
+		id,
+		big: big + BigInt(id),
+		code: id % 2 === 0 ? 'ab  ' : 'cd  ',
+		ts: new Date(base + id),
+		tags: id <= 3 ? ['x', 'y'] : null,
+		label: `item ${id}`,
+	});
+	const collect = async <T>(rows: AsyncIterable<T>): Promise<T[]> => {
+		const out: T[] = [];
+		for await (const row of rows) out.push(row);
+		return out;
+	};
+
+	beforeAll(async () => {
+		for (const table of [items, counters]) {
+			await client.query(createTableSql(table));
+			created.push(`"${native.getTableConfig(table).name}"`);
+		}
+		await client.query(
+			`INSERT INTO "${native.getTableConfig(items).name}" ("id", "big", "code", "ts", "label") SELECT ROWNUM, CAST(${big} AS BIGINT) + ROWNUM, CASE WHEN MOD(ROWNUM, 2) = 0 THEN 'ab' ELSE 'cd' END, DATETIME'2024-02-29 23:59:58.123' + ROWNUM, CONCAT('item ', ROWNUM) FROM db_root CONNECT BY LEVEL <= ${ROWS}`,
+		);
+		await native
+			.drizzle(client)
+			.update(items)
+			.set({ tags: ['x', 'y'] })
+			.where(lte(items.id, 3));
+	}, DDL_TIMEOUT);
+
+	it('reuses a prepared select with different values under both bindings, refusing a missing one before sending', async () => {
+		for (const binding of ['prepared', 'literal'] as const) {
+			const statements: string[] = [];
+			const db = native.drizzle(client, { binding, logger: { logQuery: (query) => statements.push(query) } });
+			const page = db
+				.select()
+				.from(items)
+				.where(and(gte(items.id, sql.placeholder('from')), eq(items.code, sql.placeholder('code'))))
+				.orderBy(items.id)
+				.limit(sql.placeholder('n'))
+				.prepare();
+			for (let from = 1; from <= 300; from += 7) {
+				const first = from % 2 === 0 ? from : from + 1;
+				expect(await page.execute({ from, code: 'ab', n: 3 })).toEqual([first, first + 2, first + 4].map(item));
+			}
+			expect(await page.execute({ from: 9998, code: 'cd', n: 10 })).toEqual([item(9999)]);
+			const sent = statements.length;
+			await expect(page.execute({ from: 1, code: 'ab' })).rejects.toThrow('No value for placeholder "n" was provided');
+			expect(statements).toHaveLength(sent);
+		}
+	});
+
+	// An autocommit write took up to about 0.6 s on a local 11.4 container, so the
+	// statement count is kept small and the test gets a longer timeout.
+	it('reuses prepared inserts, $returningId(), updates and deletes', async () => {
+		const db = native.drizzle(client);
+		const insert = db
+			.insert(counters)
+			.values({ label: sql.placeholder('label'), n: sql.placeholder('n') })
+			.$returningId()
+			.prepare();
+		const ids: number[] = [];
+		for (let i = 0; i < 6; i++) {
+			const [row] = await insert.execute({ label: `c${i}`, n: i });
+			ids.push(row?.id as number);
+		}
+		expect(new Set(ids).size).toBe(6);
+		expect(await db.select({ id: counters.id }).from(counters).where(eq(counters.label, 'c5'))).toEqual([
+			{ id: ids[5] },
+		]);
+		const bump = db
+			.update(counters)
+			.set({ n: sql`${counters.n} + ${sql.placeholder('by')}` })
+			.where(eq(counters.label, sql.placeholder('label')))
+			.prepare();
+		// n becomes 100, 1, 102, 3, 104, 5.
+		for (let i = 0; i < 6; i += 2) expect(await bump.execute({ by: 100, label: `c${i}` })).toEqual({ affectedRows: 1 });
+		const remove = db
+			.delete(counters)
+			.where(lt(counters.n, sql.placeholder('below')))
+			.prepare();
+		expect(await remove.execute({ below: 2 })).toEqual({ affectedRows: 1 });
+		expect(await remove.execute({ below: 6 })).toEqual({ affectedRows: 2 });
+		expect(await db.select({ n: counters.n }).from(counters).orderBy(counters.n)).toEqual([
+			{ n: 100 },
+			{ n: 102 },
+			{ n: 104 },
+		]);
+		await db.delete(counters);
+	}, 120_000);
+
+	it('streams 10,000 rows through one pool connection, decoded as execute() decodes them', async () => {
+		const db = native.drizzle(pool);
+		const all = await db.select().from(items).orderBy(items.id);
+		expect(all).toHaveLength(ROWS);
+		expect([all[0], all[2], all[3], all[ROWS - 1]]).toEqual([item(1), item(3), item(4), item(ROWS)]);
+		let n = 0;
+		let active: number | undefined;
+		for await (const row of db.select().from(items).orderBy(items.id).iterator({}, { fetchSize: 1000 })) {
+			expect(row).toEqual(all[n]);
+			n++;
+			active ??= pool.stats().active;
+		}
+		expect({ n, active }).toEqual({ n: ROWS, active: 1 });
+		expect(pool.stats().active).toBe(0);
+		// A set operation streams too, with placeholders in an operand.
+		const union = db
+			.select({ id: items.id, ts: items.ts })
+			.from(items)
+			.where(lte(items.id, 2))
+			.unionAll(
+				db
+					.select({ id: items.id, ts: items.ts })
+					.from(items)
+					.where(gte(items.id, sql.placeholder('from'))),
+			)
+			.orderBy(items.id);
+		expect(await collect(union.iterator({ from: ROWS - 1 }))).toEqual(
+			[1, 2, ROWS - 1, ROWS].map((id) => ({ id, ts: item(id).ts })),
+		);
+	});
+
+	it('filters a stream by bigint, Date and CHAR values, bound or placeholders, under both bindings (#239)', async () => {
+		for (const binding of ['prepared', 'literal'] as const) {
+			const db = native.drizzle(client, { binding });
+			expect(
+				await collect(
+					db
+						.select({ id: items.id })
+						.from(items)
+						.where(and(eq(items.big, big + 5n), eq(items.ts, new Date(base + 5))))
+						.iterator(),
+				),
+			).toEqual([{ id: 5 }]);
+			const prepared = db
+				.select({ id: items.id })
+				.from(items)
+				.where(
+					and(
+						inArray(items.code, [sql.placeholder('a'), sql.placeholder('b')]),
+						lte(items.id, sql.placeholder('max')),
+						gte(items.ts, sql.placeholder('since')),
+					),
+				)
+				.orderBy(items.id)
+				.prepare();
+			const values = { a: 'ab', b: 'zz', max: 8, since: new Date(base + 3) };
+			expect(await prepared.execute(values)).toEqual([{ id: 4 }, { id: 6 }, { id: 8 }]);
+			expect(await collect(prepared.iterator(values))).toEqual([{ id: 4 }, { id: 6 }, { id: 8 }]);
+			const excluded = db
+				.select({ id: items.id })
+				.from(items)
+				.where(and(notInArray(items.code, [sql.placeholder('a'), sql.placeholder('b')]), lte(items.id, 4)))
+				.orderBy(items.id);
+			expect(await collect(excluded.iterator({ a: 'ab', b: 'zz' }))).toEqual([{ id: 1 }, { id: 3 }]);
+		}
+	});
+
+	it('releases the pool connection when the loop breaks, throws or the iterator is returned', async () => {
+		const db = native.drizzle(pool);
+		const ids = () => db.select({ id: items.id }).from(items).orderBy(items.id);
+		expect(pool.stats().active).toBe(0);
+		for await (const row of ids().iterator()) {
+			expect(row).toEqual({ id: 1 });
+			expect(pool.stats().active).toBe(1);
+			break;
+		}
+		expect(pool.stats().active).toBe(0);
+		const boom = new Error('consumer failed');
+		await expect(
+			(async () => {
+				for await (const _ of ids().iterator()) throw boom;
+			})(),
+		).rejects.toBe(boom);
+		expect(pool.stats().active).toBe(0);
+		const iterator = ids().iterator();
+		// Nothing is taken before the first read.
+		expect(pool.stats().active).toBe(0);
+		expect(await iterator.next()).toEqual({ value: { id: 1 }, done: false });
+		expect(pool.stats().active).toBe(1);
+		expect(await iterator.return()).toEqual({ value: undefined, done: true });
+		expect(pool.stats().active).toBe(0);
+		expect(await db.select({ n: count() }).from(items)).toEqual([{ n: ROWS }]);
+	});
+
+	it('runs concurrent streams on a pool, each on a connection of its own', async () => {
+		const db = native.drizzle(pool);
+		const streams = [0, 1, 2].map((k) =>
+			db
+				.select({ id: items.id })
+				.from(items)
+				.where(eq(sql`mod(${items.id}, 3)`, k))
+				.orderBy(items.id)
+				.iterator(),
+		);
+		const counts = [0, 0, 0];
+		const open = new Set([0, 1, 2]);
+		let peak = 0;
+		while (open.size > 0) {
+			for (const k of [...open]) {
+				const next = await (streams[k] as AsyncGenerator<{ id: number }>).next();
+				if (next.done) open.delete(k);
+				else {
+					expect(next.value.id % 3).toBe(k);
+					counts[k] = (counts[k] as number) + 1;
+				}
+				peak = Math.max(peak, pool.stats().active);
+			}
+		}
+		expect({ counts, peak }).toEqual({ counts: [3333, 3334, 3333], peak: 3 });
+		expect(pool.stats().active).toBe(0);
+	});
+
+	it('refuses a statement awaited inside the loop on a CubridClient (stream-busy); a pool runs it on another connection', async () => {
+		const shared = createClient({ ...config, timezone: 'utc' });
+		try {
+			const db = native.drizzle(shared);
+			let refused: unknown;
+			for await (const _ of db
+				.select({ id: items.id })
+				.from(items)
+				.orderBy(items.id)
+				.iterator({}, { consumerTimeout: 200 })) {
+				refused = await db
+					.select({ id: items.id })
+					.from(items)
+					.where(eq(items.id, 1))
+					.catch((e: unknown) => e);
+				break;
+			}
+			expect(refused).toBeInstanceOf(QueryError);
+			expect(refused).toMatchObject({ kind: 'stream-busy' });
+			// The stream is closed and the client works.
+			expect(await db.select({ id: items.id }).from(items).where(eq(items.id, 2))).toEqual([{ id: 2 }]);
+		} finally {
+			await shared.close();
+		}
+		const db = native.drizzle(pool);
+		for await (const row of db.select({ id: items.id }).from(items).orderBy(items.id).iterator()) {
+			expect(row).toEqual({ id: 1 });
+			expect(await db.select({ id: items.id }).from(items).where(eq(items.id, 5))).toEqual([{ id: 5 }]);
+			expect(pool.stats().active).toBe(1);
+			break;
+		}
+		expect(pool.stats().active).toBe(0);
+	});
+
+	it('refuses iterator() inside db.transaction() before anything is sent; a stream outside sees only committed rows', async () => {
+		const statements: string[] = [];
+		const db = native.drizzle(pool, { logger: { logQuery: (query) => statements.push(query) } });
+		const labels = () =>
+			collect(
+				db
+					.select({ label: counters.label })
+					.from(counters)
+					.where(inArray(counters.label, ['tx-commit', 'tx-rollback']))
+					.iterator(),
+			);
+		await db.transaction(async (tx) => {
+			expect(() => tx.select().from(counters).iterator()).toThrow(
+				/iterator\(\) is not supported inside db\.transaction\(\)/,
+			);
+			expect(statements).toEqual([]);
+			await tx.insert(counters).values({ label: 'tx-commit', n: 1 });
+			// db streams on another pool connection, outside the transaction.
+			expect(await labels()).toEqual([]);
+		});
+		expect(await labels()).toEqual([{ label: 'tx-commit' }]);
+		const refusal = await db
+			.transaction(async (tx) => {
+				await tx.insert(counters).values({ label: 'tx-rollback', n: 1 });
+				tx.select().from(counters).iterator();
+			})
+			.catch((e: unknown) => e);
+		expect(refusal).toMatchObject({ message: expect.stringMatching(/not supported inside db\.transaction\(\)/) });
+		expect(await labels()).toEqual([{ label: 'tx-commit' }]);
+		expect(pool.stats().active).toBe(0);
+		await db.delete(counters);
+	});
+
+	it('stops a stream with an AbortSignal and releases its connection', async () => {
+		const db = native.drizzle(pool);
+		const reason = new Error('enough');
+		const controller = new AbortController();
+		let n = 0;
+		const error = await (async () => {
+			for await (const _ of db.select({ id: items.id }).from(items).iterator({}, { signal: controller.signal })) {
+				if (++n === 5) controller.abort(reason);
+			}
+		})().catch((e: unknown) => e);
+		expect({ error, n }).toEqual({ error: reason, n: 5 });
+		expect(pool.stats().active).toBe(0);
+		const before = pool.stats();
+		await expect(
+			collect(
+				db
+					.select({ id: items.id })
+					.from(items)
+					.iterator({}, { signal: AbortSignal.abort(reason) }),
+			),
+		).rejects.toBe(reason);
+		expect(pool.stats()).toEqual(before);
+		expect(await db.select({ n: count() }).from(items)).toEqual([{ n: ROWS }]);
+	});
+
+	it('passes a server error through at the first read; a row that fails to decode ends the stream and releases it', async () => {
+		const db = native.drizzle(pool);
+		// CUBRID evaluates the result when the statement runs, so its errors come before any row.
+		let rows = 0;
+		const server = await (async () => {
+			for await (const _ of db
+				.select({ v: sql<number>`1 / (${items.id} - 5000)` })
+				.from(items)
+				.iterator()) {
+				rows++;
+			}
+		})().catch((e: unknown) => e);
+		expect(server).toBeInstanceOf(QueryError);
+		expect(server).toMatchObject({ code: -539 });
+		expect(rows).toBe(0);
+		expect(pool.stats().active).toBe(0);
+		const decode = await (async () => {
+			const odd = sql<number>`${items.id}`.mapWith((value: number) => {
+				if (value === 500) throw new Error('row 500 cannot be decoded');
+				return value;
+			});
+			for await (const _ of db.select({ v: odd }).from(items).orderBy(items.id).iterator()) rows++;
+		})().catch((e: unknown) => e);
+		expect(decode).toMatchObject({ message: 'row 500 cannot be decoded' });
+		expect(rows).toBe(499);
+		expect(pool.stats().active).toBe(0);
+	});
 });

@@ -79,8 +79,13 @@ describe('db.query', () => {
 		db.query.users.findMany({ having: 1 });
 	});
 
-	it('types prepare() as refused', () => {
-		expectTypeOf(db.query.users.findMany().prepare).returns.toBeNever();
+	it('types prepare() with the query result, and iterator() as refused (#165)', async () => {
+		const many = db.query.users.findMany({ columns: { id: true }, limit: sql.placeholder('n') }).prepare();
+		expectTypeOf(await many.execute({ n: 1 })).toEqualTypeOf<{ id: bigint }[]>();
+		expectTypeOf(many.execute).parameters.toEqualTypeOf<[placeholderValues?: Record<string, unknown>]>();
+		const first = db.query.users.findFirst({ columns: { name: true } }).prepare();
+		expectTypeOf(await first.execute()).toEqualTypeOf<{ name: string } | undefined>();
+		expectTypeOf(db.query.users.findMany().iterator).returns.toBeNever();
 	});
 
 	it('has the schema in a transaction', () => {

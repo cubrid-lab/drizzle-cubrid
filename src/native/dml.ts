@@ -5,17 +5,18 @@
 import { Column } from 'drizzle-orm/column';
 import { entityKind, is } from 'drizzle-orm/entity';
 import { QueryPromise } from 'drizzle-orm/query-promise';
-import { fillPlaceholders, Placeholder, type Query, SQL, type SQLWrapper } from 'drizzle-orm/sql/sql';
+import { Placeholder, type Query, SQL, type SQLWrapper } from 'drizzle-orm/sql/sql';
 import { getTableName } from 'drizzle-orm/table';
 import { getTableColumns } from 'drizzle-orm/utils';
 import { CubridColumn } from './columns/common.js';
-import type {
-	CubridDeleteConfig,
-	CubridDialect,
-	CubridInsertConfig,
-	CubridInsertRow,
-	CubridOrderByItem,
-	CubridUpdateConfig,
+import {
+	type CubridDeleteConfig,
+	type CubridDialect,
+	type CubridInsertConfig,
+	type CubridInsertRow,
+	type CubridOrderByItem,
+	type CubridUpdateConfig,
+	fillPlaceholderValues,
 } from './dialect.js';
 import { CubridQueryBuilder, CubridSelect } from './select.js';
 import type { CubridDmlResult, CubridSession, CubridWriteOptions } from './session.js';
@@ -64,7 +65,11 @@ export interface CubridInsertSelectQuery extends SQLWrapper {
 	getSelectedFields(): Record<string, unknown>;
 }
 
-/** An INSERT, UPDATE or DELETE built once; run it with `execute(placeholderValues)`. */
+/**
+ * An INSERT, UPDATE or DELETE built once: each `execute(placeholderValues)`
+ * fills the `sql.placeholder()` values into the kept parameters and sends the
+ * statement again. Nothing is prepared on the server across executions.
+ */
 export class CubridPreparedWrite<TResult> {
 	static readonly [entityKind]: string = 'CubridPreparedWrite';
 
@@ -76,7 +81,7 @@ export class CubridPreparedWrite<TResult> {
 	) {}
 
 	async execute(placeholderValues: Record<string, unknown> = {}): Promise<TResult> {
-		const params = fillPlaceholders(this.query.params, placeholderValues);
+		const params = fillPlaceholderValues(this.query.params, placeholderValues);
 		return this.map(await this.session.write(this.query.sql, params, this.options), placeholderValues);
 	}
 }

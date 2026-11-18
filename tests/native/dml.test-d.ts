@@ -101,3 +101,29 @@ describe('update and delete', () => {
 		db.delete(users).orderBy(users.id);
 	});
 });
+
+describe('prepared writes (#165)', () => {
+	it('take placeholder values and resolve as the awaited write does', async () => {
+		const insert = db
+			.insert(users)
+			.values({ name: sql.placeholder('name') })
+			.prepare();
+		expectTypeOf(insert.execute).parameters.toEqualTypeOf<[placeholderValues?: Record<string, unknown>]>();
+		expectTypeOf(await insert.execute({ name: 'a' })).toEqualTypeOf<CubridDmlResult>();
+		const ids = db
+			.insert(users)
+			.values({ name: sql.placeholder('name') })
+			.$returningId()
+			.prepare();
+		expectTypeOf(await ids.execute({ name: 'a' })).toEqualTypeOf<{ id: bigint }[]>();
+		const update = db
+			.update(users)
+			.set({ visits: sql.placeholder('v') })
+			.where(eq(users.id, sql.placeholder('id')))
+			.prepare();
+		expectTypeOf(await update.execute({ v: 1, id: 1n })).toEqualTypeOf<CubridDmlResult>();
+		expectTypeOf(
+			await db.delete(users).limit(sql.placeholder('n')).prepare().execute({ n: 1 }),
+		).toEqualTypeOf<CubridDmlResult>();
+	});
+});

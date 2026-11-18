@@ -10,6 +10,7 @@ import { Column } from 'drizzle-orm/column';
 import { is } from 'drizzle-orm/entity';
 import {
 	type DriverValueDecoder,
+	fillPlaceholders,
 	noopDecoder,
 	Param,
 	Placeholder,
@@ -477,6 +478,19 @@ function updateSetSql(table: Table, set: Record<string, unknown>, statement: str
 	return sql.join(assignments, sql`, `);
 }
 
+/**
+ * `params` with each `sql.placeholder()` replaced by its value from `values`
+ * (Drizzle's `fillPlaceholders()`), before anything is sent: a placeholder
+ * without a value throws Drizzle's `No value for placeholder "name" was
+ * provided`, and values no placeholder names are ignored, as in Drizzle.
+ */
+export function fillPlaceholderValues(params: readonly unknown[], values: Record<string, unknown>): unknown[] {
+	if (typeof values !== 'object' || values === null || Array.isArray(values)) {
+		throw new TypeError(`Placeholder values must be an object keyed by placeholder name, not ${describeValue(values)}`);
+	}
+	return fillPlaceholders([...params], values);
+}
+
 export class CubridDialect {
 	private readonly casing = new CasingCache();
 	private readonly expandPlaceholderLists: boolean;
@@ -487,18 +501,19 @@ export class CubridDialect {
 	}
 
 	/**
-	 * SQL text with `?` for each parameter, and the parameters. A string bound
+	 * SQL text with `?` for each parameter, and the parameters, rendered for
+	 * the session's binding or, when given, for `binding` (a stream always
+	 * sends literals, so it is rendered for `'literal'`). A string bound
 	 * to a CHAR column is `cast(? as CHAR(n))` (see `charParamSql()`, #237);
 	 * with typed binds, an `inArray()`/`notInArray()` list with a
 	 * `sql.placeholder()` on a CHAR column is `(c = ? or c = ?)`/
 	 * `(c <> ? and c <> ?)` (see `expandPlaceholderLists()`, #239).
 	 */
-	sqlToQuery(query: SQLWrapper): Query {
+	sqlToQuery(query: SQLWrapper, binding?: CubridBinding): Query {
 		const statement = query.getSQL();
 		refuseCollectionParams(statement.queryChunks);
-		const rendered = this.expandPlaceholderLists
-			? expandPlaceholderLists(statement, (column) => is(column, CubridChar))
-			: statement;
+		const expand = binding === undefined ? this.expandPlaceholderLists : binding === 'prepared';
+		const rendered = expand ? expandPlaceholderLists(statement, (column) => is(column, CubridChar)) : statement;
 		const { sql: text, params } = rendered.toQuery({
 			casing: this.casing,
 			escapeName: quoteIdentifier,

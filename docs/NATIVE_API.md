@@ -24,8 +24,12 @@
   `db.transaction()` with nested transactions (see [Transactions](#transactions)),
   and relational queries, `db.query.<table>.findMany()`/`findFirst()` with
   `with` (see [Relational queries](#relational-queries)).
+- `prepare()` on every query, relational ones included (see
+  [Prepared queries](#prepared-queries)), and `iterator()` streaming of
+  selects and set operations (see [Streaming](#streaming)).
 
-**Not yet:** prepared or streamed relational queries (#165), migrations or DDL generation (#163), and
+**Not yet:** streaming inside `db.transaction()` or of relational queries
+(both refused, see [Streaming](#streaming)), migrations or DDL generation (#163), and
 indexes or foreign keys in `extraConfig`. Native tables are not supported by
 the 0.x `drizzle()` from `drizzle-cubrid`.
 
@@ -92,7 +96,8 @@ types, so they match Drizzle's other dialects.
 | `limit`, `offset` | Bound as parameters; `offset()` needs `limit()` |
 | `.for('update')` | Locks the rows until the transaction ends; use it inside `db.transaction()` |
 | `.as(alias)` | A subquery for `from()` and joins. Inside it each column is named by its key path (`"users.id"`, `"pets.id"`), so joined tables that share column names stay apart, and a `sql` field, which needs `.as('name')`, keeps that name, so the subquery's own `having`/`orderBy` can use it. Outside, every use of a field (select list, `where`, `on`, `orderBy`, `having`) reads `"alias"."name"`. Names that differ only in case are refused, as CUBRID compares identifiers ignoring case. A subquery's `sql` fields are typed `SQL.Aliased`, as in Drizzle, but at runtime they are plain `sql` expressions (`sq.n.fieldAlias` is `undefined`), so that conditions on them render qualified |
-| `.prepare()` | Builds the SQL once; `execute({ name: value })` fills `sql.placeholder('name')` |
+| `.prepare()` | Builds the SQL once; `execute({ name: value })` fills `sql.placeholder('name')`. A client-side plan, not a server-side statement: see [Prepared queries](#prepared-queries) |
+| `.iterator(values?, options?)` | Streams the rows one at a time with cubrid-client's `stream()`; see [Streaming](#streaming) |
 | `.toSQL()`, `$dynamic()`, `await`/`then` | As in Drizzle |
 | `db.execute(sql\`...\`)` | Runs a raw statement; rows come back as cubrid-client returns them (objects by label), not decoded |
 
@@ -246,6 +251,8 @@ each value into the SQL text as an escaped literal. Values are encoded by the
 column they are compared with (`eq(users.active, true)` sends `1`), except
 `sql.placeholder()` values, which are sent as given, as in Drizzle's other
 dialects. An array parameter is refused: cubrid-client cannot bind one.
+A stream (`iterator()`) always sends its values as literals, whatever the
+binding: see [Streaming](#streaming).
 
 A string bound to a `char()` column is sent as `cast(? as CHAR(n))` under both
 bindings (`inArray(t.code, ['ab', 'cd'])` is
@@ -328,7 +335,7 @@ await db.delete(users).where(lt(users.visits, 1n)).limit(100);
 | `update(t).set(values)` | Values are encoded by their columns; `undefined` ones are left out, and a set with no value is refused. Columns with `$onUpdateFn()` that `set` does not name get its value |
 | `.where()`, `.orderBy()`, `.limit()` on update | `orderBy()` decides which rows `limit()` updates |
 | `delete(t)`, `.where()`, `.limit()` | Without `where()` every row is deleted. There is no `orderBy()` (see below) |
-| `.prepare()`, `.toSQL()`, `$dynamic()`, `await`/`then` | `prepare()` builds the SQL once, generating `$defaultFn()` values once (every `execute()` reuses them; see [`$returningId()`](#returningid)); `execute({ name: value })` fills `sql.placeholder('name')` |
+| `.prepare()`, `.toSQL()`, `$dynamic()`, `await`/`then` | `prepare()` builds the SQL once, generating `$defaultFn()` values once (every `execute()` reuses them; see [`$returningId()`](#returningid)); `execute({ name: value })` fills `sql.placeholder('name')` (see [Prepared queries](#prepared-queries)) |
 
 Any value can also be a `sql` expression or a `sql.placeholder()`
 (placeholders are encoded by their column when the prepared statement runs),
@@ -606,7 +613,9 @@ const first = await db.query.users.findFirst({ where: (u, { eq }) => eq(u.id, 1n
 0.45) and adds `db.query.<table>` with `findMany()` and `findFirst()`, as in
 Drizzle's other dialects: `columns` (include with `true`, or exclude with
 `false`; `{}` selects none), `with` to any depth, `where` and `orderBy` as values or
-callbacks, `limit` (and `offset` at the root), and `extras`. Result types are Drizzle's
+callbacks, `limit` (and `offset` at the root), and `extras`; `limit` and
+`offset` may be `sql.placeholder()`s of a prepared query (see
+[Prepared queries](#prepared-queries)). Result types are Drizzle's
 neutral `BuildQueryResult`: a `one()` relation is an object, or `null` when its
 `fields` are nullable or nothing matches; a `many()` relation is an array. `tx.query`
 works the same inside `db.transaction()`. Without `schema`, `db.query` is a
@@ -723,8 +732,9 @@ Refused before anything is sent:
 
 | Refused | Why |
 | --- | --- |
-| `prepare()` | A relational query runs several statements, each built from the previous results; prepared relational queries are #165. Await the query, or use `select().prepare()` |
-| `sql.placeholder()` (or anything but a non-negative integer) as `limit` or `offset` | There is no `prepare()` to fill it. A placeholder elsewhere (in `where`) fails with Drizzle's `No value for placeholder` |
+| `iterator()` | A row is complete only after every level is loaded and stitched; stream a `select()` instead |
+| Anything but a non-negative integer or a `sql.placeholder()` as `limit` or `offset` (a placeholder's value is checked the same way when the prepared query runs) | Not a row count |
+| A `sql.placeholder()` without a value, at any level (also when the query is awaited, which runs it with no values) | Drizzle's `No value for placeholder "name" was provided`, before the root statement is sent |
 | `offset` without `limit` at the root | CUBRID needs `LIMIT` with `OFFSET` |
 | `offset` on a nested relation; `where`, `orderBy`, `limit` or `offset` on a `one()` relation | Not in Drizzle's types |
 | Key columns of types that cannot be matched reliably | See [Key types](#key-types) |
@@ -736,6 +746,106 @@ Refused before anything is sent:
 Collection values compared in `where` are refused as in `select()` (see
 [Errors and refusals](#errors-and-refusals)), and date and time columns need a
 UTC-decoding client at every level (see [Date and time](#date-and-time)).
+
+## Prepared queries
+
+```ts
+const byAuthor = db
+  .select({ id: posts.id, title: posts.title })
+  .from(posts)
+  .where(eq(posts.authorId, sql.placeholder('author')))
+  .limit(sql.placeholder('n'))
+  .prepare();
+await byAuthor.execute({ author: 1n, n: 10 });
+await byAuthor.execute({ author: 2n, n: 5 });
+
+const withPosts = db.query.users
+  .findMany({ where: (u, { gt }) => gt(u.id, sql.placeholder('min')), limit: sql.placeholder('n'), with: { posts: true } })
+  .prepare();
+await withPosts.execute({ min: 0n, n: 20 });
+```
+
+`prepare()` is a **client-side plan, not a server-side prepared statement.**
+cubrid-client 1.4 has no statement handle that outlives a call: under the
+default binding each `queryPrepared()`/`executePrepared()` prepares, runs and
+closes its own server statement, and under `binding: 'literal'` each
+`query()`/`execute()` sends SQL text. So a prepared query costs the same round
+trips as an awaited one; what it saves is the client-side work. See
+[ADR 0008](adr/0008-prepared-queries-and-streaming.md).
+
+| Query | What `prepare()` keeps | Each `execute(values)` |
+| --- | --- | --- |
+| `select()`, `selectDistinct()`, set operations | The SQL text for the binding, the parameters with their placeholders, the row mapping; also the SQL rendered for literals that `iterator()` sends | Fills the placeholders and sends the statement through the session's binding; returns decoded rows |
+| `insert()`, `update()`, `delete()` | The SQL text and parameters, and the `$defaultFn()`/`$onUpdateFn()` values generated once (every execution writes the same ones) | Fills the placeholders and runs the statement; resolves to `{ affectedRows, lastInsertId? }` |
+| `insert(…).$returningId()` | As for `insert()`, plus which keys to report (checked once) | Fills the placeholders; a key written as a placeholder is reported with that execution's value, an AUTO_INCREMENT key from the server's generated keys |
+| `db.query.<t>.findMany()`/`findFirst()` | The checked plan: options, relations, key types, the results of the `where`/`orderBy`/`extras` callbacks | Checks every placeholder (and each placeholder `limit`/`offset` as a non-negative integer) before anything is sent, then builds and runs its statements as an awaited query does, in one transaction when it loads relations (see [Consistency and connections](#consistency-and-connections)). The key lists of related levels are values read from the parent rows, never placeholders |
+
+Placeholders:
+
+- A placeholder without a value is refused before anything is sent, with
+  Drizzle's `No value for placeholder "name" was provided`; for a relational
+  query this covers every level, so a nested level never fails after the
+  root statement ran. Awaiting a query that has placeholders runs it with no
+  values and fails the same way.
+- Values no placeholder names are ignored, as in Drizzle, so one values
+  object can serve several queries. Values that are not an object are
+  refused.
+- `limit()` and `offset()` of selects, set operations, `update()` and
+  `delete()` take a placeholder (bound as a parameter); so do a relational
+  query's `limit` and `offset`.
+- A placeholder value is sent as given (it has no column to encode it),
+  except in `insert().values()` and `update().set()`, where the column
+  encodes it. With typed binds, an `inArray()`/`notInArray()` list of
+  placeholders on a `char()` column is expanded as described in
+  [Binding](#binding) (#239); a prepared query keeps that form for every
+  execution.
+- A prepared query belongs to the database or `tx` that built it: one built
+  from `tx` is refused once its transaction ended.
+
+## Streaming
+
+```ts
+const db = drizzle(pool);
+for await (const row of db.select().from(events).where(gt(events.id, 0)).orderBy(events.id).iterator()) {
+  await send(row); // rows decoded as execute() decodes them
+  if (done(row)) break; // closes the cursor and gives the connection back to the pool
+}
+
+const prepared = db.select().from(events).where(eq(events.kind, sql.placeholder('kind'))).prepare();
+const controller = new AbortController();
+for await (const row of prepared.iterator({ kind: 'click' }, { signal: controller.signal, fetchSize: 1000 })) {
+  // ...
+}
+```
+
+`iterator(placeholderValues?, options?)` on a select, a set operation or a
+prepared select reads the rows through cubrid-client's `stream()` with
+`rowMode: 'array'`, and decodes each row by position with the same codecs as
+`execute()` (bigint, CHAR padding, dates, collections, `mapWith()`). It
+returns an `AsyncGenerator` of the select's row type.
+
+| Behavior | Details |
+| --- | --- |
+| When it is sent | Placeholders, options and the transaction are checked when `iterator()` is called, before anything is sent; the statement is sent, and a pool's connection taken, on the first read |
+| Memory and backpressure | cubrid-client holds one server reply of rows at a time and asks for the next only when the loop wants more rows (CUBRID 10.2–11.4 send about 16 KiB of rows per reply whatever `fetchSize` says). The dialect decodes one row at a time and keeps none. Verified live with 10,000 rows on one pool connection |
+| Connection | A pool's stream holds one connection from the first read until it ends; a statement awaited inside the loop takes another connection of the pool (or waits for one). A `CubridClient`'s stream holds the client's shared connection: its other statements wait, and one awaited inside the loop is refused with cubrid-client's `kind: 'stream-busy'` `QueryError` after `consumerTimeout` (5000 ms by default) since it could never run. Stream next to other work with a pool |
+| Ending early | `break`, a `return`, a throw in the loop body or `iterator.return()` closes the server cursor and releases the connection (verified live: `pool.stats().active` back to 0). Drive it with `for await`; code that calls `next()` by hand must call `return()`, or the connection stays held |
+| Cancellation | `options.signal`: aborting it makes the next read reject with `signal.reason`, closes the cursor and releases the connection; already aborted, nothing is sent. A reply already awaited is not interrupted (cubrid-client's `readTimeout` limits it) |
+| Errors | cubrid-client's errors pass through unchanged. CUBRID evaluates a result when the statement runs, so a server error (division by zero, a failed cast) rejects the first read, before any row (verified on 11.4). A row that fails to decode (a codec or `mapWith()` error) rejects that read and closes the stream |
+| Binding | cubrid-client 1.4's `stream()` writes values into the SQL text as escaped literals, so a stream sends literals under both bindings, and its SQL is rendered as for `binding: 'literal'`: a CHAR placeholder list is not expanded (#239), since literal lists compare padded already. BLOB/CLOB values are refused by cubrid-client |
+| `options` | `signal`, `fetchSize` and `consumerTimeout`, passed to cubrid-client unchanged (it checks their values). Any other key, `rowMode` included, is refused |
+| Concurrency | Several streams on a pool each hold a connection (verified live with three interleaved streams). Several on one `CubridClient` take turns on its connection |
+
+Refused, before anything is sent:
+
+| Refused | Why |
+| --- | --- |
+| `iterator()` inside `db.transaction()` (on `tx` or a nested `tx`) | cubrid-client 1.4's transaction client has no `stream()`. It is refused even for a client that has one: an open cursor's interaction with savepoints and with a callback that returns has no defined behavior yet. Await the select in the transaction, or stream with `db`, which runs outside it and sees only committed rows |
+| `iterator()` on a client without `stream()` (such as a cubrid-client transaction client passed to `drizzle()`) | Nothing to stream with |
+| `iterator()` on a relational query | Its rows are complete only after every level is loaded; stream a `select()` |
+| Writes | Have no `iterator()` |
+
+The 0.x API (`drizzle-cubrid`) is unchanged: its `iterator()` still throws.
 
 ## Column builders
 

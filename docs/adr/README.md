@@ -13,6 +13,7 @@ ADRs preserve **why** a consequential technical or release decision was made, th
 | [0005](0005-development-setup.md) | Reproducible language-native developer setup and verification | Proposed |
 | [0006](0006-node-18-support-through-1x.md) | Retain Node.js 18 consumer support throughout 1.x; consider removal no earlier than 2.0 | Proposed |
 | [0007](0007-drizzle-extension-boundary.md) | Build the native dialect on Drizzle's database-neutral modules | Accepted (2026-11-14, #227) |
+| [0008](0008-prepared-queries-and-streaming.md) | Prepared queries are client-side plans; streaming uses cubrid-client's `stream()` outside transactions | Proposed |
 
 The CUBRID-native architecture ADR 0003 was merged as Proposed in #166, together with [the architecture plan](../CUBRID_NATIVE_ARCHITECTURE.md) and [design sign-off checklist](../DESIGN_SIGNOFF.md), and accepted after ADR 0001 in #225. Acceptance approves the direction; it does not sign off the design checklist or claim any implementation exists.
 

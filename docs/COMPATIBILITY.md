@@ -128,6 +128,28 @@ connection and that the pool recovers; what callers see is in
 - A relational query with `with` whose connection is lost between the root
   and the child statement.
 
+**Prepared queries and streaming verified** (CUBRID 11.4, cubrid-client
+1.4.0, `drizzle-cubrid/native`, in the live suite; see
+[Prepared queries](NATIVE_API.md#prepared-queries) and
+[Streaming](NATIVE_API.md#streaming)):
+
+- A prepared select re-run with different placeholder values (`limit`
+  included) under both bindings, prepared inserts with `$returningId()`,
+  updates and deletes, and prepared relational queries with placeholder
+  `where`, `limit` and `offset` at the root and a nested level; a missing
+  value is refused before any statement.
+- `iterator()` over 10,000 rows on one pool connection, each row equal to
+  what `execute()` returns (BIGINT beyond 2^53, CHAR padding, DATETIME,
+  SET), a set operation and placeholder filters (bigint, `Date`, CHAR
+  `IN` lists) under both bindings.
+- The pool connection released (`stats().active` back to 0) after `break`,
+  a throw in the loop, `return()` and an `AbortSignal`; three interleaved
+  streams on three connections; a statement awaited inside the loop refused
+  with `kind: 'stream-busy'` on a `CubridClient` and run on another
+  connection of a pool; a server error at the first read and a decode error
+  mid-stream releasing the connection; `iterator()` refused inside
+  `db.transaction()` while a stream outside it reads only committed rows.
+
 A live lane passes only if it ran a non-zero number of tests and none failed or
 was skipped (`scripts/check-live-results.mjs`), and the server's `version()`
 starts with `11.4`. Each packed lane records the server version, image digest,
@@ -155,3 +177,5 @@ then runs `npm publish <tarball>`.
 - Windows and macOS: every job runs on Linux (`ubuntu-latest`).
 - A TypeScript consumer type-checking against the packed `.d.ts` files.
 - Migrations and schema reflection (#163).
+- Streaming memory use beyond the row count: the bound of one server reply
+  is cubrid-client's contract (`stream()`), not measured by these tests.

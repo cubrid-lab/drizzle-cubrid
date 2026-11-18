@@ -50,7 +50,8 @@ flowchart TD
 
 ### Native dialect preview
 
-`drizzle-cubrid/native` is an **experimental preview** of the CUBRID-native dialect that will replace the MySQL-derived classes ([ADR 0007](docs/adr/0007-drizzle-extension-boundary.md)). Today it has `cubridTable()` and column builders with CUBRID types and codecs (`smallint`, `integer`, `bigint`, `numeric`, `float`, `double`, `char`, `varchar`, `string`, `boolean`, date and time, `monetary`, `set`/`multiset`/`sequence`) and `drizzle(client, { schema? })` with `select()` (joins, grouping, subqueries, set operations, placeholders), `insert()`/`update()`/`delete()`, `transaction()` and relational queries with `with` (`db.query`), but its API can still change, so it is **not for production**. See [docs/NATIVE_API.md](docs/NATIVE_API.md).
+`drizzle-cubrid/native` is an **experimental preview** of the CUBRID-native dialect that will replace the MySQL-derived classes ([ADR 0007](docs/adr/0007-drizzle-extension-boundary.md)). Today it has `cubridTable()` and column builders with CUBRID types and codecs (`smallint`, `integer`, `bigint`, `numeric`, `float`, `double`, `char`, `varchar`, `string`, `boolean`, date and time, `monetary`, `set`/`multiset`/`sequence`) and `drizzle(client, { schema? })` with `select()` (joins, grouping, subqueries, set operations, placeholders), `insert()`/`update()`/`delete()`, `transaction()`, relational queries with `with` (`db.query`), `prepare()` on
+every query and `iterator()` streaming of selects, but its API can still change, so it is **not for production**. See [docs/NATIVE_API.md](docs/NATIVE_API.md).
 
 ## Installation
 
@@ -337,7 +338,7 @@ try {
 | Feature | Status | Notes |
 |---------|--------|-------|
 | `INSERT ... RETURNING` | ❌ Not supported | Use `$returningId()` for a one-row INSERT, `lastInsertId`, or a separate SELECT ([details](docs/QUERIES.md#affected-rows-and-generated-keys)) |
-| Streaming / `.iterator()` | ❌ Not implemented (throws) | Use LIMIT/OFFSET for pagination; design tracked in [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165) |
+| Streaming / `.iterator()` | ❌ Not implemented (throws) | Use LIMIT/OFFSET for pagination. The experimental `drizzle-cubrid/native` streams selects ([Streaming](docs/NATIVE_API.md#streaming), [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)) |
 | Relational queries with `with` | ❌ Refused | See [Relations](#relations) ([#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200)) |
 | Schema migrations / DDL generation | ❌ Not provided | See [schema migration status](examples/migration/README.md) ([#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)) |
 | JSON, BLOB and CLOB columns | ⚠️ No builder exported | Not exposed or tested by this adapter; a `customType` is unverified |
@@ -352,7 +353,7 @@ try {
 | [Schema Guide](docs/SCHEMA.md) | Column types, CUBRID types, relations, custom types |
 | [Queries Guide](docs/QUERIES.md) | SELECT, INSERT, UPDATE, DELETE, joins, aggregations, raw SQL |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common errors, TypeScript issues, performance tips |
-| [Native API preview](docs/NATIVE_API.md) | Experimental `drizzle-cubrid/native` tables, column builders, codecs, queries, writes, transactions and relational queries |
+| [Native API preview](docs/NATIVE_API.md) | Experimental `drizzle-cubrid/native` tables, column builders, codecs, queries, writes, transactions, relational queries, prepared queries and streaming |
 | [Schema migration status](examples/migration/README.md) | Native CUBRID migration is not yet supported; no other database dialect fallback |
 
 ## Development

@@ -83,6 +83,55 @@ export interface CubridArrayRowOptions {
 }
 
 /**
+ * Options of `iterator()` on a native select, set operation or prepared
+ * select, passed to cubrid-client's `stream()` unchanged (see its
+ * `StreamOptions`). Any other key is refused.
+ */
+export interface CubridStreamOptions {
+	/**
+	 * Stops the stream: the next read rejects with `signal.reason` and the
+	 * cursor (and a pool's connection) is released. Aborted before the stream
+	 * took a connection, nothing is sent.
+	 */
+	signal?: AbortSignal;
+	/** Rows asked for in each FETCH; CUBRID 10.2 to 11.4 answer about 16 KiB of rows per FETCH whatever it says. */
+	fetchSize?: number;
+	/**
+	 * Milliseconds another statement on the stream's connection waits while
+	 * the consumer reads no row, before cubrid-client rejects it with
+	 * `kind: 'stream-busy'` (default 5000). Only a `CubridClient`'s shared
+	 * connection is affected: a pool streams on a connection of its own.
+	 */
+	consumerTimeout?: number;
+}
+
+const STREAM_OPTIONS: ReadonlySet<string> = new Set(['signal', 'fetchSize', 'consumerTimeout']);
+
+/** What this session passes to `stream()`: the caller's options and positional rows. */
+export interface CubridStreamCallOptions extends CubridStreamOptions {
+	rowMode: 'array';
+}
+
+/**
+ * Checks `iterator()` options before anything is sent: an object with only
+ * cubrid-client's stream options (their values are checked by cubrid-client).
+ */
+function streamOptions(options: CubridStreamOptions | undefined): CubridStreamCallOptions {
+	if (options === undefined) return { rowMode: 'array' };
+	if (typeof options !== 'object' || options === null || Array.isArray(options)) {
+		throw new TypeError(`iterator() options must be an object, not ${describeValue(options)}`);
+	}
+	for (const key of Object.keys(options)) {
+		if (!STREAM_OPTIONS.has(key)) {
+			throw new Error(
+				`Unknown iterator() option '${key}'; drizzle-cubrid/native accepts signal, fetchSize and consumerTimeout`,
+			);
+		}
+	}
+	return { ...options, rowMode: 'array' };
+}
+
+/**
  * The outcome of an INSERT, UPDATE or DELETE, as cubrid-client's `execute()`
  * and `executePrepared()` report it: `affectedRows`, and `lastInsertId` only
  * when an INSERT made the session hold a new AUTO_INCREMENT value (a `number`
@@ -122,6 +171,12 @@ export interface CubridNativeClient {
 	queryPrepared?(sql: string, params?: readonly unknown[], options?: CubridArrayRowOptions): Promise<unknown[]>;
 	execute?(sql: string, params?: readonly unknown[], options?: CubridWriteOptions): Promise<CubridDmlResult>;
 	executePrepared?(sql: string, params?: readonly unknown[], options?: CubridWriteOptions): Promise<CubridDmlResult>;
+	/**
+	 * Reads a SELECT's rows one server reply at a time, writing the values
+	 * into the SQL text as escaped literals (cubrid-client 1.4's `stream()`);
+	 * `iterator()` needs it.
+	 */
+	stream?(sql: string, params: readonly unknown[], options: CubridStreamCallOptions): AsyncIterable<unknown[]>;
 	/**
 	 * Runs `callback` on a connection the driver owns for the whole
 	 * transaction, commits when it resolves and rolls back when it rejects
@@ -345,6 +400,46 @@ export class CubridSession {
 		this.assertActive();
 		if (readsTemporal) await assertUtcDecoding(this.options.zoneClient ?? this.client);
 		return this.run(sql, params, ARRAY_ROWS);
+	}
+
+	/**
+	 * The rows of a SELECT one at a time, as arrays in select-list order, from
+	 * cubrid-client's `stream()`, which sends the values as SQL literals
+	 * whatever the binding. Refused, before anything is sent, inside
+	 * `db.transaction()` (cubrid-client 1.4's transaction client has no
+	 * `stream()`), for a client without `stream()`, for unknown options, and as
+	 * `selectRows()` refuses. Nothing is sent before the first read; ending the
+	 * iteration early (`break`, `return()`, a throw) closes cubrid-client's
+	 * stream, which releases the cursor and a pool's connection.
+	 */
+	streamRows(
+		sql: string,
+		params: unknown[],
+		readsTemporal: boolean,
+		options?: CubridStreamOptions,
+	): AsyncGenerator<unknown[], void, undefined> {
+		const callOptions = streamOptions(options);
+		if (this.options.scope !== undefined) {
+			throw new Error(
+				"iterator() is not supported inside db.transaction(): cubrid-client 1.4's transaction client has no stream(); await the select in the transaction, or stream with db outside it",
+			);
+		}
+		const stream = this.client.stream;
+		if (typeof stream !== 'function') {
+			throw new Error(
+				'The CUBRID client has no stream() for iterator() (a cubrid-client 1.4 client or pool has one; its transaction clients do not)',
+			);
+		}
+		const client = this.client;
+		const zoneClient = this.options.zoneClient ?? client;
+		const send = (sql: string, params: unknown[]) => this.send(sql, params);
+		return (async function* () {
+			if (readsTemporal) await assertUtcDecoding(zoneClient);
+			send(sql, params);
+			// Driver errors are passed through unchanged; leaving this loop early
+			// calls return() on cubrid-client's stream.
+			yield* stream.call(client, sql, params, callOptions);
+		})();
 	}
 
 	/**
