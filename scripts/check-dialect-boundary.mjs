@@ -30,6 +30,18 @@
 //                 cubrid-client, node: built-ins), since every other path can
 //                 reach the 0.x modules built on Drizzle's MySQL classes
 //
+//   - native-dynamic: in native code (src/native/** and the packed native
+//                 entries dist/native*.{js,cjs,mjs}), code loading the
+//                 literal-specifier checks above cannot see: `eval`,
+//                 `Function` (new Function, Function(...), globalThis.Function,
+//                 an alias), a call of `.constructor(...)`, import(expr) with
+//                 a non-literal argument, require(expr)/module.require(expr)/
+//                 createRequire(...)(expr) with a non-literal argument, and
+//                 'eval'/'Function'/'require'/'createRequire' as a computed
+//                 property key (`module['require']`, Reflect.get(m, 'require')).
+//                 Comments, ordinary strings, type annotations and properties
+//                 such as `.function` never match. Never baselinable.
+//
 // The 0.x code still depends on Drizzle's MySQL classes. Each of those
 // findings is pinned in scripts/dialect-boundary-baseline.json by scope,
 // file, rule and match, with a count. A new or larger finding fails, and so
@@ -71,6 +83,11 @@ const FOREIGN_DIALECT_SETTING = /^(?:mysql2?|postgres(?:ql)?|pg|sqlite|singlesto
 
 const NATIVE_DIR = 'src/native/';
 const NATIVE_SHIM = 'src/native/internal.ts';
+/** The packed native entries (dist/native.*, dist/native-migrator.*); they bundle only src/native. */
+const NATIVE_PACKED = /^dist\/native(?:-[\w-]+)?\.(?:js|cjs|mjs)$/;
+/** Names that load or build code when reached by a computed key. */
+const DYNAMIC_KEYS = new Set(['eval', 'Function', 'require', 'createRequire']);
+const GLOBAL_OBJECTS = new Set(['globalThis', 'global', 'window', 'self']);
 
 /** The banned specifier, or undefined when it is allowed. */
 export function bannedSpecifier(spec) {
@@ -114,6 +131,7 @@ export function scanText(file, text, scope = 'src') {
 	const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file));
 	const inNative = scope === 'src' && file.startsWith(NATIVE_DIR);
 	const checkInternals = inNative && file !== NATIVE_SHIM;
+	const checkDynamic = inNative || (scope === 'package' && NATIVE_PACKED.test(file));
 	const findings = [];
 	const add = (rule, match, pos) => {
 		findings.push({ file, rule, match, line: source.getLineAndCharacterOfPosition(pos).line + 1 });
@@ -128,6 +146,34 @@ export function scanText(file, text, scope = 'src') {
 	for (const ref of [...source.typeReferenceDirectives, ...source.referencedFiles]) {
 		checkSpecifier(ref.fileName, ref.pos);
 	}
+
+	// An identifier that is a use of the global `eval` / `Function`, not a
+	// property name, declaration or type.
+	const isGlobalUse = (node) => {
+		const p = node.parent;
+		if (ts.isPropertyAccessExpression(p) && p.name === node) return false;
+		if (ts.isQualifiedName(p) || ts.isTypeNode(p) || ts.isImportSpecifier(p) || ts.isExportSpecifier(p)) return false;
+		if (
+			(ts.isPropertyAssignment(p) || ts.isBindingElement(p) || ts.isParameter(p) || ts.isVariableDeclaration(p)) &&
+			p.name === node
+		)
+			return false;
+		if (ts.isBindingElement(p) && p.propertyName === node) return false;
+		if (
+			(ts.isPropertyDeclaration(p) ||
+				ts.isMethodDeclaration(p) ||
+				ts.isPropertySignature(p) ||
+				ts.isMethodSignature(p) ||
+				ts.isFunctionDeclaration(p) ||
+				ts.isEnumMember(p)) &&
+			p.name === node
+		)
+			return false;
+		// `x instanceof Function` and `Function.prototype` cannot build code.
+		if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.InstanceOfKeyword) return false;
+		if (ts.isPropertyAccessExpression(p) && p.expression === node && p.name.text === 'prototype') return false;
+		return true;
+	};
 
 	const visit = (node) => {
 		if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
@@ -163,6 +209,40 @@ export function scanText(file, text, scope = 'src') {
 				checkSpecifier(spec, node.arguments[0].getStart(source));
 			} else if (spec !== undefined && loader && inNative && !nativeMayImport(file, spec)) {
 				checkSpecifier(spec, node.arguments[0].getStart(source));
+			}
+		}
+
+		if (checkDynamic) {
+			const dyn = (match) => add('native-dynamic', match, node.getStart(source));
+			if (ts.isIdentifier(node) && (node.text === 'eval' || node.text === 'Function') && isGlobalUse(node)) {
+				dyn(node.text);
+			} else if (ts.isPropertyAccessExpression(node)) {
+				const { expression, name } = node;
+				if (
+					(name.text === 'eval' || name.text === 'Function') &&
+					ts.isIdentifier(expression) &&
+					GLOBAL_OBJECTS.has(expression.text)
+				)
+					dyn(name.text);
+			} else if (ts.isElementAccessExpression(node) || ts.isComputedPropertyName(node)) {
+				const key = stringValue(ts.isElementAccessExpression(node) ? node.argumentExpression : node.expression);
+				if (key !== undefined && DYNAMIC_KEYS.has(key)) dyn(`["${key}"]`);
+			} else if (ts.isCallExpression(node)) {
+				const callee = node.expression;
+				const arg = node.arguments[0];
+				if (ts.isPropertyAccessExpression(callee) && callee.name.text === 'constructor') dyn('.constructor()');
+				if (ts.isElementAccessExpression(callee) && stringValue(callee.argumentExpression) === 'constructor')
+					dyn('.constructor()');
+				if (callee.kind === ts.SyntaxKind.ImportKeyword && stringValue(arg) === undefined) dyn('import(expression)');
+				const requireCall =
+					(ts.isIdentifier(callee) && callee.text === 'require') ||
+					(ts.isPropertyAccessExpression(callee) && callee.name.text === 'require') ||
+					(ts.isCallExpression(callee) &&
+						ts.isIdentifier(callee.expression) &&
+						callee.expression.text === 'createRequire');
+				if (requireCall && stringValue(arg) === undefined) dyn('require(expression)');
+				if (callee.getText(source) === 'Reflect.get' && DYNAMIC_KEYS.has(stringValue(node.arguments[1]) ?? ''))
+					dyn(`["${stringValue(node.arguments[1])}"]`);
 			}
 		}
 
@@ -300,7 +380,7 @@ export function compare(findings, baselineEntries, scope) {
 	const allowed = new Map(baselineEntries.filter((e) => e.scope === scope).map((e) => [key(e), e]));
 
 	for (const entry of baselineEntries) {
-		if (entry.scope === 'src' && entry.file.startsWith(NATIVE_DIR)) {
+		if (entry.rule === 'native-dynamic' || (entry.scope === 'src' && entry.file.startsWith(NATIVE_DIR))) {
 			problems.push(`baseline entry for native code is not allowed: ${entry.file} ${entry.rule} ${entry.match}`);
 		}
 	}
@@ -311,7 +391,7 @@ export function compare(findings, baselineEntries, scope) {
 			.join(', ');
 		const b = allowed.get(key(a));
 		allowed.delete(key(a));
-		if (a.scope === 'src' && a.file.startsWith(NATIVE_DIR)) {
+		if (a.rule === 'native-dynamic' || (a.scope === 'src' && a.file.startsWith(NATIVE_DIR))) {
 			problems.push(`${a.file}:${lines} ${a.rule} "${a.match}" is not allowed in native code`);
 		} else if (!b) {
 			problems.push(`${a.file}:${lines} new ${a.rule} "${a.match}" (x${a.count})`);
@@ -386,7 +466,9 @@ export function main(argv, options = {}) {
 	const baseline = readBaseline(baselinePath);
 
 	if (update) {
-		const native = findings.filter((f) => scope === 'src' && f.file.startsWith(NATIVE_DIR));
+		const native = findings.filter(
+			(f) => f.rule === 'native-dynamic' || (scope === 'src' && f.file.startsWith(NATIVE_DIR)),
+		);
 		if (native.length > 0) {
 			for (const f of native) console.error(`${f.file}:${f.line} ${f.rule} "${f.match}" is not allowed in native code`);
 			return 1;
