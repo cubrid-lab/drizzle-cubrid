@@ -189,11 +189,11 @@ THIRD_PARTY_NOTICES.md alone.
 
 ## Open maintainer items
 
-- **Copyright line.** `LICENSE` says "Copyright (c) 2026 CUBRID Labs"; the organisation is "CUBRID Lab" in the
-  README and brand, `cubrid-lab` on GitHub, and `package.json` names an individual author. Whether "CUBRID Labs"
-  is the intended holder name is a maintainer decision; this audit does not change it. CONTRIBUTING.md states no
-  inbound license terms, CLA or copyright assignment, so contributors keep the copyright in their contributions,
-  presumably licensed under the project's MIT license.
+- **Copyright line.** Resolved: the maintainer unified the organisation name as "CUBRID Lab" (the GitHub display
+  name; `cubrid-lab` is the login), so `LICENSE` now says "Copyright (c) 2026 CUBRID Lab", matching the org.
+  `package.json` still names an individual author. CONTRIBUTING.md states no inbound license terms, CLA or
+  copyright assignment, so contributors keep the copyright in their contributions, presumably licensed under the
+  project's MIT license.
 - **Precautionary attribution.** The notices on `src/session.ts` and `src/driver.ts` can be kept until the 0.x API
   is removed in 1.0 (ADR 0010), when both files and the drizzle-orm part of THIRD_PARTY_NOTICES.md go away.
 - **npm provenance.** `publish.yml` already grants `id-token: write` but runs `npm publish` without
