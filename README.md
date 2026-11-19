@@ -317,4 +317,4 @@ This project is part of [CUBRID Lab](https://github.com/cubrid-lab), an independ
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Parts of two files of the deprecated 0.x API (`drizzle-cubrid/legacy`) follow drizzle-orm code (Apache-2.0); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [docs/PROVENANCE.md](docs/PROVENANCE.md).

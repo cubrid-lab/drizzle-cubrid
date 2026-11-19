@@ -159,4 +159,4 @@ await db.transaction(async (tx) => {
 
 ## 라이선스
 
-MIT — [LICENSE](../LICENSE) 참조.
+MIT — [LICENSE](../LICENSE) 참조. 지원 중단된 0.x API(`drizzle-cubrid/legacy`)의 두 파일 일부는 drizzle-orm 코드(Apache-2.0)를 따릅니다. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)와 [PROVENANCE.md](PROVENANCE.md)를 참조하세요.

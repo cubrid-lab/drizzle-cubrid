@@ -1,3 +1,14 @@
+/*!
+ * drizzle-cubrid 0.x API (drizzle-cubrid/legacy): src/driver.ts
+ *
+ * Portions of this file (the logger and relational-schema setup in
+ * construct()) follow drizzle() in drizzle-orm 0.38.x src/mysql2/driver.ts
+ * (https://github.com/drizzle-team/drizzle-orm), by the Drizzle Team,
+ * licensed under the Apache License, Version 2.0. The drizzle-cubrid
+ * contributors changed them for CUBRID and cubrid-client. See
+ * THIRD_PARTY_NOTICES.md for the license text and docs/PROVENANCE.md for the
+ * comparison. The rest of this file is MIT-licensed (see LICENSE).
+ */
 import type { CubridClient } from 'cubrid-client';
 import { entityKind } from 'drizzle-orm/entity';
 import type { Logger } from 'drizzle-orm/logger';

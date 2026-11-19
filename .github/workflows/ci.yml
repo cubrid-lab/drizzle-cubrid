@@ -301,6 +301,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/unpacked"
           tar -xzf packed/*.tgz -C "$RUNNER_TEMP/unpacked"
           node scripts/check-dialect-boundary.mjs package "$RUNNER_TEMP/unpacked/package"
+      # Provenance (#220, docs/PROVENANCE.md): packed files, LICENSE and
+      # third-party notices, drizzle-orm and cubrid-client not bundled.
+      # Network-free; the similarity scan stays a manual pre-release step.
+      - name: Packed-package provenance
+        run: node scripts/check-provenance.mjs pack
       - uses: actions/upload-artifact@v7
         with:
           name: npm-package
