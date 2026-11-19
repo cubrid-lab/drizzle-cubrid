@@ -1,3 +1,21 @@
+/*!
+ * drizzle-cubrid 0.x API (drizzle-cubrid/legacy): src/session.ts
+ *
+ * Portions of this file follow drizzle-orm's MySQL drivers, including:
+ * the CubridPreparedQuery constructor (PreparedQuery in
+ * src/mysql-proxy/session.ts) and the start of its execute()
+ * (MySql2PreparedQuery in src/mysql2/session.ts); the CubridSession
+ * constructor and prepareQuery() (MySql2Session, and MySqlRemoteSession in
+ * src/mysql-proxy/session.ts); all() (MySqlRemoteSession); the BEGIN/COMMIT
+ * fallback in CubridSession.transaction() (MySql2Session); and the savepoints
+ * in CubridTransaction.transaction() (MySql2Transaction). drizzle-orm
+ * 0.38.x-0.45.x (https://github.com/drizzle-team/drizzle-orm) is by the
+ * Drizzle Team and licensed under the Apache License, Version 2.0. The
+ * drizzle-cubrid contributors changed these portions for CUBRID and
+ * cubrid-client. See THIRD_PARTY_NOTICES.md for the license text and
+ * docs/PROVENANCE.md for the comparison. The rest of this file is
+ * MIT-licensed (see LICENSE).
+ */
 import type { Cache } from 'drizzle-orm/cache/core/cache';
 import type { WithCacheConfig } from 'drizzle-orm/cache/core/types';
 import { Column } from 'drizzle-orm/column';

@@ -1,7 +1,7 @@
 {
   "name": "drizzle-cubrid",
   "version": "0.2.1",
-  "description": "Drizzle ORM dialect for CUBRID database",
+  "description": "Community-maintained Drizzle ORM dialect for the CUBRID database (not an official Drizzle project)",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -77,7 +77,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "build": "tsup",
@@ -90,6 +91,7 @@
     "lint": "biome ci --error-on-warnings .",
     "format": "biome check --write .",
     "typecheck": "tsc --noEmit && tsc -p tests/native/tsconfig.json",
+    "check:provenance": "npm run build && node scripts/check-provenance.mjs pack",
     "check:boundary": "node scripts/check-dialect-boundary.mjs src && npm run build && node scripts/check-dialect-boundary.mjs package --pack",
     "prepublishOnly": "npm run build"
   },

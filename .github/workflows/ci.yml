@@ -32,6 +32,8 @@ jobs:
             while IFS= read -r -d '' p; do
               seen=1
               case "$p" in
+                # Shipped in the package and checked by the provenance pack check (#220).
+                THIRD_PARTY_NOTICES.md) return 1 ;;
                 *.md|*.mdx|*.rst|docs/*.png|docs/*.jpg|docs/*.jpeg|docs/*.svg|docs/*.webp) ;;
                 *) return 1 ;;
               esac
@@ -41,6 +43,7 @@ jobs:
           docs_only < <(printf 'README.md\0docs/guide.md\0')
           if docs_only < <(printf 'README.md\0src/main.source\0'); then exit 1; fi
           if docs_only < <(printf '.github/workflows/ci.yml\0'); then exit 1; fi
+          if docs_only < <(printf 'THIRD_PARTY_NOTICES.md\0'); then exit 1; fi
           if docs_only < /dev/null; then exit 1; fi
           selected=false
           if [[ "$EVENT_NAME" == pull_request ]] &&
@@ -301,6 +304,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/unpacked"
           tar -xzf packed/*.tgz -C "$RUNNER_TEMP/unpacked"
           node scripts/check-dialect-boundary.mjs package "$RUNNER_TEMP/unpacked/package"
+      # Provenance (#220, docs/PROVENANCE.md): packed files, LICENSE and
+      # third-party notices, drizzle-orm and cubrid-client not bundled.
+      # Network-free; the similarity scan stays a manual pre-release step.
+      # A change to THIRD_PARTY_NOTICES.md alone is not docs-only (impact job).
+      - name: Packed-package provenance
+        run: node scripts/check-provenance.mjs pack
       - uses: actions/upload-artifact@v7
         with:
           name: npm-package
