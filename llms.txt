@@ -1,38 +1,44 @@
 # drizzle-cubrid
 
-> Drizzle ORM dialect for the CUBRID database. Independently maintained community adapter, not an official Drizzle dialect. TypeScript-first, built on Drizzle's MySQL query builders. Node.js 18+.
+> Drizzle ORM dialect for the CUBRID database. Independently maintained community adapter, not an official Drizzle dialect. TypeScript-first, written for CUBRID on Drizzle's database-neutral modules (no MySQL dialect). Node.js 18+.
 
-drizzle-cubrid brings Drizzle ORM's type-safe query builder to CUBRID, built on top of cubrid-client. It supports CUBRID-specific types (SET, MULTISET, SEQUENCE, MONETARY), MySQL-compatible SQL generation, and transactions with savepoints.
+drizzle-cubrid brings Drizzle ORM's type-safe query builder to CUBRID, built on top of cubrid-client. Since 0.3 the root entry `drizzle-cubrid` is the CUBRID-native dialect; the former MySQL-based 0.x API is `drizzle-cubrid/legacy`, deprecated and removed in 1.0.
 
 Key facts:
 - Install: `npm install drizzle-cubrid drizzle-orm cubrid-client`
-- Define schema: `cubridTable('users', { id: int('id').primaryKey().autoincrement(), name: varchar('name', { length: 100 }) })`
+- Define schema: `cubridTable('users', { id: integer().primaryKey().autoIncrement(), name: varchar({ length: 100 }).notNull() })` (a builder without a name uses its key as the column name)
 - Connect: `const db = drizzle(createClient({ host: "localhost", port: 33000, database: "demodb", user: "dba", timezone: "utc" }))` (`timezone: "utc"` is required to read date and time columns)
-- Query: `await db.select().from(users).where(eq(users.name, 'Alice'))`
-- Imports: `drizzle`, `cubridTable`, column builders, `eq`/`and`/`or`/`asc`/`desc`/`sql` and similar come from `drizzle-cubrid`; `relations`, `like`, `inArray` and other helpers come from `drizzle-orm`; `createClient`/`createPool` from `cubrid-client`
-- CUBRID-specific column types: `set()`, `multiset()`, `sequence()` (also exported as `cubridSet()`, `cubridMultiset()`, `cubridSequence()`), `monetary()`
-- Not supported: relational queries with `with` (0.x entry), streaming (`.iterator()`), schema diffing/ALTER generation, Drizzle Kit in any dialect, JSON/BLOB/CLOB column builders; only CUBRID 11.4 is tested
-- Experimental migrations for `drizzle-cubrid/native`: `migrate(db, { migrationsFolder })` from `drizzle-cubrid/native/migrator` applies `0001_name.sql` CUBRID SQL files, one transaction per migration; `generateInitialMigration(schema)` writes the first one ([MIGRATIONS.md](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/docs/MIGRATIONS.md))
-- Offline unit tests with a 95% coverage gate, plus a live CUBRID 11.4 suite in CI
+- Query: `await db.select().from(users).where(eq(users.name, 'Alice'))`; `await db.insert(users).values({ name: 'Ann' }).$returningId()`
+- Imports: `drizzle`, `cubridTable`, column builders and `eq`/`and`/`or`/`asc`/`desc`/`sql` come from `drizzle-cubrid`; `relations`, `like`, `inArray` and other helpers from `drizzle-orm`; `migrate` from `drizzle-cubrid/migrator`; `createClient`/`createPool` from `cubrid-client`. `drizzle-cubrid/native` is an alias of the root
+- CUBRID-specific column types: `set({ element })`, `multiset({ element })`, `sequence({ element })`, `monetary()`; `binary`/`varbinary` use `Buffer`
+- Supported: joins, subqueries, set operations, insert/update/delete, transactions with savepoints, relational queries with `with`, `prepare()`, `iterator()` streaming of selects
+- Not supported: schema diffing/ALTER generation, Drizzle Kit in any dialect, JSON/BLOB/CLOB/ENUM column builders, streaming inside transactions; only CUBRID 11.4 is tested
+- Migrations: `migrate(db, { migrationsFolder })` from `drizzle-cubrid/migrator` applies `0001_name.sql` CUBRID SQL files, one transaction per migration; `generateInitialMigration(schema)` writes the first one ([MIGRATIONS.md](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/docs/MIGRATIONS.md))
+- Migrating from 0.x: change `'drizzle-cubrid'` to `'drizzle-cubrid/legacy'` to keep the old API (it warns once, code `DRIZZLE_CUBRID_LEGACY`), then move to the native API ([MIGRATING_FROM_0X.md](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/docs/MIGRATING_FROM_0X.md))
+- Offline unit tests with a 95% coverage gate, plus a live CUBRID 11.4 suite and a packed-tarball live suite in CI
 - TypeScript-first with full type inference from schema definitions
 
 ## Docs
 
 - [README](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md): Full documentation with schema definition, queries, custom types, transactions
-- [Product Requirements](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/docs/PRD.md): Current shipped behavior versus the planned CUBRID-native design
+- [Native API](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/docs/NATIVE_API.md): Tables, column builders, codecs, queries, writes, transactions, relational queries, prepared queries and streaming
+- [Migrating from 0.x](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/docs/MIGRATING_FROM_0X.md): From the deprecated `drizzle-cubrid/legacy` API to the native one
+- [Product Requirements](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/docs/PRD.md): Native API status and the deprecated 0.x API
 
 ## Examples
 
 - [Define Schema](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#1-define-your-schema): Table and column definition with cubridTable
 - [Query Examples](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#2-connect-and-query): Insert, select, where, update, delete operations
 - [CUBRID-Specific Types](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#cubrid-specific-column-types): SET, MULTISET, SEQUENCE, MONETARY column types
+- [Relations](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#relations): Relational queries with `with`
 - [Transactions](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/README.md#transactions): Transaction support with automatic commit/rollback
 
 ## API Reference
 
-- [Source — index.ts](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/src/index.ts): Public API exports — drizzle(), cubridTable, column types
-- [Source — driver.ts](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/src/driver.ts): Drizzle driver adapter for cubrid-client
-- [Source — columns/](https://github.com/cubrid-lab/drizzle-cubrid/tree/main/src/columns): Column type definitions including CUBRID-specific types
+- [Source — native/index.ts](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/src/native/index.ts): Public API of the root entry — drizzle(), cubridTable, column builders
+- [Source — native/db.ts](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/src/native/db.ts): drizzle(), database and transactions over cubrid-client
+- [Source — native/columns/](https://github.com/cubrid-lab/drizzle-cubrid/tree/main/src/native/columns): Column builders and codecs, including CUBRID collections
+- [Source — legacy.ts](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/src/legacy.ts): The deprecated 0.x API (`drizzle-cubrid/legacy`)
 
 ## Ecosystem
 

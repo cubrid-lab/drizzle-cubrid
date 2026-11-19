@@ -19,12 +19,22 @@
     },
     "./native": {
       "import": {
-        "types": "./dist/native.d.ts",
-        "default": "./dist/native.js"
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
       },
       "require": {
-        "types": "./dist/native.d.cts",
-        "default": "./dist/native.cjs"
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./migrator": {
+      "import": {
+        "types": "./dist/native-migrator.d.ts",
+        "default": "./dist/native-migrator.js"
+      },
+      "require": {
+        "types": "./dist/native-migrator.d.cts",
+        "default": "./dist/native-migrator.cjs"
       }
     },
     "./native/migrator": {
@@ -36,6 +46,32 @@
         "types": "./dist/native-migrator.d.cts",
         "default": "./dist/native-migrator.cjs"
       }
+    },
+    "./legacy": {
+      "import": {
+        "types": "./dist/legacy.d.ts",
+        "default": "./dist/legacy.js"
+      },
+      "require": {
+        "types": "./dist/legacy.d.cts",
+        "default": "./dist/legacy.cjs"
+      }
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "legacy": [
+        "./dist/legacy.d.ts"
+      ],
+      "migrator": [
+        "./dist/native-migrator.d.ts"
+      ],
+      "native": [
+        "./dist/index.d.ts"
+      ],
+      "native/migrator": [
+        "./dist/native-migrator.d.ts"
+      ]
     }
   },
   "files": [

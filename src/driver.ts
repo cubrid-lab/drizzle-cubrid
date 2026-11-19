@@ -24,11 +24,13 @@ import {
 	CubridSession,
 } from './session.js';
 
+/** @deprecated Use `CubridDrizzleConfig` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export interface CubridDriverOptions {
 	logger?: Logger;
 	binding?: CubridBinding;
 }
 
+/** @deprecated The native `drizzle()` of `drizzle-cubrid` needs no driver object. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export class CubridDriver {
 	static readonly [entityKind] = 'CubridDriver';
 
@@ -50,6 +52,7 @@ export class CubridDriver {
 	}
 }
 
+/** @deprecated Use `CubridDatabase` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export class CubridDatabase<TSchema extends Record<string, unknown> = Record<string, never>> extends MySqlDatabase<
 	CubridQueryResultHKT,
 	CubridPreparedQueryHKT,
@@ -58,6 +61,7 @@ export class CubridDatabase<TSchema extends Record<string, unknown> = Record<str
 	static override readonly [entityKind] = 'CubridDatabase';
 }
 
+/** @deprecated Use `CubridDrizzleConfig` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export type CubridDrizzleConfig<TSchema extends Record<string, unknown> = Record<string, never>> = Omit<
 	DrizzleConfig<TSchema>,
 	'schema'
@@ -128,18 +132,22 @@ function isClientConfig<TSchema extends Record<string, unknown>, TClient extends
 	return typeof value === 'object' && value !== null && 'client' in value;
 }
 
+/** @deprecated Use `drizzle()` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export function drizzle<
 	TSchema extends Record<string, unknown> = Record<string, never>,
 	TClient extends CubridQueryable = CubridClient,
 >(client: TClient): DrizzleWithClient<TSchema, TClient>;
+/** @deprecated Use `drizzle()` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export function drizzle<
 	TSchema extends Record<string, unknown> = Record<string, never>,
 	TClient extends CubridQueryable = CubridClient,
 >(client: TClient, config: CubridDrizzleConfig<TSchema>): DrizzleWithClient<TSchema, TClient>;
+/** @deprecated Use `drizzle()` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export function drizzle<
 	TSchema extends Record<string, unknown> = Record<string, never>,
 	TClient extends CubridQueryable = CubridClient,
 >(config: DrizzleClientConfig<TSchema, TClient>): DrizzleWithClient<TSchema, TClient>;
+/** @deprecated Use `drizzle()` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export function drizzle<
 	TSchema extends Record<string, unknown> = Record<string, never>,
 	TClient extends CubridQueryable = CubridClient,

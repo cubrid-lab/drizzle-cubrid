@@ -107,7 +107,7 @@ The native 1.x adapter **must support Node 18 for the entire 1.x line**, indepen
 - [ ] Independently verify migration generation, execution, failure and recovery; unverified migration features must not be advertised as supported.
 - [ ] Keep compatibility and semantic behavior visible in README, PRD, schema/query guides, examples, and contribution instructions.
 - [ ] Resolve currently tracked CI and coverage reliability issues without silently weakening release gates.
-- [ ] Produce clear migration notes from the 0.x public API before announcing stability.
+- [ ] Produce clear migration notes from the 0.x public API before announcing stability. (Draft for review: [MIGRATING_FROM_0X.md](MIGRATING_FROM_0X.md), with [ADR 0010](adr/0010-promote-native-root-deprecate-0x.md).)
 
 ## Implementation tracking
 

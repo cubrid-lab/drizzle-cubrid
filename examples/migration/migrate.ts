@@ -2,8 +2,8 @@
 // Run it with a TypeScript runner, for example: npx tsx examples/migration/migrate.ts
 import { fileURLToPath } from 'node:url';
 import { createClient } from 'cubrid-client';
-import { drizzle } from 'drizzle-cubrid/native';
-import { migrate } from 'drizzle-cubrid/native/migrator';
+import { drizzle } from 'drizzle-cubrid';
+import { migrate } from 'drizzle-cubrid/migrator';
 
 const client = createClient({
 	host: process.env.CUBRID_HOST ?? '127.0.0.1',

@@ -42,7 +42,7 @@ describe('import rule', () => {
 	});
 
 	it('catches require() in the packed CommonJS build', () => {
-		expect(found('dist/index.cjs', 'var x = require("drizzle-orm/mysql-core/index.js");', 'package')).toContain(
+		expect(found('dist/legacy.cjs', 'var x = require("drizzle-orm/mysql-core/index.js");', 'package')).toContain(
 			'import:drizzle-orm/mysql-core/index.js',
 		);
 	});
@@ -267,11 +267,18 @@ describe('native-dynamic rule (native code only)', () => {
 	});
 
 	it('scans the packed native entries but no other packed file', () => {
-		for (const entry of ['dist/native.js', 'dist/native.cjs', 'dist/native-migrator.js', 'dist/native-migrator.cjs']) {
+		for (const entry of [
+			'dist/index.js',
+			'dist/index.cjs',
+			'dist/native.js',
+			'dist/native.cjs',
+			'dist/native-migrator.js',
+			'dist/native-migrator.cjs',
+		]) {
 			expect(found(entry, 'const r = eval(x);', 'package')).toEqual(['native-dynamic:eval']);
 			expect(found(entry, "const m = module['require'];", 'package')).toEqual(['native-dynamic:["require"]']);
 		}
-		expect(found('dist/index.js', 'const r = eval(x); const m = require(name);', 'package')).toEqual([]);
+		expect(found('dist/legacy.js', 'const r = eval(x); const m = require(name);', 'package')).toEqual([]);
 		expect(found('src/session.ts', 'const r = eval(x); const m = import(name);')).toEqual([]);
 		expect(found('dist/native.d.ts', 'declare const f: Function;', 'package')).toEqual([]);
 	});
@@ -326,6 +333,20 @@ describe('native-dynamic rule (native code only)', () => {
 		]);
 	});
 
+	it('never accepts a baselined finding in the packed root entry or its declarations (ADR 0010)', () => {
+		for (const file of ['dist/index.js', 'dist/index.cjs', 'dist/index.d.ts', 'dist/index.d.cts']) {
+			const f = scanText(file, "import { MySqlDialect } from 'drizzle-orm/mysql-core';", 'package');
+			const problems = compare(f, summarize(f, 'package'), 'package');
+			expect(problems).toContain(`${file}:1 identifier "MySqlDialect" is not allowed in native code`);
+			expect(problems).toContain(
+				`baseline entry for native code is not allowed: ${file} import drizzle-orm/mysql-core`,
+			);
+		}
+		// The deprecated 0.x entry keeps its ratchet.
+		const legacy = scanText('dist/legacy.d.ts', "import { MySqlDialect } from 'drizzle-orm/mysql-core';", 'package');
+		expect(compare(legacy, summarize(legacy, 'package'), 'package')).toEqual([]);
+	});
+
 	it('fails the command and refuses --update-baseline for a packed native entry', () => {
 		const dir = mkdtempSync(join(tmpdir(), 'boundary-'));
 		try {
@@ -366,8 +387,8 @@ describe('baseline ratchet', () => {
 	});
 
 	it('keeps src and package baselines apart', () => {
-		const known = summarize([finding('dist/index.js')], 'package');
-		expect(compare([finding('dist/index.js')], known, 'src')[0]).toMatch(/new import/);
+		const known = summarize([finding('dist/legacy.js')], 'package');
+		expect(compare([finding('dist/legacy.js')], known, 'src')[0]).toMatch(/new import/);
 	});
 });
 
@@ -395,6 +416,11 @@ describe('repository and command line', () => {
 	it('matches the checked-in baseline for src', () => {
 		const findings = scanTree(join(__dirname, '..'), 'src', 'src');
 		expect(compare(findings, baseline.entries, 'src')).toEqual([]);
+	});
+
+	it('pins packed 0.x findings only under the deprecated legacy entry (ADR 0010)', () => {
+		const files = new Set(baseline.entries.filter((e) => e.scope === 'package').map((e) => e.file));
+		expect([...files].sort()).toEqual(['dist/legacy.cjs', 'dist/legacy.d.cts', 'dist/legacy.d.ts', 'dist/legacy.js']);
 	});
 
 	it('exits 0 for a clean tree, 1 for a planted violation and 2 for bad arguments', () => {
@@ -435,7 +461,7 @@ describe('repository and command line', () => {
 	});
 
 	it('runs as a script and writes the step summary', () => {
-		const root = tree({ 'pkg/dist/index.js': "import { MySqlDialect } from 'drizzle-orm/mysql-core';\n" });
+		const root = tree({ 'pkg/dist/legacy.js': "import { MySqlDialect } from 'drizzle-orm/mysql-core';\n" });
 		const summary = join(root, 'summary.md');
 		const run = spawnSync(
 			process.execPath,
@@ -446,8 +472,8 @@ describe('repository and command line', () => {
 			},
 		);
 		expect(run.status).toBe(1);
-		expect(run.stderr).toContain('::error::dist/index.js:1 new import "drizzle-orm/mysql-core" (x1)');
-		expect(run.stderr).toContain('::error::dist/index.js:1 new identifier "MySqlDialect" (x1)');
+		expect(run.stderr).toContain('::error::dist/legacy.js:1 new import "drizzle-orm/mysql-core" (x1)');
+		expect(run.stderr).toContain('::error::dist/legacy.js:1 new identifier "MySqlDialect" (x1)');
 		expect(readFileSync(summary, 'utf8')).toMatch(/Foreign-dialect boundary \(package\): 2 known 0\.x findings/);
 		expect(spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8' }).status).toBe(2);
 	});

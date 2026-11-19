@@ -128,6 +128,7 @@ function resolveElementCastType(element?: ColumnBuilderBase): string | undefined
 /**
  * A value cubrid-client can send as one parameter, and so as one element of a
  * collection literal. Nested collections, objects and functions are not.
+ * @deprecated Use the native collection builders' element types in `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
  */
 export type CubridCollectionElement = string | number | bigint | boolean | Date | Uint8Array | null;
 
@@ -234,6 +235,7 @@ function createCollectionType<TElement>(kind: CollectionKind, config: CubridColl
  * A `SET` column. The server removes duplicates and defines no order.
  * `TElement` is the JavaScript type of one element, `string` by default; pass
  * an `element` column to set the SQL element type.
+ * @deprecated Use `set({ element })` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
  */
 export function cubridSet<TElement extends CubridCollectionElement = string>(
 	name: string,
@@ -241,28 +243,37 @@ export function cubridSet<TElement extends CubridCollectionElement = string>(
 ) {
 	return createCollectionType<TElement>('SET', config)(name, config);
 }
+/** @deprecated Use `CubridCollectionBuilder` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export type CubridSetColumnBuilder<TElement extends CubridCollectionElement = string> = ReturnType<
 	typeof cubridSet<TElement>
 >;
 
-/** A `MULTISET` column: duplicates are kept, order is not defined. */
+/**
+ * A `MULTISET` column: duplicates are kept, order is not defined.
+ * @deprecated Use `multiset({ element })` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
+ */
 export function cubridMultiset<TElement extends CubridCollectionElement = string>(
 	name: string,
 	config?: CubridCollectionConfig,
 ) {
 	return createCollectionType<TElement>('MULTISET', config)(name, config);
 }
+/** @deprecated Use `CubridCollectionBuilder` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export type CubridMultisetColumnBuilder<TElement extends CubridCollectionElement = string> = ReturnType<
 	typeof cubridMultiset<TElement>
 >;
 
-/** A `SEQUENCE` (LIST) column: duplicates and stored order are kept. */
+/**
+ * A `SEQUENCE` (LIST) column: duplicates and stored order are kept.
+ * @deprecated Use `sequence({ element })` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
+ */
 export function cubridSequence<TElement extends CubridCollectionElement = string>(
 	name: string,
 	config?: CubridCollectionConfig,
 ) {
 	return createCollectionType<TElement>('SEQUENCE', config)(name, config);
 }
+/** @deprecated Use `CubridCollectionBuilder` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export type CubridSequenceColumnBuilder<TElement extends CubridCollectionElement = string> = ReturnType<
 	typeof cubridSequence<TElement>
 >;

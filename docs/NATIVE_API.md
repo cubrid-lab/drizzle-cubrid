@@ -1,9 +1,17 @@
-# `drizzle-cubrid/native` (experimental preview)
+# Native API: `drizzle-cubrid`
 
-> **Preview, not for production.** `drizzle-cubrid/native` is the first slice
-> of the CUBRID-native dialect ([ADR 0003](adr/0003-native-architecture-boundaries.md),
-> [ADR 0007](adr/0007-drizzle-extension-boundary.md)). Its API can change in
-> any release. The supported API is still the root `drizzle-cubrid` entry.
+> **The root entry since 0.3.** `drizzle-cubrid` is the CUBRID-native dialect
+> ([ADR 0003](adr/0003-native-architecture-boundaries.md),
+> [ADR 0007](adr/0007-drizzle-extension-boundary.md),
+> [ADR 0010](adr/0010-promote-native-root-deprecate-0x.md)). Until 0.2 it was
+> the experimental `drizzle-cubrid/native` entry, which stays an alias of the
+> root through 1.x: both specifiers load the same module, so tables, databases
+> and classes from either are the same objects. **Pre-1.0:** the API can
+> still change in a minor release, with migration notes
+> ([ADR 0001](adr/0001-release-governance.md)), and production use is not yet
+> signed off ([DESIGN_SIGNOFF.md](DESIGN_SIGNOFF.md)). The former 0.x API is
+> `drizzle-cubrid/legacy`, deprecated and removed in 1.0; see
+> [MIGRATING_FROM_0X.md](MIGRATING_FROM_0X.md).
 
 ## What it provides today
 
@@ -30,17 +38,17 @@
 - `prepare()` on every query, relational ones included (see
   [Prepared queries](#prepared-queries)), and `iterator()` streaming of
   selects and set operations (see [Streaming](#streaming)).
-- Schema migrations: `migrate()` from `drizzle-cubrid/native/migrator`
+- Schema migrations: `migrate()` from `drizzle-cubrid/migrator` (also `drizzle-cubrid/native/migrator`)
   applies ordered CUBRID SQL files, and `generateInitialMigration(schema)`
   writes the first one (`CREATE TABLE` and `CREATE INDEX`). See [MIGRATIONS.md](MIGRATIONS.md).
 
 **Not yet:** streaming inside `db.transaction()` or of relational queries
 (both refused, see [Streaming](#streaming)), schema diffing and `ALTER` generation (#163), and
 descending, function-based or filtered indexes (write them in a migration by
-hand). Native tables are not supported by the 0.x `drizzle()` from `drizzle-cubrid`.
+hand). Native tables are not supported by the 0.x `drizzle()` of `drizzle-cubrid/legacy`.
 
 ```ts
-import { bigint, cubridTable, integer, primaryKey, set, varchar } from 'drizzle-cubrid/native';
+import { bigint, cubridTable, integer, primaryKey, set, varchar } from 'drizzle-cubrid';
 
 export const users = cubridTable('users', {
   id: integer().primaryKey().autoIncrement(), // column name "id" (the key)
@@ -73,7 +81,7 @@ columns are not supported yet.
 ```ts
 import { createClient } from 'cubrid-client';
 import { count, eq, gt, sql } from 'drizzle-orm';
-import { drizzle } from 'drizzle-cubrid/native';
+import { drizzle } from 'drizzle-cubrid';
 
 const client = createClient({ host, database, user, password, timezone: 'utc' });
 const db = drizzle(client); // or drizzle(pool)
@@ -115,7 +123,7 @@ that share column names (`users.id`, `posts.id`) keep both values.
 
 ```ts
 import { desc } from 'drizzle-orm';
-import { union } from 'drizzle-cubrid/native';
+import { union } from 'drizzle-cubrid';
 
 const names = await db
   .select({ id: users.id, name: users.name })
@@ -142,7 +150,7 @@ const ids = union(
 | `.exceptAll(q)`, `exceptAll(...)` | `(a) except all (b)`: each row of `a` as often as it occurs there more than in `b` |
 
 They are methods of a select and of a set operation, standalone functions
-exported from `drizzle-cubrid/native`, and callbacks (`.union(({ intersect })
+exported from `drizzle-cubrid`, and callbacks (`.union(({ intersect })
 => intersect(b, c))`), as in Drizzle. Every one, with the ALL forms' bag
 semantics, was verified on CUBRID 11.4 (which also spells them `INTERSECTION`
 and `DIFFERENCE`).
@@ -458,7 +466,7 @@ built and refused by the same rules as any native select.
 ## Transactions
 
 ```ts
-import { drizzle } from 'drizzle-cubrid/native';
+import { drizzle } from 'drizzle-cubrid';
 
 const db = drizzle(pool); // or drizzle(client)
 
@@ -577,7 +585,7 @@ Recommendations:
 ```ts
 import { createPool } from 'cubrid-client';
 import { relations } from 'drizzle-orm';
-import { drizzle } from 'drizzle-cubrid/native';
+import { drizzle } from 'drizzle-cubrid';
 
 export const usersRelations = relations(users, ({ one, many }) => ({
   posts: many(posts),
@@ -900,7 +908,7 @@ Refused, before anything is sent:
 | `iterator()` on a relational query | Its rows are complete only after every level is loaded; stream a `select()` |
 | Writes | Have no `iterator()` |
 
-The 0.x API (`drizzle-cubrid`) is unchanged: its `iterator()` still throws.
+The deprecated 0.x API (`drizzle-cubrid/legacy`) is unchanged: its `iterator()` still throws.
 
 ## Column builders
 
@@ -1029,8 +1037,8 @@ would refuse. `insert()` and `update()` emit this literal themselves (see
 ## Indexes and foreign keys
 
 ```ts
-import { cubridTable, foreignKey, index, integer, primaryKey, uniqueIndex, varchar } from 'drizzle-cubrid/native';
-import type { CubridColumn } from 'drizzle-cubrid/native';
+import { cubridTable, foreignKey, index, integer, primaryKey, uniqueIndex, varchar } from 'drizzle-cubrid';
+import type { CubridColumn } from 'drizzle-cubrid';
 
 export const users = cubridTable(
   'users',
@@ -1136,8 +1144,10 @@ schema modules are still loading: a table that is not defined yet makes a
 
 ## MySQL-only builders and their CUBRID replacements
 
-The 0.x API re-exports Drizzle's MySQL builders. These have no CUBRID type and
-are not in `drizzle-cubrid/native`:
+The 0.x API (`drizzle-cubrid/legacy`) re-exports Drizzle's MySQL builders. These have no CUBRID type and
+are not in `drizzle-cubrid`. Since 0.3 the root exports a placeholder for most of
+these names that throws, and fails to compile when called, with the replacement
+(see [MIGRATING_FROM_0X.md](MIGRATING_FROM_0X.md)):
 
 | 0.x / MySQL builder | Use instead |
 | --- | --- |
@@ -1155,8 +1165,8 @@ are not in `drizzle-cubrid/native`:
 
 ## Not supported in the native dialect
 
-These CUBRID types have no column builder in `drizzle-cubrid/native`.
-`drizzle-cubrid/native` has no custom-type facility either, so there is no
+These CUBRID types have no column builder in `drizzle-cubrid`.
+`drizzle-cubrid` has no custom-type facility either, so there is no
 supported way to declare such a column in a `cubridTable()`. The only
 workaround is raw `sql` in queries on a table created outside the schema (for
 example by a [migration](MIGRATIONS.md)), which bypasses the column codecs: you
