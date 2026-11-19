@@ -325,6 +325,19 @@ const table = cubridTable("example", {
 });
 ```
 
+### Indexes and foreign keys
+
+This guide's `cubridTable` is the 0.x MySQL-based one, and drizzle-cubrid
+generates no DDL for it. The experimental `drizzle-cubrid/native` entry has
+CUBRID-native `index()`, `uniqueIndex()`, `foreignKey()` and
+`.references()`, verified on CUBRID 11.4, which `generateInitialMigration()`
+writes as `CREATE INDEX` statements and `FOREIGN KEY` table constraints. CUBRID
+supports `ON DELETE CASCADE | RESTRICT | NO ACTION | SET NULL`, but not
+`ON UPDATE CASCADE` or `SET DEFAULT`, and a foreign key must reference the
+whole primary key of the other table. See
+[Indexes and foreign keys](NATIVE_API.md#indexes-and-foreign-keys) and
+[MIGRATIONS.md](MIGRATIONS.md).
+
 ## Relations
 
 Define relations between tables for Drizzle's relational query API:

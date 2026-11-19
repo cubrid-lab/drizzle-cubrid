@@ -5,6 +5,9 @@ import { describe, expectTypeOf, it } from 'vitest';
 import {
 	bigint,
 	boolean,
+	type CubridColumn,
+	type CubridForeignKeyAction,
+	type CubridForeignKeyUpdateAction,
 	char,
 	cubridTable,
 	date,
@@ -12,6 +15,8 @@ import {
 	decimal,
 	double,
 	float,
+	foreignKey,
+	index,
 	int,
 	integer,
 	monetary,
@@ -25,6 +30,7 @@ import {
 	time,
 	timestamp,
 	unique,
+	uniqueIndex,
 	varchar,
 } from '../../src/native/index';
 
@@ -212,5 +218,59 @@ describe('table extra config', () => {
 			return [primaryKey({ columns: [self.a, self.b] }), unique('u_ab').on(self.b, self.a)];
 		});
 		expectTypeOf(t.$inferInsert).toEqualTypeOf<{ a: number; b: string }>();
+	});
+});
+
+describe('indexes and foreign keys (#157)', () => {
+	const parents = cubridTable('parents', { id: integer().primaryKey() });
+
+	it('accepts indexes and foreign keys in extra config without changing the models', () => {
+		const t = cubridTable(
+			'children',
+			{
+				id: integer().primaryKey(),
+				parentId: integer().references(() => parents.id, { onDelete: 'cascade', onUpdate: 'set null' }),
+				self: integer().references((): CubridColumn => t.id),
+				code: varchar({ length: 5 }).notNull(),
+			},
+			(self) => [
+				index('ix_code').on(self.code),
+				uniqueIndex('ux_parent_code').on(self.parentId, self.code),
+				foreignKey({ name: 'fk_parent', columns: [self.parentId], foreignColumns: [parents.id] })
+					.onDelete('no action')
+					.onUpdate('restrict'),
+			],
+		);
+		expectTypeOf(t.$inferSelect).toEqualTypeOf<{
+			id: number;
+			parentId: number | null;
+			self: number | null;
+			code: string;
+		}>();
+	});
+
+	it('limits actions to what CUBRID has', () => {
+		expectTypeOf<CubridForeignKeyAction>().toEqualTypeOf<'cascade' | 'restrict' | 'no action' | 'set null'>();
+		expectTypeOf<CubridForeignKeyUpdateAction>().toEqualTypeOf<'restrict' | 'no action' | 'set null'>();
+		const fk = foreignKey({ columns: [parents.id], foreignColumns: [parents.id] });
+		// @ts-expect-error CUBRID has no SET DEFAULT
+		fk.onDelete('set default');
+		// @ts-expect-error CUBRID has no ON UPDATE CASCADE
+		fk.onUpdate('cascade');
+		// @ts-expect-error CUBRID has no ON UPDATE CASCADE
+		integer().references(() => parents.id, { onUpdate: 'cascade' });
+	});
+
+	it('takes plain columns only, and at least one', () => {
+		// @ts-expect-error at least one column
+		index('ix').on();
+		// @ts-expect-error not a column: descending and expression indexes are written by hand
+		index('ix').on('id');
+		// @ts-expect-error an index needs a name
+		uniqueIndex();
+		// @ts-expect-error foreign keys need at least one column on each side
+		foreignKey({ columns: [], foreignColumns: [] });
+		// @ts-expect-error no USING / WHERE builders
+		index('ix').on(parents.id).where;
 	});
 });

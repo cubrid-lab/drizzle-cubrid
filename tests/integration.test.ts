@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
 	TransactionError as ClientTransactionError,
+	ConstraintError,
 	type CubridClient,
 	type CubridPool,
 	createClient,
@@ -61,7 +62,7 @@ import {
 	varchar,
 } from '../src/columns';
 import { drizzle } from '../src/driver';
-import { createTableSql } from '../src/native/ddl';
+import { createIndexSql, createTableSql } from '../src/native/ddl';
 import * as native from '../src/native/index';
 import { CubridMigrationError, migrate } from '../src/native/migrator';
 import { RELATIONAL_KEY_CHUNK } from '../src/native/relational';
@@ -4453,4 +4454,228 @@ describe('drizzle-cubrid/native/migrator on CUBRID (#163)', () => {
 		},
 		DDL_TIMEOUT,
 	);
+});
+
+describe('drizzle-cubrid/native indexes and foreign keys on CUBRID (#157)', () => {
+	const parentsName = name('fk_parents');
+	const childrenName = name('fk_children');
+	const pairsName = name('fk_pairs');
+	const pairRefsName = name('fk_pair_refs');
+	const nodesName = name('fk_nodes');
+	const table = name('fk_migrations');
+	const ix = (base: string) => name(`fk_${base}`);
+	// Declared children first: the generated migration must create parents first.
+	const children = native.cubridTable(
+		childrenName,
+		{
+			id: native.integer().primaryKey(),
+			parentId: native.integer('parent_id').references(() => parents.id, { onDelete: 'cascade' }),
+			editorId: native
+				.integer('editor_id')
+				.references(() => parents.id, { onDelete: 'set null', onUpdate: 'no action' }),
+			code: native.varchar({ length: 10 }).notNull(),
+		},
+		(t) => [native.index(ix('ix_code')).on(t.code), native.uniqueIndex(ix('ux_parent_code')).on(t.parentId, t.code)],
+	);
+	const parents = native.cubridTable(
+		parentsName,
+		{ id: native.integer().primaryKey(), email: native.varchar({ length: 50 }).notNull() },
+		(t) => [native.uniqueIndex(ix('ux_email')).on(t.email)],
+	);
+	const pairs = native.cubridTable(pairsName, { a: native.integer().notNull(), b: native.integer().notNull() }, (t) => [
+		native.primaryKey({ columns: [t.a, t.b] }),
+	]);
+	const pairRefs = native.cubridTable(
+		pairRefsName,
+		{ id: native.integer().primaryKey(), x: native.integer(), y: native.integer() },
+		(t) => [
+			native
+				.foreignKey({ name: ix('fk_pair'), columns: [t.x, t.y], foreignColumns: [pairs.b, pairs.a] })
+				.onDelete('restrict')
+				.onUpdate('restrict'),
+		],
+	);
+	const nodes = native.cubridTable(nodesName, {
+		id: native.integer().primaryKey(),
+		parent: native.integer().references((): native.CubridColumn => nodes.id, { onDelete: 'cascade' }),
+	});
+	let dir: string;
+	const driverError = async (promise: Promise<unknown>) =>
+		promise.then(
+			() => undefined,
+			(e: unknown) => e,
+		);
+	const showCreate = async (t: string) =>
+		(await client.query<Record<string, string>>(`SHOW CREATE TABLE "${t}"`))[0]!['CREATE TABLE']!;
+
+	beforeAll(async () => {
+		dir = mkdtempSync(join(tmpdir(), 'dz-live-fk-'));
+		writeFileSync(
+			join(dir, '0001_initial.sql'),
+			native.generateInitialMigration({ children, pairRefs, nodes, parents, pairs }),
+		);
+		// Dropped in reverse: referencing tables first.
+		created.push(
+			`"${table}"`,
+			`"${table}_lock"`,
+			`"${parentsName}"`,
+			`"${pairsName}"`,
+			`"${nodesName}"`,
+			`"${childrenName}"`,
+			`"${pairRefsName}"`,
+		);
+		const result = await migrate(native.drizzle(client), { migrationsFolder: dir, migrationsTable: table });
+		expect(result.applied.map((m) => m.fileName)).toEqual(['0001_initial.sql']);
+	}, DDL_TIMEOUT);
+	afterAll(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it('creates the indexes and foreign keys the schema declares, as the catalog shows them', async () => {
+		const indexes = await client.query<{
+			class_name: string;
+			index_name: string;
+			is_unique: string;
+			is_foreign_key: string;
+		}>(
+			`SELECT class_name, index_name, is_unique, is_foreign_key FROM db_index WHERE class_name IN ('${childrenName}', '${parentsName}', '${pairRefsName}', '${nodesName}') AND is_primary_key = 'NO' ORDER BY class_name, index_name`,
+		);
+		const byName = Object.fromEntries(indexes.map((i) => [i.index_name, i]));
+		expect(byName[ix('ix_code')]).toMatchObject({ class_name: childrenName, is_unique: 'NO', is_foreign_key: 'NO' });
+		expect(byName[ix('ux_parent_code')]).toMatchObject({ is_unique: 'YES', is_foreign_key: 'NO' });
+		expect(byName[ix('ux_email')]).toMatchObject({ class_name: parentsName, is_unique: 'YES' });
+		expect(byName[ix('fk_pair')]).toMatchObject({ class_name: pairRefsName, is_foreign_key: 'YES' });
+		// Unnamed foreign keys are named by CUBRID: fk_<table>_<columns>.
+		expect(byName[`fk_${childrenName}_parent_id`]).toMatchObject({ is_foreign_key: 'YES' });
+		expect(byName[`fk_${childrenName}_editor_id`]).toMatchObject({ is_foreign_key: 'YES' });
+		expect(byName[`fk_${nodesName}_parent`]).toMatchObject({ is_foreign_key: 'YES' });
+		const keys = await client.query<{ key_attr_name: string; key_order: number; asc_desc: string }>(
+			`SELECT key_attr_name, key_order, asc_desc FROM db_index_key WHERE class_name = '${childrenName}' AND index_name = '${ix('ux_parent_code')}' ORDER BY key_order`,
+		);
+		expect(keys).toEqual([
+			{ key_attr_name: 'parent_id', key_order: 0, asc_desc: 'ASC' },
+			{ key_attr_name: 'code', key_order: 1, asc_desc: 'ASC' },
+		]);
+		// The referential actions as the server stores them (RESTRICT when unset).
+		const childDdl = await showCreate(childrenName);
+		expect(childDdl).toMatch(
+			new RegExp(
+				`FOREIGN KEY +\\(\\[parent_id\\]\\) REFERENCES \\[dba\\.${parentsName}\\] \\(\\[id\\]\\) ON DELETE CASCADE ON UPDATE RESTRICT`,
+			),
+		);
+		expect(childDdl).toMatch(/FOREIGN KEY +\(\[editor_id\]\) REFERENCES .* ON DELETE SET NULL ON UPDATE NO ACTION/);
+		// CUBRID keeps a composite key in the referenced primary key's order.
+		expect(await showCreate(pairRefsName)).toMatch(
+			new RegExp(
+				`FOREIGN KEY +\\(\\[y\\], \\[x\\]\\) REFERENCES \\[dba\\.${pairsName}\\] \\(\\[a\\], \\[b\\]\\) ON DELETE RESTRICT ON UPDATE RESTRICT`,
+			),
+		);
+	});
+
+	it('raises a foreign-key-violation ConstraintError for a missing parent and a referenced parent', async () => {
+		const db = native.drizzle(client);
+		await db.insert(parents).values([
+			{ id: 1, email: 'a@example.com' },
+			{ id: 2, email: 'b@example.com' },
+		]);
+		await db.insert(pairs).values({ a: 1, b: 2 });
+		const orphan = await driverError(db.insert(children).values({ id: 1, parentId: 99, code: 'x' }));
+		expect(orphan).toBeInstanceOf(ConstraintError);
+		expect(orphan).toMatchObject({ kind: 'foreign-key-violation', code: -922 });
+		// (x, y) references (b, a): (2, 1) matches the pair (a = 1, b = 2), (1, 2) does not.
+		await db.insert(pairRefs).values({ id: 1, x: 2, y: 1 });
+		expect(await driverError(db.insert(pairRefs).values({ id: 2, x: 1, y: 2 }))).toMatchObject({
+			kind: 'foreign-key-violation',
+			code: -922,
+		});
+		const restricted = await driverError(db.delete(pairs));
+		expect(restricted).toBeInstanceOf(ConstraintError);
+		expect(restricted).toMatchObject({ kind: 'foreign-key-violation', code: -924 });
+		expect(await db.select().from(pairs)).toEqual([{ a: 1, b: 2 }]);
+	});
+
+	it('applies ON DELETE CASCADE and ON DELETE SET NULL', async () => {
+		const db = native.drizzle(client);
+		await db.insert(children).values([
+			{ id: 10, parentId: 1, editorId: 2, code: 'a' },
+			{ id: 11, parentId: 2, editorId: 1, code: 'b' },
+		]);
+		await db.delete(parents).where(eq(parents.id, 1));
+		// Child 10 (parent 1) is deleted; child 11 keeps its row, editor 1 becomes NULL.
+		expect(await db.select().from(children).orderBy(children.id)).toEqual([
+			{ id: 11, parentId: 2, editorId: null, code: 'b' },
+		]);
+		await db.insert(nodes).values([{ id: 1 }, { id: 2, parent: 1 }, { id: 3, parent: 2 }]);
+		await db.delete(nodes).where(eq(nodes.id, 1));
+		expect(await db.select().from(nodes)).toEqual([]);
+	});
+
+	it(
+		'accepts the keys getTableConfig() accepts and refuses with -272 the ones it refuses',
+		async () => {
+			const keysName = name('fk_keys');
+			const keys = native.cubridTable(
+				keysName,
+				{
+					id: native.integer().primaryKey(),
+					e: native.integer().unique(),
+					a: native.integer(),
+					b: native.integer(),
+					f: native.integer(),
+					p: native.integer().references(() => parents.id),
+				},
+				(t) => [
+					native.unique().on(t.a, t.b),
+					// Named unique constraints on columns that already have one are accepted.
+					native.unique(ix('k_c_ab')).on(t.a, t.b),
+					native.unique(ix('k_c_e')).on(t.e),
+					native.index(ix('k_ba')).on(t.b, t.a),
+					native.uniqueIndex(ix('k_u_id')).on(t.id),
+					native.uniqueIndex(ix('k_u_e')).on(t.e),
+					native.uniqueIndex(ix('k_u_ab')).on(t.a, t.b),
+					native.uniqueIndex(ix('k_u_f')).on(t.f),
+					native.uniqueIndex(ix('k_u_f2')).on(t.f),
+					native.index(ix('k_p')).on(t.p),
+					native.index(ix('k_a')).on(t.a),
+				],
+			);
+			created.push(`"${keysName}"`);
+			await client.query(createTableSql(keys));
+			for (const statement of createIndexSql(keys)) await client.query(statement);
+			// Each statement is what a declaration refused by getTableConfig() would emit.
+			const refused = [
+				`CREATE INDEX "${ix('k_x1')}" ON "${keysName}" ("id")`,
+				`CREATE INDEX "${ix('k_x2')}" ON "${keysName}" ("e")`,
+				`CREATE INDEX "${ix('k_x3')}" ON "${keysName}" ("a", "b")`,
+				`CREATE INDEX "${ix('k_x4')}" ON "${keysName}" ("f")`,
+				`CREATE INDEX "${ix('k_x5')}" ON "${keysName}" ("b", "a")`,
+				`CREATE UNIQUE INDEX "${ix('k_x6')}" ON "${keysName}" ("p")`,
+				`CREATE INDEX "pk_${keysName}_id" ON "${keysName}" ("f", "a")`,
+				`CREATE INDEX "U_${keysName}_E" ON "${keysName}" ("f", "a")`,
+				`CREATE INDEX "fk_${keysName}_p" ON "${keysName}" ("f", "a")`,
+			];
+			for (const statement of refused) {
+				expect(await driverError(client.query(statement)), statement).toMatchObject({ code: -272 });
+			}
+			// A repeated column, which getTableConfig() also refuses.
+			expect(await driverError(client.query(`CREATE INDEX "${ix('k_x7')}" ON "${keysName}" ("f", "f")`))).toMatchObject(
+				{ code: -494 },
+			);
+		},
+		DDL_TIMEOUT,
+	);
+
+	it('raises a unique-violation ConstraintError for a unique index', async () => {
+		const db = native.drizzle(client);
+		const duplicate = await driverError(db.insert(parents).values({ id: 3, email: 'b@example.com' }));
+		expect(duplicate).toBeInstanceOf(ConstraintError);
+		expect(duplicate).toMatchObject({ kind: 'unique-violation' });
+		const composite = await driverError(db.insert(children).values({ id: 12, parentId: 2, code: 'b' }));
+		expect(composite).toMatchObject({ kind: 'unique-violation' });
+		// A plain index does not constrain.
+		await db.insert(children).values({ id: 13, parentId: null, code: 'b' });
+		expect((await db.select({ id: children.id }).from(children).orderBy(children.id)).map((r) => r.id)).toEqual([
+			11, 13,
+		]);
+	});
 });

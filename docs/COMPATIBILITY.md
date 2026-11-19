@@ -184,6 +184,6 @@ then runs `npm publish <tarball>`.
   `cubrid-client` version.
 - Windows and macOS: every job runs on Linux (`ubuntu-latest`).
 - A TypeScript consumer type-checking against the packed `.d.ts` files.
-- Schema reflection, schema diffing and `ALTER` generation (#163). The migrator ([MIGRATIONS.md](MIGRATIONS.md)) is live-tested on CUBRID 11.4 only, for the DDL kinds [ADR 0009](adr/0009-cubrid-native-migrations.md) lists.
+- Schema reflection, schema diffing and `ALTER` generation (#163). The migrator ([MIGRATIONS.md](MIGRATIONS.md)) is live-tested on CUBRID 11.4 only, for the DDL kinds [ADR 0009](adr/0009-cubrid-native-migrations.md) lists. Indexes and foreign keys generated from `drizzle-cubrid/native` tables (#157) are live-tested on CUBRID 11.4 only; descending, function-based and filtered indexes are not generated.
 - Streaming memory use beyond the row count: the bound of one server reply
   is cubrid-client's contract (`stream()`), not measured by these tests.
