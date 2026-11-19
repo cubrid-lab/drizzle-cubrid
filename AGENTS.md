@@ -303,8 +303,10 @@ contributor, Codex, Claude Code, OpenCode or another agent is never required to
 append a particular coauthor or AI-tool trailer.
 
 PR titles are checked by `.github/workflows/pr-title.yml`: `type: description`
-or `type(scope): description`. PRs are squash-merged, so the title is the
-commit subject Release Please reads to choose the next version.
+or `type(scope): description`. With the repository's required squash-merge
+settings ([docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md#repository-settings)),
+the PR title becomes the commit subject Release Please reads to choose the
+next version. Retitle a GitHub "Revert" PR as `revert: ...`.
 
 ## Release Process
 
