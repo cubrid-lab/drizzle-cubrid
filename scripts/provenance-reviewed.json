@@ -1,0 +1,152 @@
+{
+	"$comment": "Reviewed similarity hits for scripts/check-provenance.mjs similarity (#220, docs/PROVENANCE.md). A hit is accepted only inside `lines` of `file` and up to `maxTokens` tokens. category api: drizzle-orm's public API dictates the code (type signatures, builder methods, export/import lists, idioms); attributed: follows drizzle-orm code and carries the Apache-2.0 notice. Review any new hit before adding it here.",
+	"entries": [
+		{
+			"file": "src/native/columns/common.ts",
+			"lines": [29, 32],
+			"maxTokens": 25,
+			"category": "api",
+			"reason": "CubridColumn's type parameters, as Drizzle's Column<T, TRuntimeConfig> subclasses declare them"
+		},
+		{
+			"file": "src/native/columns/common.ts",
+			"lines": [67, 81],
+			"maxTokens": 34,
+			"category": "api",
+			"reason": "unique(name) setter: the ColumnBuilder config fields isUnique/uniqueName"
+		},
+		{
+			"file": "src/native/columns/common.ts",
+			"lines": [86, 105],
+			"maxTokens": 50,
+			"category": "api",
+			"reason": "CubridAutoIncrementBuilder type parameters and autoIncrement(): the ColumnBuilder config fields autoIncrement/hasDefault and Drizzle's IsAutoincrement<HasDefault<this>> type"
+		},
+		{
+			"file": "src/native/columns/numeric.ts",
+			"lines": [122, 127],
+			"maxTokens": 25,
+			"category": "api",
+			"reason": "getSQLType() and the first line of mapFromDriverValue(): the Column methods every Drizzle column overrides"
+		},
+		{
+			"file": "src/native/columns/temporal.ts",
+			"lines": [141, 146],
+			"maxTokens": 50,
+			"category": "api",
+			"reason": "Builder declaration (type parameter, entityKind, constructor calling super(name, dataType, columnType)) shared by every Drizzle column builder"
+		},
+		{
+			"file": "src/native/db.ts",
+			"lines": [36, 38],
+			"maxTokens": 25,
+			"category": "api",
+			"reason": "Config generic default Record<string, unknown> = Record<string, never> and the logger option, as drizzle() configs declare them"
+		},
+		{
+			"file": "src/native/db.ts",
+			"lines": [61, 64],
+			"maxTokens": 35,
+			"category": "api",
+			"reason": "CubridDatabase type parameters TFullSchema/TSchema = ExtractTablesWithRelations<TFullSchema>, required for Drizzle's relational types"
+		},
+		{
+			"file": "src/native/db.ts",
+			"lines": [157, 159],
+			"maxTokens": 26,
+			"category": "api",
+			"reason": "Same type parameters on CubridTransaction"
+		},
+		{
+			"file": "src/native/db.ts",
+			"lines": [191, 192],
+			"maxTokens": 25,
+			"category": "api",
+			"reason": "for (const [key, value] of Object.entries(schema)) with is(value, Table): an iteration idiom over a Drizzle schema"
+		},
+		{
+			"file": "src/native/dml.ts",
+			"lines": [353, 360],
+			"maxTokens": 27,
+			"category": "api",
+			"reason": "limit()/$dynamic()/getSQL() builder methods of Drizzle's query-builder API"
+		},
+		{
+			"file": "src/native/dml.ts",
+			"lines": [404, 411],
+			"maxTokens": 27,
+			"category": "api",
+			"reason": "$dynamic()/getSQL()/toSQL() builder methods of Drizzle's query-builder API"
+		},
+		{
+			"file": "src/native/index.ts",
+			"lines": [81, 110],
+			"maxTokens": 59,
+			"category": "api",
+			"reason": "Export list of column builders (same shape as any export list)"
+		},
+		{
+			"file": "src/native/relational.ts",
+			"lines": [501, 503],
+			"maxTokens": 25,
+			"category": "api",
+			"reason": "const result: Record<string, unknown> = {} and a for...of loop: an object-building idiom"
+		},
+		{
+			"file": "src/native/relational.ts",
+			"lines": [605, 617],
+			"maxTokens": 84,
+			"category": "api",
+			"reason": "findMany()/findFirst() public signatures: DBQueryConfig, KnownKeysOnly and BuildQueryResult exactly as Drizzle's relational query builders type them, so db.query has Drizzle's types"
+		},
+		{
+			"file": "src/session.ts",
+			"lines": [19, 27],
+			"maxTokens": 59,
+			"category": "api",
+			"reason": "Import list from drizzle-orm (same shape as other drivers' imports)"
+		},
+		{
+			"file": "src/session.ts",
+			"lines": [324, 350],
+			"maxTokens": 55,
+			"category": "attributed",
+			"reason": "CubridPreparedQuery constructor (PreparedQuery in mysql-proxy/session.ts) and start of execute() (MySql2PreparedQuery); attributed in the file header and THIRD_PARTY_NOTICES.md"
+		},
+		{
+			"file": "src/session.ts",
+			"lines": [461, 503],
+			"maxTokens": 74,
+			"category": "attributed",
+			"reason": "CubridSession constructor and prepareQuery() (MySql2Session, MySqlRemoteSession); attributed"
+		},
+		{
+			"file": "src/session.ts",
+			"lines": [527, 532],
+			"maxTokens": 46,
+			"category": "attributed",
+			"reason": "all() (MySqlRemoteSession); attributed"
+		},
+		{
+			"file": "src/session.ts",
+			"lines": [534, 640],
+			"maxTokens": 40,
+			"category": "attributed",
+			"reason": "BEGIN/COMMIT fallback of CubridSession.transaction() (MySql2Session); attributed"
+		},
+		{
+			"file": "src/session.ts",
+			"lines": [663, 690],
+			"maxTokens": 54,
+			"category": "attributed",
+			"reason": "Savepoints in CubridTransaction.transaction() (MySql2Transaction); attributed"
+		},
+		{
+			"file": "src/driver.ts",
+			"lines": [107, 138],
+			"maxTokens": 46,
+			"category": "attributed",
+			"reason": "Logger and relational-schema setup in construct() (drizzle() in mysql2/driver.ts); attributed"
+		}
+	]
+}

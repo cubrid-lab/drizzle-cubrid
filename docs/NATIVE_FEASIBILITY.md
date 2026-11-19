@@ -110,7 +110,7 @@ Export paths for these current imports were not yet confirmed from a clean consu
 - **The two licenses:** drizzle-orm is Apache-2.0 according to its `package.json`. Its npm tarball ships no LICENSE file; the upstream repository has the Apache-2.0 text and no NOTICE file. drizzle-cubrid is MIT.
 - **Importing:** importing Drizzle's modules and types creates no copy obligation.
 - **Copying or adapting:** Apache-2.0 §4 then requires shipping the license text, keeping upstream copyright and attribution notices, and marking modified files.
-- **Current `src/`:** the provenance audit (#220, [PROVENANCE.md](PROVENANCE.md)) compared `src/` token by token with drizzle-orm 0.38.4, 0.44.1 and 0.45.4. The native dialect contains no copied or adapted Drizzle code. Parts of two 0.x files (`src/session.ts`, `src/driver.ts`) follow drizzle-orm's mysql2 driver closely and carry an Apache-2.0 notice, with the license text in `THIRD_PARTY_NOTICES.md`, as a precaution.
+- **Current `src/`:** the provenance audit (#220, [PROVENANCE.md](PROVENANCE.md)) compared `src/` token by token with drizzle-orm 0.38.4, 0.44.1 and 0.45.4. The native dialect contains no copied or adapted Drizzle code; it shares only what Drizzle's public API dictates (relational query signatures, type-parameter lists, builder one-liners, export lists). Parts of two 0.x files (`src/session.ts`, `src/driver.ts`) follow drizzle-orm's MySQL drivers closely and carry an Apache-2.0 notice, with the license text in `THIRD_PARTY_NOTICES.md`, as a precaution.
 
 ## Ownership boundary
 

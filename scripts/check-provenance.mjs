@@ -13,21 +13,24 @@
 //     node_modules/...) and embeds them as they are in the repository.
 //
 //   node scripts/check-provenance.mjs similarity [--version=<v>]... [--upstream=<dir>]...
-//       [--min-raw=<tokens>] [--min-normalized=<tokens>]
+//       [--min-raw=<tokens>] [--min-normalized=<tokens>] [--reviewed=<file>|none] [--verbose]
 //     Compares src/**/*.ts with drizzle-orm's TypeScript source and prints
 //     every run of identical tokens at least --min-raw tokens long (default
-//     50), and every run of the same token shape (identifiers, strings and
+//     25), and every run of the same token shape (identifiers, strings and
 //     numbers normalised) at least --min-normalized tokens long (default
-//     100). Comments and whitespace never count. Each --version downloads that
+//     50). Comments and whitespace never count. Each --version downloads that
 //     drizzle-orm release with `npm pack` (network) and reads the TypeScript
 //     source embedded in its source maps; each --upstream reads .ts files from
 //     a directory instead. Defaults to the installed drizzle-orm version.
-//     Hits are leads for a manual review, not findings: record the review in
-//     docs/PROVENANCE.md. Exits 1 when there is a hit.
+//     Hits are leads for a manual review, not findings. A hit inside a range
+//     listed in scripts/provenance-reviewed.json (file, lines, maxTokens, why)
+//     was reviewed and is only counted; every other hit fails (exit 1) until it
+//     is reviewed and recorded there and in docs/PROVENANCE.md. Editing a file
+//     can move a reviewed range; the hit then fails again and is re-reviewed.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, normalize, relative, sep } from 'node:path';
+import { dirname, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
@@ -126,33 +129,35 @@ function checkPack() {
 	return problems;
 }
 
-/** Tokens with comments and whitespace removed: { raw, norm, line }. */
-function tokenize(text) {
-	const scanner = ts.createScanner(ts.ScriptTarget.Latest, true, ts.LanguageVariant.Standard, text);
-	const lineStarts = [0];
-	for (let i = 0; i < text.length; i++) if (text[i] === '\n') lineStarts.push(i + 1);
-	const lineOf = (pos) => {
-		let lo = 0;
-		let hi = lineStarts.length - 1;
-		while (lo < hi) {
-			const mid = (lo + hi + 1) >> 1;
-			if (lineStarts[mid] <= pos) lo = mid;
-			else hi = mid - 1;
-		}
-		return lo + 1;
-	};
+/**
+ * Tokens with comments and whitespace removed: { raw, norm, line }. The leaf
+ * tokens of the parsed tree, so template literals (`${…}` and the text after
+ * it) and regular expressions are split as the parser sees them; JSDoc is
+ * skipped like any other comment.
+ */
+export function tokenize(text) {
+	const sf = ts.createSourceFile('x.ts', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 	const out = [];
-	let kind = scanner.scan();
-	while (kind !== ts.SyntaxKind.EndOfFileToken) {
-		const raw = scanner.getTokenText();
-		let norm = raw;
-		if (kind === ts.SyntaxKind.Identifier || kind === ts.SyntaxKind.PrivateIdentifier) norm = 'I';
-		else if (kind === ts.SyntaxKind.StringLiteral || kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral) norm = 'S';
-		else if (kind === ts.SyntaxKind.NumericLiteral || kind === ts.SyntaxKind.BigIntLiteral) norm = 'N';
-		else if (kind >= ts.SyntaxKind.TemplateHead && kind <= ts.SyntaxKind.TemplateTail) norm = 'T';
-		out.push({ raw, norm, line: lineOf(scanner.getTokenStart()) });
-		kind = scanner.scan();
-	}
+	const visit = (node) => {
+		if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode) return;
+		const children = node.getChildren(sf);
+		if (children.length === 0) {
+			if (node.kind === ts.SyntaxKind.EndOfFileToken) return;
+			const kind = node.kind;
+			const raw = node.getText(sf);
+			if (raw === '') return;
+			let norm = raw;
+			if (kind === ts.SyntaxKind.Identifier || kind === ts.SyntaxKind.PrivateIdentifier) norm = 'I';
+			else if (kind === ts.SyntaxKind.StringLiteral || kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral) norm = 'S';
+			else if (kind === ts.SyntaxKind.NumericLiteral || kind === ts.SyntaxKind.BigIntLiteral) norm = 'N';
+			else if (kind >= ts.SyntaxKind.TemplateHead && kind <= ts.SyntaxKind.TemplateTail) norm = 'T';
+			else if (kind === ts.SyntaxKind.RegularExpressionLiteral) norm = 'R';
+			out.push({ raw, norm, line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1 });
+			return;
+		}
+		for (const child of children) visit(child);
+	};
+	visit(sf);
 	return out;
 }
 
@@ -182,8 +187,12 @@ function upstreamFromDir(dir) {
 	}));
 }
 
-function findRuns(ours, theirs, field, min) {
-	const K = 20;
+/**
+ * Runs of at least `min` equal tokens (`field` 'raw' or 'norm') between `ours`
+ * and `theirs` ([{ name, tokens }]), the longest match at each position.
+ */
+export function findRuns(ours, theirs, field, min) {
+	const K = Math.min(20, min);
 	const index = new Map();
 	for (const file of theirs) {
 		for (let j = 0; j + K <= file.tokens.length; j++) {
@@ -218,6 +227,9 @@ function findRuns(ours, theirs, field, min) {
 			}
 			if (best && best.n >= min) {
 				runs.push({
+					file: file.name,
+					start: tokens[i].line,
+					end: tokens[i + best.n - 1].line,
 					ours: `${file.name}:${tokens[i].line}-${tokens[i + best.n - 1].line}`,
 					theirs: `${best.other.name}:${best.other.tokens[best.j].line}-${best.other.tokens[best.j + best.n - 1].line}`,
 					tokens: best.n,
@@ -233,13 +245,23 @@ function findRuns(ours, theirs, field, min) {
 	return runs;
 }
 
+/** A run is reviewed when an entry names its file, contains its lines and allows its length. */
+function reviewedEntry(entries, run) {
+	return entries.find(
+		(e) => e.file === run.file && e.lines[0] <= run.start && run.end <= e.lines[1] && run.tokens <= e.maxTokens,
+	);
+}
+
 function checkSimilarity(argv) {
 	const opt = (name, fallback) => {
 		const flag = argv.find((a) => a.startsWith(`--${name}=`));
 		return flag ? flag.slice(name.length + 3) : fallback;
 	};
-	const minRaw = Number(opt('min-raw', 50));
-	const minNorm = Number(opt('min-normalized', 100));
+	const minRaw = Number(opt('min-raw', 25));
+	const minNorm = Number(opt('min-normalized', 50));
+	const reviewedPath = opt('reviewed', join(REPO, 'scripts/provenance-reviewed.json'));
+	const reviewed = reviewedPath === 'none' ? [] : JSON.parse(readFileSync(reviewedPath, 'utf8')).entries;
+	const verbose = argv.includes('--verbose');
 	let versions = argv.filter((a) => a.startsWith('--version=')).map((a) => a.slice(10));
 	const dirs = argv.filter((a) => a.startsWith('--upstream=')).map((a) => a.slice(11));
 	if (versions.length === 0 && dirs.length === 0) {
@@ -255,33 +277,43 @@ function checkSimilarity(argv) {
 			tokens: tokenize(readFileSync(p, 'utf8')),
 		}));
 		console.log(
-			`compared ${ours.length} files in src/ with ${theirs.length} upstream files (${[...versions.map((v) => `drizzle-orm@${v}`), ...dirs].join(', ')})`,
+			`compared ${ours.length} files in src/ with ${theirs.length} upstream files (${[...versions.map((v) => `drizzle-orm@${v}`), ...dirs].join(', ')}), thresholds ${minRaw} identical / ${minNorm} same-shape tokens`,
 		);
 		const problems = [];
+		let reviewedHits = 0;
 		for (const [field, min] of [
 			['raw', minRaw],
 			['norm', minNorm],
 		]) {
 			for (const run of findRuns(ours, theirs, field, min)) {
-				problems.push(
-					`${field === 'raw' ? 'identical' : 'same shape'} ${run.tokens} tokens: ${run.ours} ~ ${run.theirs}\n    ${run.text}`,
-				);
+				const line = `${field === 'raw' ? 'identical' : 'same shape'} ${run.tokens} tokens: ${run.ours} ~ ${run.theirs}`;
+				const entry = reviewedEntry(reviewed, run);
+				if (entry) {
+					reviewedHits++;
+					if (verbose) console.log(`reviewed (${entry.category}) ${line}`);
+				} else problems.push(`${line}\n    ${run.text}`);
 			}
 		}
+		console.log(`${reviewedHits} hit(s) match reviewed entries in ${relative(REPO, reviewedPath) || reviewedPath}`);
 		return problems;
 	} finally {
 		rmSync(tmp, { recursive: true, force: true });
 	}
 }
 
-const [mode, ...rest] = process.argv.slice(2);
-let problems;
-if (mode === 'pack') problems = checkPack();
-else if (mode === 'similarity') problems = checkSimilarity(rest);
-else {
-	console.error('Usage: check-provenance.mjs pack | similarity [--version=<v>]... [--upstream=<dir>]...');
-	process.exit(2);
+function main(argv) {
+	const [mode, ...rest] = argv;
+	let problems;
+	if (mode === 'pack') problems = checkPack();
+	else if (mode === 'similarity') problems = checkSimilarity(rest);
+	else {
+		console.error('Usage: check-provenance.mjs pack | similarity [--version=<v>]... [--upstream=<dir>]...');
+		return 2;
+	}
+	for (const p of problems) console.error(p);
+	console.log(problems.length === 0 ? 'provenance check passed' : `${problems.length} problem(s)`);
+	return problems.length === 0 ? 0 : 1;
 }
-for (const p of problems) console.error(p);
-console.log(problems.length === 0 ? 'provenance check passed' : `${problems.length} problem(s)`);
-process.exit(problems.length === 0 ? 0 : 1);
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]))
+	process.exit(main(process.argv.slice(2)));

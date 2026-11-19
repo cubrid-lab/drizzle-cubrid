@@ -11,20 +11,25 @@ file covers third-party material distributed in this package.
   drizzle-orm has no `NOTICE` file and its source files carry no copyright
   headers, so there is no further notice to reproduce.
 - Portions in this package: parts of two files of the deprecated 0.x API
-  (`drizzle-cubrid/legacy`) follow drizzle-orm 0.38.x code closely:
-  - `src/session.ts` (in `dist/legacy.*`): the `CubridSession` constructor and
-    `prepareQuery()` shape and the BEGIN/COMMIT fallback in
-    `CubridSession.transaction()` follow `MySql2Session`, and the savepoints in
-    `CubridTransaction.transaction()` follow `MySql2Transaction`, both in
-    `src/mysql2/session.ts`; the `CubridPreparedQuery` constructor follows
-    `PreparedQuery` in `src/mysql-proxy/session.ts`;
-  - `src/driver.ts` (in `dist/legacy.*`): the logger and relational-schema
-    setup in `construct()` follow `drizzle()` in `src/mysql2/driver.ts`.
+  (`drizzle-cubrid/legacy`, built into `dist/legacy.*`) follow drizzle-orm's
+  MySQL drivers (0.38.x to 0.45.x) closely, including:
+  - `src/session.ts`: the `CubridPreparedQuery` constructor (`PreparedQuery`
+    in `src/mysql-proxy/session.ts`) and the start of its `execute()`
+    (`MySql2PreparedQuery` in `src/mysql2/session.ts`); the `CubridSession`
+    constructor and `prepareQuery()` (`MySql2Session`, and
+    `MySqlRemoteSession` in `src/mysql-proxy/session.ts`); `all()`
+    (`MySqlRemoteSession`); the BEGIN/COMMIT fallback in
+    `CubridSession.transaction()` (`MySql2Session`); and the savepoints in
+    `CubridTransaction.transaction()` (`MySql2Transaction`);
+  - `src/driver.ts`: the logger and relational-schema setup in `construct()`
+    (`drizzle()` in `src/mysql2/driver.ts`).
 - Changes: the drizzle-cubrid contributors changed these portions for CUBRID
   and cubrid-client (transactions on cubrid-client's `transaction()`,
   isolation levels, no `RELEASE SAVEPOINT`, value binding, CUBRID row and
   result mapping). Each file says so in its header, which the build keeps in
   `dist/legacy.*`.
+- Since: this notice ships from the release after 0.2.1. Releases 0.1.0 to
+  0.2.1 did not include it.
 
 Much of these portions is dictated by drizzle-orm's public extension API (the
 abstract `MySqlSession` and `MySqlTransaction` methods and the relational

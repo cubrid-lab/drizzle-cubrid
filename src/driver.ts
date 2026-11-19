@@ -2,7 +2,7 @@
  * drizzle-cubrid 0.x API (drizzle-cubrid/legacy): src/driver.ts
  *
  * Portions of this file (the logger and relational-schema setup in
- * construct()) follow drizzle() in drizzle-orm 0.38.x src/mysql2/driver.ts
+ * construct()) follow drizzle() in drizzle-orm (0.38.x-0.45.x) src/mysql2/driver.ts
  * (https://github.com/drizzle-team/drizzle-orm), by the Drizzle Team,
  * licensed under the Apache License, Version 2.0. The drizzle-cubrid
  * contributors changed them for CUBRID and cubrid-client. See
