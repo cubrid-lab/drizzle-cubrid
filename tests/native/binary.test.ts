@@ -78,6 +78,22 @@ describe('SQL types and lengths', () => {
 		expect(text).toContain('"data" BIT VARYING(64)');
 		expect(text).toContain('"parts" SET(BIT VARYING(16))');
 	});
+
+	it('renders a bytes .default() as an X literal, padded and checked by the codec', () => {
+		const withDefaults = cubridTable('defaults', {
+			hash: binary({ length: 4 }).default(Buffer.from([0xab, 0x01])),
+			data: varbinary({ length: 4 }).default(new Uint8Array([0, 0x0f])),
+		});
+		const text = generateInitialMigration({ withDefaults });
+		expect(text).toContain(`"hash" BIT(32) DEFAULT X'ab010000'`);
+		expect(text).toContain(`"data" BIT VARYING(32) DEFAULT X'000f'`);
+		const tooLong = cubridTable('too_long', { hash: binary({ length: 1 }).default(Buffer.from([1, 2])) });
+		expect(() => generateInitialMigration({ tooLong })).toThrow(/2 bytes, more than the column's 1/);
+		const empty = cubridTable('empty', { data: varbinary({ length: 1 }).default(new Uint8Array(0)) });
+		expect(() => generateInitialMigration({ empty })).toThrow(/is empty/);
+		const text2 = cubridTable('text_default', { hash: binary({ length: 1 }).default('ab' as never) });
+		expect(() => generateInitialMigration({ text2 })).toThrow(/must be a Buffer or Uint8Array/);
+	});
 });
 
 describe('writes', () => {

@@ -337,13 +337,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          sparse-checkout: scripts/packed-exports-smoke.cjs
+          sparse-checkout: |
+            scripts/packed-exports-smoke.cjs
+            scripts/packed-types-check.mjs
           sparse-checkout-cone-mode: false
           path: repo
       - name: Exercise CJS and ESM exports on Node 18
         working-directory: consumer
         # Copied so that require() and import() resolve from the consumer.
         run: cp ../repo/scripts/packed-exports-smoke.cjs . && node packed-exports-smoke.cjs
+      - name: Type-check binary column types with and without @types/node
+        working-directory: consumer
+        run: cp ../repo/scripts/packed-types-check.mjs . && node packed-types-check.mjs
 
   packed-live-cubrid:
     # The release gate in publish.yml runs this on the tag's tarball; running it

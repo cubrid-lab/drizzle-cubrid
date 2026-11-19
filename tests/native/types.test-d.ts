@@ -288,7 +288,8 @@ describe('binary columns (#216)', () => {
 
 	it('reads and writes bytes: Buffer with Node types, Uint8Array without them', () => {
 		// tests/native has no Node types, so CubridBytes is Uint8Array here;
-		// a consumer with @types/node gets Buffer (checked against the build).
+		// a consumer with @types/node gets Buffer (scripts/packed-types-check.mjs
+		// checks the packed tarball both ways in the Node 18 consumer jobs).
 		expectTypeOf<CubridBytes>().toEqualTypeOf<Uint8Array>();
 		expectTypeOf(files.$inferSelect).toEqualTypeOf<{
 			id: number;

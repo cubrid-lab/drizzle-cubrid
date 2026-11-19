@@ -978,16 +978,26 @@ required, from 1 to 134217727 (CUBRID's limit of 1073741823 bits). Values are
   otherwise, for `BIT` and `BIT VARYING` under both bindings (verified live).
 - Comparisons such as `eq()` and `inArray()` send the value through the same
   codec under both bindings; `iterator()` sends it as an `X'…'` literal.
+- **Placeholder and raw `sql` values bypass the codec.** The value of a
+  `sql.placeholder()` (`eq(t.hash, sql.placeholder('h'))`) and a value written
+  into a raw template (`` sql`${t.hash} = ${buf}` ``) are sent as given: a
+  `BIT` value is not padded, so a short one silently matches nothing, and a
+  string is not refused. Pass such values as `Buffer`s, padded to the full
+  `BIT(n)` length yourself.
 - Binary elements in `set()`, `multiset()` and `sequence()` use the same
   codec (`set({ element: varbinary({ length: 16 }) })` is
   `SET(BIT VARYING(128))`), including the length check and the refusal of an
   empty `varbinary` element.
 - A binary column cannot be a relation key in relational queries (refused
   before anything is sent).
+- `.default(Buffer)` goes through the same codec (padded, length-checked, an
+  empty `varbinary` default refused) and `generateInitialMigration()` writes
+  it as an `X'…'` literal.
 
 The TypeScript type is `CubridBytes`: Node's `Buffer` when the program has
 Node's types (`@types/node`), `Uint8Array` otherwise. The declarations never
-name `Buffer`, so they compile either way. With Node's types, `$inferInsert`
+name `Buffer`, so they compile either way; CI type-checks the packed tarball
+both ways (`scripts/packed-types-check.mjs`, Node 18 consumer jobs). With Node's types, `$inferInsert`
 takes a `Buffer`; a plain `Uint8Array` is accepted at run time but needs a
 cast (`Buffer.from(bytes)` avoids it).
 

@@ -4715,6 +4715,24 @@ describe('drizzle-cubrid/native binary() and varbinary() round-trip Buffer value
 		]);
 	});
 
+	it(
+		'applies a bytes .default() rendered by createTableSql()',
+		async () => {
+			const defaults = native.cubridTable(name('nbindefault'), {
+				id: native.integer().primaryKey(),
+				hash: native.binary({ length: 4 }).default(Buffer.from('ab01', 'hex')),
+				data: native.varbinary({ length: 4 }).default(Buffer.from('000f', 'hex')),
+			});
+			const table = `"${native.getTableConfig(defaults).name}"`;
+			await client.query(createTableSql(defaults));
+			created.push(table);
+			await native.drizzle(client).insert(defaults).values({ id: 1 });
+			const [row] = await native.drizzle(client).select().from(defaults);
+			expect([hex(row?.hash), hex(row?.data)]).toEqual(['ab010000', '000f']);
+		},
+		DDL_TIMEOUT,
+	);
+
 	for (const [binding, base] of [
 		['prepared', 0],
 		['literal', 100],
