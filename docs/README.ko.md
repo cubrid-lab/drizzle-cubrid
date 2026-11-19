@@ -18,7 +18,7 @@
 
 ---
 
-> **커뮤니티 어댑터:** `drizzle-cubrid`는 CUBRID Lab이 독립적으로 유지보수하는 어댑터이며, 공식 `drizzle-orm` 다이얼렉트나 Drizzle Kit 내장 통합이 아닙니다. Drizzle Kit은 어떤 다이얼렉트로도 지원하지 않으며, Drizzle Kit의 MySQL 다이얼렉트가 CUBRID와 호환된다고 가정하지 마세요. CUBRID 전용 마이그레이터가 CUBRID SQL 파일을 순서대로 적용합니다 ([스키마 마이그레이션](MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)).
+> **커뮤니티 어댑터:** `drizzle-cubrid`는 CUBRID Lab이 독립적으로 유지보수하는 어댑터이며, 공식 `drizzle-orm` 다이얼렉트나 Drizzle Kit 내장 통합이 아닙니다. Drizzle Kit은 어떤 다이얼렉트로도 지원하지 않으며, Drizzle Kit의 MySQL 다이얼렉트가 CUBRID와 호환된다고 가정하지 마세요. 실험적 CUBRID 전용 마이그레이터가 CUBRID SQL 파일을 순서대로 적용합니다 ([스키마 마이그레이션](MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)).
 
 > **0.3부터 루트 엔트리가 바뀝니다.** `drizzle-cubrid`는 이제 CUBRID 네이티브 다이얼렉트입니다(0.2까지의 `drizzle-cubrid/native` 미리보기이며, 이 경로도 별칭으로 계속 동작합니다). Drizzle의 MySQL 클래스를 기반으로 한 0.x API는 **`drizzle-cubrid/legacy`** 로 옮겨졌습니다. 이 API는 더 이상 권장되지 않으며(deprecated), 처음 불러올 때 `DRIZZLE_CUBRID_LEGACY` 코드의 DeprecationWarning을 한 번 출력하고, 1.0에서 제거됩니다. [0.x에서 마이그레이션하기](MIGRATING_FROM_0X.md)(영문)와 [ADR 0010](adr/0010-promote-native-root-deprecate-0x.md)을 참고하세요.
 
@@ -34,7 +34,8 @@ CUBRID는 한국 공공기관 및 기업 환경에서 널리 사용되는 고성
 - [`cubrid-client`](https://github.com/cubrid-lab/cubrid-client) 기반 — 모던 TypeScript CUBRID 드라이버
 - 코덱을 갖춘 CUBRID 타입: `SET`, `MULTISET`, `SEQUENCE`, `MONETARY`, 정확한 문자열 `NUMERIC`, `bigint` `BIGINT`, `Buffer` `BIT`
 - 세이브포인트를 활용한 트랜잭션, `with`를 지원하는 관계형 쿼리, `prepare()`, 스트리밍(`iterator()`)
-- 1.0 이전 API이므로 마이너 릴리스에서 마이그레이션 안내와 함께 바뀔 수 있습니다 ([ADR 0001](adr/0001-release-governance.md)).
+
+> **1.0 이전:** API는 마이너 릴리스에서 (마이그레이션 안내와 함께) 바뀔 수 있으며([ADR 0001](adr/0001-release-governance.md)), 프로덕션 사용은 아직 승인(sign-off)되지 않았습니다([DESIGN_SIGNOFF.md](DESIGN_SIGNOFF.md)). 마이그레이터는 실험적 기능입니다([COMPATIBILITY.md](COMPATIBILITY.md)).
 
 ## 요구 사항
 
@@ -55,7 +56,7 @@ npm install drizzle-cubrid drizzle-orm cubrid-client
 | import | 내용 |
 | --- | --- |
 | `drizzle-cubrid` | CUBRID 네이티브 다이얼렉트: 테이블, 컬럼 빌더, `drizzle()`, Drizzle 연산자(`eq`, `and`, `sql` 등) |
-| `drizzle-cubrid/migrator` | CUBRID SQL 마이그레이션용 `migrate()`, `readMigrationFiles()` ([MIGRATIONS.md](MIGRATIONS.md)) |
+| `drizzle-cubrid/migrator` | 실험적: CUBRID SQL 마이그레이션용 `migrate()`, `readMigrationFiles()` ([MIGRATIONS.md](MIGRATIONS.md)) |
 | `drizzle-cubrid/native`, `drizzle-cubrid/native/migrator` | 위 두 엔트리의 별칭(1.x 동안 유지). 같은 모듈이므로 클래스도 같습니다 |
 | `drizzle-cubrid/legacy` | **Deprecated** 0.x API(MySQL 기반), 1.0에서 제거 ([마이그레이션 가이드](MIGRATING_FROM_0X.md)) |
 

@@ -101,8 +101,11 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 	const silenced = node(['--no-deprecation'], both);
 	assert.equal(silenced.status, 0, silenced.stderr);
 	assert.doesNotMatch(silenced.stderr, /DRIZZLE_CUBRID_LEGACY/);
-	const thrown = node(['--throw-deprecation'], "require('drizzle-cubrid/legacy');");
+	// Node throws the warning on the next tick: the process fails with an
+	// uncaught DeprecationWarning, and a try/catch around the require catches nothing.
+	const thrown = node(['--throw-deprecation'], "try { require('drizzle-cubrid/legacy'); } catch { process.exit(3); }");
 	assert.notEqual(thrown.status, 0);
+	assert.notEqual(thrown.status, 3, 'the import itself must not throw');
 	assert.match(thrown.stderr, /DRIZZLE_CUBRID_LEGACY/);
 	const quiet = node(['--throw-deprecation'], "require('drizzle-cubrid'); require('drizzle-cubrid/native');");
 	assert.equal(quiet.status, 0, quiet.stderr);

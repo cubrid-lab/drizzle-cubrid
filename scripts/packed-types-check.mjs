@@ -6,7 +6,9 @@
 //   for one without.
 // - The export layout (ADR 0010): the root and drizzle-cubrid/native have the
 //   same types, a removed 0.x name fails to compile when used from the root,
-//   and drizzle-cubrid/legacy still type-checks the 0.x API.
+//   and drizzle-cubrid/legacy still type-checks the 0.x API, under both
+//   `moduleResolution: nodenext` (package.json exports) and `node10`
+//   (package.json typesVersions).
 // Usage (from the consumer directory): node packed-types-check.mjs
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -89,18 +91,26 @@ try {
 		console.log(`binary column types, ${name === 'node' ? 'with' : 'without'} @types/node: ok`);
 	}
 	writeFileSync(join(dir, 'layout.ts'), layout);
-	const compilerOptions = {
-		strict: true,
-		noEmit: true,
-		module: 'nodenext',
-		moduleResolution: 'nodenext',
-		target: 'es2022',
-		skipLibCheck: true,
-		types: ['node'],
-	};
-	writeFileSync(join(dir, 'tsconfig.layout.json'), JSON.stringify({ compilerOptions, files: ['layout.ts'] }));
-	execFileSync(npx, ['tsc', '-p', join(dir, 'tsconfig.layout.json')], { stdio: 'inherit' });
-	console.log('export layout (root = native, /native alias, /migrator, /legacy): ok');
+	// nodenext reads package.json `exports`; node10 (TypeScript's default for
+	// `module: commonjs`) ignores them and needs `typesVersions` for every subpath.
+	for (const [resolution, module] of [
+		['nodenext', 'nodenext'],
+		['node10', 'commonjs'],
+	]) {
+		const compilerOptions = {
+			strict: true,
+			noEmit: true,
+			module,
+			moduleResolution: resolution,
+			target: 'es2022',
+			skipLibCheck: true,
+			types: ['node'],
+		};
+		const config = join(dir, `tsconfig.layout-${resolution}.json`);
+		writeFileSync(config, JSON.stringify({ compilerOptions, files: ['layout.ts'] }));
+		execFileSync(npx, ['tsc', '-p', config], { stdio: 'inherit' });
+		console.log(`export layout (root = native, /native alias, /migrator, /legacy), ${resolution}: ok`);
+	}
 } finally {
 	rmSync(dir, { recursive: true, force: true });
 }

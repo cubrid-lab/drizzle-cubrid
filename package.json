@@ -58,6 +58,22 @@
       }
     }
   },
+  "typesVersions": {
+    "*": {
+      "legacy": [
+        "./dist/legacy.d.ts"
+      ],
+      "migrator": [
+        "./dist/native-migrator.d.ts"
+      ],
+      "native": [
+        "./dist/index.d.ts"
+      ],
+      "native/migrator": [
+        "./dist/native-migrator.d.ts"
+      ]
+    }
+  },
   "files": [
     "dist",
     "README.md",

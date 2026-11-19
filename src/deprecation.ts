@@ -19,9 +19,10 @@ const WARNED = Symbol.for('drizzle-cubrid.legacy-deprecation-warned');
 
 /**
  * Emits the deprecation warning unless this process already did. Node's
- * `--no-deprecation` silences it, `--throw-deprecation` turns it into an
- * exception and `--trace-deprecation` adds a stack trace, as for Node's own
- * deprecations.
+ * `--no-deprecation` silences it, `--trace-deprecation` adds a stack trace,
+ * and `--throw-deprecation` makes Node throw it on the next tick, as an
+ * uncaught exception that ends the process (not catchable around the import;
+ * use `process.on('warning')` for that), as for Node's own deprecations.
  */
 export function emitLegacyDeprecationWarning(): void {
 	const flags = globalThis as { [WARNED]?: boolean };

@@ -8,7 +8,7 @@
 
 **Drizzle ORM dialect for the CUBRID database** — TypeScript-first, type-safe schema definition and query builder for Node.js.
 
-> **Community adapter:** `drizzle-cubrid` is independently maintained by CUBRID Lab. It is not an official `drizzle-orm` dialect or a built-in Drizzle Kit integration. Drizzle Kit is not supported in any dialect; do not assume that its MySQL dialect is compatible with CUBRID. A CUBRID-native migrator applies hand-written or generated CUBRID SQL files (see [Schema migrations](docs/MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)).
+> **Community adapter:** `drizzle-cubrid` is independently maintained by CUBRID Lab. It is not an official `drizzle-orm` dialect or a built-in Drizzle Kit integration. Drizzle Kit is not supported in any dialect; do not assume that its MySQL dialect is compatible with CUBRID. An experimental CUBRID-native migrator applies hand-written or generated CUBRID SQL files (see [Schema migrations](docs/MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)).
 
 > **0.3 changes the root entry.** `drizzle-cubrid` is now the CUBRID-native dialect, which until 0.2 was the `drizzle-cubrid/native` preview (still available as an alias). The 0.x API built on Drizzle's MySQL classes moved to **`drizzle-cubrid/legacy`**: it is deprecated, prints a one-time `DRIZZLE_CUBRID_LEGACY` deprecation warning, and will be removed in 1.0. See [Migrating from 0.x](docs/MIGRATING_FROM_0X.md) and [ADR 0010](docs/adr/0010-promote-native-root-deprecate-0x.md).
 
@@ -34,10 +34,10 @@
 - **Transactions with savepoints** — each transaction on its own connection; nested transactions are savepoints
 - **Relational queries** — `db.query.users.findMany({ with: { posts: true } })`, without `LATERAL` or JSON
 - **Prepared queries and streaming** — `prepare()` on every query, `iterator()` on selects
-- **Schema migrations** — ordered CUBRID SQL files, one transaction per migration
+- **Schema migrations (experimental)** — ordered CUBRID SQL files, one transaction per migration
 - **Tested** — offline unit tests with a 95% coverage gate, a live CUBRID 11.4 suite and a packed-tarball live suite on every code change in CI
 
-The API is pre-1.0: it can still change in a minor release, with migration notes ([ADR 0001](docs/adr/0001-release-governance.md)).
+> **Pre-1.0:** the API can change in a minor release (with migration notes, [ADR 0001](docs/adr/0001-release-governance.md)), and production use is not yet signed off (see [docs/DESIGN_SIGNOFF.md](docs/DESIGN_SIGNOFF.md)). The migrator is experimental ([COMPATIBILITY.md](docs/COMPATIBILITY.md)).
 
 ### Architecture
 
@@ -70,7 +70,7 @@ npm install drizzle-cubrid drizzle-orm cubrid-client
 | Import | What it is |
 | --- | --- |
 | `drizzle-cubrid` | The CUBRID-native dialect: tables, column builders, `drizzle()`, and Drizzle's operators (`eq`, `and`, `sql`, …) |
-| `drizzle-cubrid/migrator` | `migrate()` and `readMigrationFiles()` for CUBRID SQL migrations ([MIGRATIONS.md](docs/MIGRATIONS.md)) |
+| `drizzle-cubrid/migrator` | Experimental: `migrate()` and `readMigrationFiles()` for CUBRID SQL migrations ([MIGRATIONS.md](docs/MIGRATIONS.md)) |
 | `drizzle-cubrid/native`, `drizzle-cubrid/native/migrator` | Aliases of the two above, kept through 1.x; the same modules, so the same classes |
 | `drizzle-cubrid/legacy` | **Deprecated** 0.x API (MySQL-based), removed in 1.0 ([migration guide](docs/MIGRATING_FROM_0X.md)) |
 
@@ -276,7 +276,7 @@ try {
 | Document | Description |
 |----------|-------------|
 | [Native API](docs/NATIVE_API.md) | Tables, column builders, codecs, queries, writes, transactions, relational queries, prepared queries and streaming |
-| [Schema migrations](docs/MIGRATIONS.md) | CUBRID-native migrator: file format, refusals, recovery, what is not implemented |
+| [Schema migrations](docs/MIGRATIONS.md) | Experimental CUBRID-native migrator: file format, refusals, recovery, what is not implemented |
 | [Migrating from 0.x](docs/MIGRATING_FROM_0X.md) | From the deprecated MySQL-based API (`drizzle-cubrid/legacy`) to the native one |
 | [Compatibility](docs/COMPATIBILITY.md) | Peer ranges and what is verified |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common errors, TypeScript issues, performance tips |

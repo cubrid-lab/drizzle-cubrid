@@ -38,8 +38,8 @@ It is a standard Node.js deprecation warning, code `DRIZZLE_CUBRID_LEGACY`:
 | Silence all deprecation warnings | `node --no-deprecation`, or `NODE_OPTIONS=--no-deprecation` |
 | Silence only this one (Node 20.11+/21.3+) | `node --disable-warning=DRIZZLE_CUBRID_LEGACY` |
 | Find the code that imports it | `node --trace-deprecation` |
-| Make it fail (CI) | `node --throw-deprecation`: the import throws |
-| Handle it yourself | `process.on('warning', (w) => w.code === 'DRIZZLE_CUBRID_LEGACY' && …)` |
+| Make it fail (CI) | `node --throw-deprecation`: Node throws the warning on the next tick, so the process ends with an uncaught `DeprecationWarning`. A `try`/`catch` around the import catches nothing |
+| Check it in code | `process.on('warning', (w) => { if (w.code === 'DRIZZLE_CUBRID_LEGACY') … })` |
 
 The root entry and `drizzle-cubrid/native` never print it. Editors show every
 `drizzle-cubrid/legacy` export as deprecated (`@deprecated`), with the native
@@ -50,9 +50,11 @@ If you skip step 1, 0.x code that imports from the root fails loudly instead
 of misbehaving:
 
 - A name that the native API has too (`drizzle`, `cubridTable`, `int`,
-  `varchar`, `timestamp`, `set`, …) now means the native one. Its options
-  differ (below), so TypeScript reports errors such as
-  `Property 'autoincrement' does not exist`.
+  `varchar`, `timestamp`, `set`, …) now means the native one. Some 0.x usages
+  fail to compile (`Property 'autoincrement' does not exist`), but **some
+  compile unchanged and run with native semantics**; see
+  [Behaviour differences](#behaviour-differences). Do step 1 rather than rely
+  on the compiler to find them.
 - A 0.x name the native API does not have (`cubridSet`, `cubridMultiset`,
   `cubridSequence`, `customType`, `tinyint`, `mediumint`, `serial`, `year`,
   `real`, `text`, `tinytext`, `mediumtext`, `longtext`,
@@ -88,12 +90,12 @@ one.
 | `smallint`, `bigint('x', { mode })`, `decimal`, `float`, `double`, `char`, `varchar`, `boolean` | Same names; options below |
 | `tinyint` | `smallint()` (CUBRID has no 8-bit integer) |
 | `mediumint` | `integer()` |
-| `serial` | `bigint({ mode: 'bigint' }).primaryKey().autoIncrement()` |
+| `serial` | `bigint({ mode: 'bigint' }).primaryKey().autoIncrement()`. The TypeScript type changes from `number` to `bigint` (use `mode: 'number'` to keep `number`, exact only up to 2^53 − 1), and MySQL's `SERIAL` also meant `UNSIGNED` and `UNIQUE`: CUBRID has no unsigned integers, and a primary key is already unique |
 | `year` | `smallint()` |
 | `real` | `double()` |
 | `text`, `tinytext`, `mediumtext`, `longtext` | `string()` (`STRING`) or `varchar({ length })` |
 | `mysqlEnum` | `varchar({ length }).$type<'a' \| 'b'>()` (not enforced by the server) |
-| `date`, `datetime`, `timestamp`, `time` | Same names; see [Date and time](#date-and-time) |
+| `date`, `datetime`, `timestamp`, `time` | Same names; see [Behaviour differences](#behaviour-differences) and [Date and time](NATIVE_API.md#date-and-time) |
 | `binary`, `varbinary` (always threw in 0.x, #216) | `binary({ length })`, `varbinary({ length })` with `Buffer` values |
 | `cubridSet`, `set` | `set({ element })` |
 | `cubridMultiset`, `multiset` | `multiset({ element })` |
@@ -106,7 +108,7 @@ one.
 
 ```diff
 -import { cubridTable, cubridSet, int, timestamp, varchar } from 'drizzle-cubrid';
-+import { cubridTable, datetime, integer, set, varchar } from 'drizzle-cubrid';
++import { cubridTable, integer, set, timestamp, varchar } from 'drizzle-cubrid';
 
  export const users = cubridTable('users', {
 -  id: int('id').primaryKey().autoincrement(),
@@ -116,13 +118,13 @@ one.
 +  id: integer().primaryKey().autoIncrement(),
 +  name: varchar({ length: 100 }).notNull(),
 +  tags: set({ element: varchar({ length: 20 }) }),
-+  createdAt: datetime('created_at'), // DEFAULT comes from the DDL; see below
++  createdAt: timestamp('created_at'), // no defaultNow(): DEFAULT comes from the DDL; see below
  });
 ```
 
 - **Column names.** A native builder called without a name uses its key in
   the table (`id: integer()` is column `id`). Pass the name first when it
-  differs (`createdAt: datetime('created_at')`).
+  differs (`createdAt: timestamp('created_at')`).
 - **`.autoincrement()` → `.autoIncrement()`**, on `smallint`, `integer`/`int`
   and `bigint`.
 - **`bigint` needs a mode:** `bigint({ mode: 'bigint' })` is exact over the
@@ -154,11 +156,14 @@ one.
 | Parameters | Typed binds by default, `binding: 'literal'` optional | The same choice, but every value goes through its column's codec: integers are range-checked, `NUMERIC` written exactly, `CHAR` values sent as `cast(? as CHAR(n))`; an array parameter is refused ([Binding](NATIVE_API.md#binding)) |
 | Unsupported SQL | Some MySQL constructs refused (#189), others sent | Refused before anything is sent: FULL/LATERAL joins, `for('share')`, `offset()` without `limit()`, comparing a collection with a value, … ([Errors and refusals](NATIVE_API.md#errors-and-refusals)) |
 | Binary data | `binary()`/`varbinary()` throw | `BIT(n*8)`/`BIT VARYING(n*8)` with `Buffer` values, length-checked ([Binary](NATIVE_API.md#binary)) |
-| `boolean()` | MySQL boolean builder | `SMALLINT` 1/0; any other stored value throws on read |
+| `int()`, `smallint()`, `integer()` writes | Sent as given | Integers only, range-checked: `1.5` throws a `TypeError` before sending instead of being rounded by the server |
+| `boolean()` | MySQL boolean builder, `true`/`false` sent as given | `true`/`false` written as `1`/`0` (`SMALLINT`); any other value throws on write, and any stored value other than 0/1 throws on read |
+| `date()` writes (`mode: 'date'`) | The `Date` object, as cubrid-client encodes it (with its time of day) | Only `YYYY-MM-DD` of the `Date`'s UTC fields |
+| `timestamp()` writes (`mode: 'date'`) | Text with milliseconds, which the server drops | Whole seconds `YYYY-MM-DD HH:MM:SS` sent; range 1970-01-01 00:00:01–2038-01-19 03:14:07 UTC checked first |
 | `monetary()` | String | String (double precision on the server, as before) |
 | Relational queries | `findMany`/`findFirst` without `with`; `with` refused (#200) | `with` to any depth, without `LATERAL` or JSON; `relationalReads` decides the snapshot ([Relational queries](NATIVE_API.md#relational-queries)) |
 | Write results | Array with `affectedRows`/`lastInsertId` | `CubridDmlResult` `{ affectedRows, lastInsertId? }`; `$returningId()` as before ([Results](NATIVE_API.md#results)) |
-| `db.execute(sql\`…\`)` | Rows or write metadata | Rows as cubrid-client returns them, not decoded |
+| `db.execute(sql\`…\`)` | Rows, or for a write an array carrying `affectedRows`/`lastInsertId` | Rows as cubrid-client returns them, not decoded; for a write there is no `affectedRows` on the result (it is `undefined` in plain JavaScript, a type error in TypeScript): use `db.insert()`/`update()`/`delete()` for write counts |
 | Transactions | `transaction()` of the client, or `BEGIN`/`COMMIT` on a client without it | `transaction()` of the client is required (a client without it is refused, #185); nested transactions are savepoints; `tx.rollback()` throws `CubridTransactionRollbackError` ([Transactions](NATIVE_API.md#transactions)) |
 | Streaming | `iterator()` throws | `iterator()` on selects and set operations ([Streaming](NATIVE_API.md#streaming)) |
 | Prepared queries | `prepare()` | `prepare()` on every query, relational ones included ([Prepared queries](NATIVE_API.md#prepared-queries)) |
@@ -173,7 +178,9 @@ one.
 3. Compare the generated SQL (`.toSQL()`) and the results of your important
    queries against a CUBRID test database.
 4. When nothing imports `drizzle-cubrid/legacy` any more, run with
-   `--throw-deprecation` in CI to keep it that way.
+   `--throw-deprecation` in CI (the run then fails with an uncaught
+   `DeprecationWarning` if anything loads it), or fail a test from a
+   `process.on('warning')` listener, to keep it that way.
 5. Upgrade to 1.0 when it is released; `drizzle-cubrid/legacy` is gone there.
 
 See [NATIVE_API.md](NATIVE_API.md) for the full native reference and

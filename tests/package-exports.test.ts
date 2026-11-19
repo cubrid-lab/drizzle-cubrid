@@ -35,6 +35,23 @@ describe('package.json exports', () => {
 		expect(manifest.exports['./legacy']).toEqual(entry('legacy'));
 	});
 
+	it('maps every subpath in typesVersions for moduleResolution node10, which ignores exports', () => {
+		expect(manifest.typesVersions).toEqual({
+			'*': {
+				legacy: ['./dist/legacy.d.ts'],
+				migrator: ['./dist/native-migrator.d.ts'],
+				native: ['./dist/index.d.ts'],
+				'native/migrator': ['./dist/native-migrator.d.ts'],
+			},
+		});
+		const subpaths = Object.keys(manifest.exports)
+			.filter((k) => k !== '.')
+			.map((k) => k.slice(2));
+		for (const sub of subpaths) {
+			expect(manifest.typesVersions['*'][sub]).toEqual([manifest.exports[`./${sub}`].import.types]);
+		}
+	});
+
 	it('keeps main, module and types on the root entry for tools that ignore exports', () => {
 		expect([manifest.main, manifest.module, manifest.types]).toEqual([
 			'./dist/index.cjs',

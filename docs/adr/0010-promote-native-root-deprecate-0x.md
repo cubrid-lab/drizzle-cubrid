@@ -53,7 +53,12 @@ this reason (ADR 0009, decision 1).
    | `drizzle-cubrid/native/migrator` | the same `dist/native-migrator.*` files | An alias, kept through all of 1.x |
    | `drizzle-cubrid/legacy` | `dist/legacy.*` | The deprecated 0.x API, unchanged: `src/legacy.ts` (the former `src/index.ts`) |
 
-   `main`, `module` and `types` keep pointing at `dist/index.*`.
+   `main`, `module` and `types` keep pointing at `dist/index.*`. TypeScript's
+   `moduleResolution: node10` (the default for `module: commonjs`) ignores
+   `exports`, so `typesVersions` maps `legacy`, `native`, `migrator` and
+   `native/migrator` to the same `.d.ts` files; without it those subpaths fail
+   with TS2307 for exactly the CommonJS 0.x users step 1 of the migration
+   addresses (`scripts/packed-types-check.mjs` checks both resolutions).
 
 2. **One module instance per alias.** `drizzle-cubrid` and
    `drizzle-cubrid/native` resolve to the *same files* in the export map; no
@@ -83,9 +88,15 @@ this reason (ADR 0009, decision 1).
 
 4. **The root fails loudly for 0.x names it no longer has.** Most 0.x names
    have a native export of the same name (`drizzle`, `cubridTable`, `int`,
-   `varchar`, `set`, `monetary`, …) whose signature differs enough for
-   TypeScript to reject 0.x usage (for example `.autoincrement()` is
-   `.autoIncrement()`). Drizzle's operators the 0.x root re-exported (`and`,
+   `varchar`, `set`, `monetary`, …). Some 0.x usages of them fail to compile
+   (`.autoincrement()` is `.autoIncrement()`, `bigint` needs a mode), but
+   others compile unchanged and run with native semantics: an `int` value
+   with a fraction throws, `boolean` writes 1/0, `date()` writes only
+   `YYYY-MM-DD`, `timestamp()` writes whole seconds, and `db.execute()`
+   returns the driver's rows (no `affectedRows` on them). The migration
+   guide's "Behaviour differences" lists each; these names are therefore not
+   a loud failure, which is why step 1 of the guide is an import change and
+   not "fix what the compiler reports". Drizzle's operators the 0.x root re-exported (`and`,
    `asc`, `avg`, `count`, `desc`, `eq`, `gt`, `gte`, `lt`, `lte`, `max`, `min`,
    `ne`, `not`, `or`, `placeholder`, `sql`, `sum`) stay exported from the root
    as drizzle-orm's own objects, so `import { eq, sql } from 'drizzle-cubrid'`
@@ -119,8 +130,11 @@ this reason (ADR 0009, decision 1).
    that module and never warn. The warning is emitted at load time rather than
    at first use, so it appears once at start-up instead of in the middle of a
    request. Node's standard controls apply: `--no-deprecation` (or
-   `NODE_OPTIONS=--no-deprecation`) silences it, `--throw-deprecation` turns
-   it into an exception at import, `--trace-deprecation` adds the stack of the
+   `NODE_OPTIONS=--no-deprecation`) silences it, `--throw-deprecation` makes the
+   process fail with an uncaught `DeprecationWarning` on the next tick (Node
+   throws it asynchronously, so a `try`/`catch` around the `require` or
+   `import` catches nothing; for a catchable check use a
+   `process.on('warning')` listener), `--trace-deprecation` adds the stack of the
    importing code, a `process.on('warning')` listener can filter on
    `warning.code === 'DRIZZLE_CUBRID_LEGACY'`, and on Node 21.3+/20.11+
    `--disable-warning=DRIZZLE_CUBRID_LEGACY` silences only this one.
@@ -220,8 +234,8 @@ this reason (ADR 0009, decision 1).
   and the same for `import`.
 - [x] The warning is emitted once, with its type and code, only by the legacy
   entry (`tests/legacy-entry.test.ts`); in a real Node 18 process it appears
-  once for `require` plus `import`, not at all with `--no-deprecation`, throws
-  with `--throw-deprecation`, and never for the root or `/native`
+  once for `require` plus `import`, not at all with `--no-deprecation`, ends the
+  process with an uncaught `DeprecationWarning` with `--throw-deprecation`, and never for the root or `/native`
   (`scripts/packed-exports-smoke.cjs`).
 - [x] The placeholders throw `CubridRemovedExportError` naming the
   replacement (`tests/native/removed.test.ts`) and do not compile when called

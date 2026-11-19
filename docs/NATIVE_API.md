@@ -6,9 +6,10 @@
 > [ADR 0010](adr/0010-promote-native-root-deprecate-0x.md)). Until 0.2 it was
 > the experimental `drizzle-cubrid/native` entry, which stays an alias of the
 > root through 1.x: both specifiers load the same module, so tables, databases
-> and classes from either are the same objects. The API is pre-1.0 and can
+> and classes from either are the same objects. **Pre-1.0:** the API can
 > still change in a minor release, with migration notes
-> ([ADR 0001](adr/0001-release-governance.md)). The former 0.x API is
+> ([ADR 0001](adr/0001-release-governance.md)), and production use is not yet
+> signed off ([DESIGN_SIGNOFF.md](DESIGN_SIGNOFF.md)). The former 0.x API is
 > `drizzle-cubrid/legacy`, deprecated and removed in 1.0; see
 > [MIGRATING_FROM_0X.md](MIGRATING_FROM_0X.md).
 
