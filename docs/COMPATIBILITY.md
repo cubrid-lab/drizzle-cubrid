@@ -43,7 +43,10 @@ CI checks both ends of the range on every code change:
 
 ### drizzle-orm internals this package depends on
 
-The adapter extends Drizzle's MySQL classes, so it imports modules that are not
+Since 0.3 the root entry is the native dialect and the 0.x API is the
+deprecated `drizzle-cubrid/legacy` entry, removed in 1.0
+([ADR 0010](adr/0010-promote-native-root-deprecate-0x.md)). The 0.x API
+extends Drizzle's MySQL classes, so it imports modules that are not
 part of Drizzle's documented public API. These can change in any minor
 release, which is why the ceiling is the next minor version:
 
@@ -56,9 +59,9 @@ release, which is why the ceiling is the next minor version:
 - `drizzle-orm/utils`: `mapResultRow`, which is not in the package's type
   declarations and is read through a cast
 
-Replacing these with a native CUBRID dialect is tracked in #155. The
-experimental `drizzle-cubrid/native` entry ([NATIVE_API.md](NATIVE_API.md))
-imports only Drizzle's database-neutral modules (`column`, `column-builder`,
+They go away with `drizzle-cubrid/legacy` in 1.0 (#155). The native root
+entry, `drizzle-cubrid` (and its alias `drizzle-cubrid/native`,
+[NATIVE_API.md](NATIVE_API.md)), imports only Drizzle's database-neutral modules (`column`, `column-builder`,
 `entity`, `table`, `utils`) and reaches two internals through
 `src/native/internal.ts`: the `Symbol.for('drizzle:Columns')` and
 `Symbol.for('drizzle:ExtraConfigColumns')` table keys and
@@ -101,15 +104,16 @@ tarball they tested.
 | Check | Verified with |
 | --- | --- |
 | Live suite (`tests/integration.test.ts`) on the source | CUBRID 11.4 (`cubrid/cubrid:11.4`, pinned by digest), Node 22, `TZ=Asia/Seoul`, lockfile `drizzle-orm` and `cubrid-client` (CI only) |
-| Live suite on the packed npm tarball, ESM, every entry point (the migrator included) | The same server and Node; once with the lockfile peers (`drizzle-orm` 0.45.4, `cubrid-client` 1.4.0) and once with the peer floors from `package.json` (`drizzle-orm` 0.44.1, `cubrid-client` 1.4.0) |
-| CommonJS live smoke on the packed tarball | `require('drizzle-cubrid')` and `require('drizzle-cubrid/native')` against the same server, in both peer lanes: generated keys, BIGINT beyond 2^53, SET values, rollback and error propagation |
-| Packed tarball imported on Node 18 | CommonJS and ESM, all three entry points (`drizzle-cubrid`, `drizzle-cubrid/native`, `drizzle-cubrid/native/migrator`, which reads a migrations folder), lockfile peers, no database |
+| Live suite on the packed npm tarball, ESM: the native tests through `drizzle-cubrid` and `drizzle-cubrid/migrator` (the DDL helper through `drizzle-cubrid/native`), the 0.x tests through `drizzle-cubrid/legacy` | The same server and Node; once with the lockfile peers (`drizzle-orm` 0.45.4, `cubrid-client` 1.4.0) and once with the peer floors from `package.json` (`drizzle-orm` 0.44.1, `cubrid-client` 1.4.0) |
+| CommonJS live smoke on the packed tarball | `require('drizzle-cubrid')`, `require('drizzle-cubrid/native')` (asserted to be the same module) and `require('drizzle-cubrid/legacy')` against the same server, in both peer lanes: generated keys, BIGINT beyond 2^53, SET values, rollback and error propagation |
+| Packed tarball imported on Node 18 | CommonJS and ESM, every entry point: `drizzle-cubrid` and `drizzle-cubrid/native` are the same module (and the same classes), `drizzle-cubrid/migrator` and `drizzle-cubrid/native/migrator` the same module (it reads a migrations folder), `drizzle-cubrid/legacy` works and emits its `DRIZZLE_CUBRID_LEGACY` deprecation warning exactly once (silenced by `--no-deprecation`, thrown by `--throw-deprecation`, never by the root); lockfile peers, no database |
+| Packed `.d.ts` on Node 18 | TypeScript 5.9 with `nodenext`: binary column types with and without `@types/node`; root and `/native` types are identical, a removed 0.x name does not compile when called from the root, `drizzle-cubrid/legacy` still type-checks (`scripts/packed-types-check.mjs`) |
 | Type check, build and unit tests | Node 20 and 22 with the lockfile peers; Node 22 with the `drizzle-orm` floor |
 | Lint and the foreign-dialect boundary | `src` and the packed tarball |
 | Fault injection (`tests/faults.test.ts`, `npm run integration:faults`) on the source | CUBRID 11.4 (same pinned digest) in a container of its own that the tests restart, pause and kill, Node 22, lockfile peers (CI only, not in the release gate) |
 
 **Fault scenarios verified** (CUBRID 11.4, cubrid-client 1.4.0, mostly
-`drizzle-cubrid/native`; each test checks the persisted rows through a new
+the native API; each test checks the persisted rows through a new
 connection and that the pool recovers; what callers see is in
 [Failures](NATIVE_API.md#failures)):
 
@@ -134,7 +138,7 @@ connection and that the pool recovers; what callers see is in
   and the child statement.
 
 **Prepared queries and streaming verified** (CUBRID 11.4, cubrid-client
-1.4.0, `drizzle-cubrid/native`, in the live suite; see
+1.4.0, the native API, in the live suite; see
 [Prepared queries](NATIVE_API.md#prepared-queries) and
 [Streaming](NATIVE_API.md#streaming)):
 
@@ -188,7 +192,7 @@ then runs `npm publish <tarball>`.
   and a lost COMMIT reply, and fault behavior with any other server or
   `cubrid-client` version.
 - Windows and macOS: every job runs on Linux (`ubuntu-latest`).
-- A TypeScript consumer type-checking against the packed `.d.ts` files.
-- Schema reflection, schema diffing and `ALTER` generation (#163). The migrator ([MIGRATIONS.md](MIGRATIONS.md)) is live-tested on CUBRID 11.4 only, for the DDL kinds [ADR 0009](adr/0009-cubrid-native-migrations.md) lists. Indexes and foreign keys generated from `drizzle-cubrid/native` tables (#157) are live-tested on CUBRID 11.4 only; descending, function-based and filtered indexes are not generated.
+- A TypeScript consumer of the packed `.d.ts` files beyond the cases of `scripts/packed-types-check.mjs` (other `moduleResolution` settings, `skipLibCheck: false`, TypeScript versions other than 5.9).
+- Schema reflection, schema diffing and `ALTER` generation (#163). The migrator ([MIGRATIONS.md](MIGRATIONS.md)) is live-tested on CUBRID 11.4 only, for the DDL kinds [ADR 0009](adr/0009-cubrid-native-migrations.md) lists. Indexes and foreign keys generated from native tables (#157) are live-tested on CUBRID 11.4 only; descending, function-based and filtered indexes are not generated.
 - Streaming memory use beyond the row count: the bound of one server reply
   is cubrid-client's contract (`stream()`), not measured by these tests.

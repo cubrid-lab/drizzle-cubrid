@@ -1,5 +1,7 @@
 # Schema Definition
 
+> **Deprecated 0.x API.** This guide describes the MySQL-based 0.x API. Since 0.3 it is imported from `drizzle-cubrid/legacy` (deprecated, removed in 1.0); the root entry `drizzle-cubrid` is the CUBRID-native dialect, documented in [NATIVE_API.md](NATIVE_API.md). See [MIGRATING_FROM_0X.md](MIGRATING_FROM_0X.md).
+
 This guide covers how to define your database schema using `drizzle-cubrid`.
 
 ## Table Definition
@@ -7,7 +9,7 @@ This guide covers how to define your database schema using `drizzle-cubrid`.
 Use `cubridTable` to define tables:
 
 ```ts
-import { cubridTable, int, varchar } from "drizzle-cubrid";
+import { cubridTable, int, varchar } from "drizzle-cubrid/legacy";
 
 export const users = cubridTable("users", {
   id: int("id").primaryKey().autoincrement(),
@@ -35,7 +37,7 @@ import {
   tinyint,
   mediumint,
   real,
-} from "drizzle-cubrid";
+} from "drizzle-cubrid/legacy";
 
 export const metrics = cubridTable("metrics", {
   id: serial("id").primaryKey(),
@@ -60,7 +62,7 @@ export const metrics = cubridTable("metrics", {
 > - `float()` on a CUBRID `FLOAT` column is 32-bit: `1.1` reads back as `1.100000023841858`. Use `double()` on a `DOUBLE` column.
 > - `sum()` and `avg()` return strings, as Drizzle does on MySQL; wrap them with `.mapWith(Number)` if needed.
 >
-> Schema migrations exist only for `drizzle-cubrid/native` tables, as an experimental migrator of CUBRID SQL files; see [MIGRATIONS.md](MIGRATIONS.md) ([#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)).
+> Schema migrations exist only for native `drizzle-cubrid` tables, as an experimental migrator of CUBRID SQL files; see [MIGRATIONS.md](MIGRATIONS.md) ([#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)).
 
 ### String Types
 
@@ -74,7 +76,7 @@ import {
   tinytext,
   mediumtext,
   longtext,
-} from "drizzle-cubrid";
+} from "drizzle-cubrid/legacy";
 
 export const documents = cubridTable("documents", {
   id: int("id").primaryKey().autoincrement(),
@@ -100,7 +102,7 @@ import {
   timestamp,
   time,
   year,
-} from "drizzle-cubrid";
+} from "drizzle-cubrid/legacy";
 
 export const events = cubridTable("events", {
   id: int("id").primaryKey().autoincrement(),
@@ -169,11 +171,11 @@ Fixing them in the 0.x code would mean new column classes built on Drizzle's
 MySQL classes, growing the 0.x code's dependence on them (which the
 dialect-boundary check only lets shrink), and the 0.x API is to be deprecated.
 
-Use the builders of `drizzle-cubrid/native`, which read and write `Buffer`
+Use the builders of the native `drizzle-cubrid`, which read and write `Buffer`
 values; `length` counts bytes:
 
 ```ts
-import { cubridTable, integer, binary, varbinary } from "drizzle-cubrid/native";
+import { cubridTable, integer, binary, varbinary } from "drizzle-cubrid";
 
 export const files = cubridTable("files", {
   id: integer("id").primaryKey().autoIncrement(),
@@ -193,7 +195,7 @@ CUBRID has unique collection types and a monetary type not found in MySQL. `driz
 An unordered collection of unique values:
 
 ```ts
-import { cubridTable, int, set, varchar } from "drizzle-cubrid";
+import { cubridTable, int, set, varchar } from "drizzle-cubrid/legacy";
 
 export const articles = cubridTable("articles", {
   id: int("id").primaryKey().autoincrement(),
@@ -222,7 +224,7 @@ console.log(rows[0].tags); // ["cubrid", "orm", "typescript"]
 Like SET but allows duplicate values:
 
 ```ts
-import { cubridTable, int, multiset } from "drizzle-cubrid";
+import { cubridTable, int, multiset } from "drizzle-cubrid/legacy";
 
 export const logs = cubridTable("logs", {
   id: int("id").primaryKey().autoincrement(),
@@ -237,7 +239,7 @@ Column SQL type: `MULTISET(INTEGER)`
 An ordered collection that allows duplicates:
 
 ```ts
-import { cubridTable, decimal, int, sequence } from "drizzle-cubrid";
+import { cubridTable, decimal, int, sequence } from "drizzle-cubrid/legacy";
 
 export const rankings = cubridTable("rankings", {
   id: int("id").primaryKey().autoincrement(),
@@ -253,7 +255,7 @@ decimal strings, as cubrid-client returns NUMERIC columns.
 CUBRID's native monetary type:
 
 ```ts
-import { cubridTable, int, monetary } from "drizzle-cubrid";
+import { cubridTable, int, monetary } from "drizzle-cubrid/legacy";
 
 export const products = cubridTable("products", {
   id: int("id").primaryKey().autoincrement(),
@@ -339,7 +341,7 @@ const table = cubridTable("example", {
 ### Indexes and foreign keys
 
 This guide's `cubridTable` is the 0.x MySQL-based one, and drizzle-cubrid
-generates no DDL for it. The experimental `drizzle-cubrid/native` entry has
+generates no DDL for it. The native root entry, `drizzle-cubrid`, has
 CUBRID-native `index()`, `uniqueIndex()`, `foreignKey()` and
 `.references()`, verified on CUBRID 11.4, which `generateInitialMigration()`
 writes as `CREATE INDEX` statements and `FOREIGN KEY` table constraints. CUBRID
@@ -354,7 +356,7 @@ whole primary key of the other table. See
 Define relations between tables for Drizzle's relational query API:
 
 ```ts
-import { cubridTable, int, varchar } from "drizzle-cubrid";
+import { cubridTable, int, varchar } from "drizzle-cubrid/legacy";
 import { relations } from "drizzle-orm";
 
 export const users = cubridTable("users", {
@@ -384,7 +386,7 @@ export const postsRelations = relations(posts, ({ one }) => ({
 Using relations in queries:
 
 ```ts
-import { drizzle } from "drizzle-cubrid";
+import { drizzle } from "drizzle-cubrid/legacy";
 import * as schema from "./schema";
 
 const db = drizzle(client, { schema, mode: "default" });
@@ -409,8 +411,8 @@ related table separately or use a join; native support is tracked in
 Use `customType` for types not covered by the built-in builders:
 
 ```ts
-import { cubridTable, int } from "drizzle-cubrid";
-import { customType } from "drizzle-cubrid";
+import { cubridTable, int } from "drizzle-cubrid/legacy";
+import { customType } from "drizzle-cubrid/legacy";
 
 const clob = customType<{ data: string; driverData: string }>({
   dataType() {
@@ -429,8 +431,8 @@ export const documents = cubridTable("documents", {
 A practical e-commerce schema:
 
 ```ts
-import { cubridTable, int, varchar, decimal, timestamp, text } from "drizzle-cubrid";
-import { set, monetary } from "drizzle-cubrid";
+import { cubridTable, int, varchar, decimal, timestamp, text } from "drizzle-cubrid/legacy";
+import { set, monetary } from "drizzle-cubrid/legacy";
 import { relations } from "drizzle-orm";
 
 // Users table

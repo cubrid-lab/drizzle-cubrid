@@ -1,6 +1,6 @@
 # Product Requirements Document — drizzle-cubrid
 
-> **Implementation note (2026-11-12):** v0.2.1 uses legacy MySQL-derived Drizzle classes and does **not** have a verified CUBRID-native dialect or migration path. The target design exclusively uses native CUBRID SQL and database-neutral verified Drizzle primitives; other database dialects, migration tools, compatibility modes, and SQL rewriting are prohibited. See [#155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155) and [#192](https://github.com/cubrid-lab/drizzle-cubrid/issues/192). This file's historical architecture diagram describes the legacy implementation and is not an approved design for the native adapter.
+> **Implementation note (2026-11-19):** the CUBRID-native dialect (ADR 0003, ADR 0007) is implemented and, from 0.3, is the root entry `drizzle-cubrid` ([ADR 0010](adr/0010-promote-native-root-deprecate-0x.md), still pre-1.0). The MySQL-derived 0.x API moves to the deprecated `drizzle-cubrid/legacy` entry and is removed in 1.0. Other database dialects, migration tools, compatibility modes and SQL rewriting remain prohibited for the native code ([#155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155), [#192](https://github.com/cubrid-lab/drizzle-cubrid/issues/192)). Version 0.2.1 (the latest published) still has the 0.x API at its root.
 
 
 ## Overview
@@ -21,11 +21,45 @@ CUBRID is a relational database used in Korean government and enterprise
 systems. Drizzle ORM ships MySQL, PostgreSQL and SQLite dialects but none for
 CUBRID, so CUBRID users fall back to raw SQL or other ORMs.
 
-## Current shipped behavior (0.2.x, MySQL-derived)
+## Native API (the root entry from 0.3)
 
-This section describes `main`. The published 0.2.1 predates the fixes listed
-under *Unreleased* in the [CHANGELOG](../CHANGELOG.md); for example, its
-`db.transaction()` still ran `BEGIN`/`COMMIT` on the shared client (#185).
+`drizzle-cubrid` (and its alias `drizzle-cubrid/native`, kept through 1.x)
+is the CUBRID-native dialect, built only on Drizzle's database-neutral
+modules and cubrid-client ([ADR 0007](adr/0007-drizzle-extension-boundary.md)).
+The reference is [NATIVE_API.md](NATIVE_API.md); migrations are
+[MIGRATIONS.md](MIGRATIONS.md) (`drizzle-cubrid/migrator`). It provides
+native tables with constraints, indexes and foreign keys; column builders with
+CUBRID types and codecs; `select()` with joins, subqueries and set operations;
+`insert()`/`update()`/`delete()` with `$returningId()`; transactions with
+savepoints; relational queries with `with`; `prepare()`; `iterator()`
+streaming; and an applier of CUBRID SQL migrations with an initial-schema
+generator. Each is covered by the live CUBRID 11.4 suite. Moving from the 0.x
+API: [MIGRATING_FROM_0X.md](MIGRATING_FROM_0X.md).
+
+```typescript
+import { createClient } from 'cubrid-client';
+import { cubridTable, drizzle, eq, integer, varchar } from 'drizzle-cubrid';
+
+const users = cubridTable('users', {
+  id: integer().primaryKey().autoIncrement(),
+  name: varchar({ length: 100 }).notNull(),
+  email: varchar({ length: 255 }).notNull().unique(),
+});
+
+const db = drizzle(createClient({ host: 'localhost', port: 33000, database: 'testdb', user: 'dba', timezone: 'utc' }));
+const [{ id }] = await db.insert(users).values({ name: 'John', email: 'john@example.com' }).$returningId();
+await db.update(users).set({ name: 'Jane' }).where(eq(users.id, id));
+```
+
+## Deprecated 0.x API (`drizzle-cubrid/legacy`, MySQL-derived)
+
+Until 0.2.x this was the root entry. From 0.3 it is imported from
+`drizzle-cubrid/legacy`, prints a one-time `DRIZZLE_CUBRID_LEGACY`
+deprecation warning, receives security and data-correctness fixes only, and is
+removed in 1.0 ([ADR 0010](adr/0010-promote-native-root-deprecate-0x.md)).
+The published 0.2.1 predates the fixes listed under *Unreleased* in the
+[CHANGELOG](../CHANGELOG.md); for example, its `db.transaction()` still ran
+`BEGIN`/`COMMIT` on the shared client (#185).
 
 ### How it works
 
@@ -65,11 +99,11 @@ under *Unreleased* in the [CHANGELOG](../CHANGELOG.md); for example, its
 | Date and time columns | Shipped | needs a UTC client (`timezone: 'utc'`) |
 | `db.query.*.findMany()` / `findFirst()` without `with` | Shipped | |
 | `monetary()` | Shipped | strings; double precision ([#217](https://github.com/cubrid-lab/drizzle-cubrid/issues/217)) |
-| `binary()` / `varbinary()` | Refused (throw); use `drizzle-cubrid/native` | [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216) |
+| `binary()` / `varbinary()` | Refused (throw); use the native `drizzle-cubrid` | [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216) |
 | Relational `with` | Refused | [#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200) |
 | `.iterator()` (streaming) | Throws | not implemented |
 | JSON columns, BLOB/CLOB columns | No builder | `customType` only; unverified |
-| Schema migrations, DDL generation | Not provided for this entry | `drizzle-cubrid/native` has an experimental migrator ([MIGRATIONS.md](MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)) |
+| Schema migrations, DDL generation | Not provided for this entry | The native API has an experimental migrator ([MIGRATIONS.md](MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)) |
 
 ### Verification
 
@@ -86,7 +120,7 @@ under *Unreleased* in the [CHANGELOG](../CHANGELOG.md); for example, its
 
 ```typescript
 import { createClient } from 'cubrid-client';
-import { cubridTable, drizzle, eq, int, varchar } from 'drizzle-cubrid';
+import { cubridTable, drizzle, eq, int, varchar } from 'drizzle-cubrid/legacy';
 
 const users = cubridTable('users', {
   id: int('id').autoincrement().primaryKey(),
@@ -117,7 +151,7 @@ await client.close();
 ```
 
 ```typescript
-import { cubridTable, decimal, int, monetary, multiset, sequence, set, varchar } from 'drizzle-cubrid';
+import { cubridTable, decimal, int, monetary, multiset, sequence, set, varchar } from 'drizzle-cubrid/legacy';
 
 const products = cubridTable('products', {
   id: int('id').autoincrement().primaryKey(),
@@ -135,30 +169,32 @@ const products = cubridTable('products', {
 - Development: TypeScript 5.9, Vitest 5 with `@vitest/coverage-v8`, tsup 9
   (ESM + CJS), Biome 2.6.7 (`npm run lint`).
 
-## Planned native architecture (not implemented)
+## Native architecture status
 
-The target design replaces the MySQL-derived classes with a CUBRID-native
-dialect ([#155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155),
-draft architecture ADR in PR [#166](https://github.com/cubrid-lab/drizzle-cubrid/pull/166)).
-None of the following exists today:
+The CUBRID-native dialect replaces the MySQL-derived classes
+([#155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155); ADR 0003,
+ADR 0007, ADR 0008, ADR 0009, ADR 0010). Implemented means merged with unit
+and live CUBRID 11.4 tests; it does not mean signed off for 1.0
+([DESIGN_SIGNOFF.md](DESIGN_SIGNOFF.md)).
 
-| Item | Issue |
-| --- | --- |
-| Independent Drizzle extension boundaries | [#156](https://github.com/cubrid-lab/drizzle-cubrid/issues/156) |
-| Native table and column builders, including a decision on the collection builder names | [#157](https://github.com/cubrid-lab/drizzle-cubrid/issues/157) |
-| Native SELECT and relational query generation (relational `with`) | [#158](https://github.com/cubrid-lab/drizzle-cubrid/issues/158) |
-| Native INSERT/UPDATE/DELETE and generated keys; upsert/`MERGE INTO` only where verified on CUBRID | [#159](https://github.com/cubrid-lab/drizzle-cubrid/issues/159) |
-| Driver and row mapping rebuilt around cubrid-client | [#160](https://github.com/cubrid-lab/drizzle-cubrid/issues/160) |
-| Native transactions and savepoints | [#161](https://github.com/cubrid-lab/drizzle-cubrid/issues/161) |
-| Native collection and scalar type codecs | [#162](https://github.com/cubrid-lab/drizzle-cubrid/issues/162) |
-| CUBRID-native schema migrations (no Drizzle Kit MySQL mode): applier and initial `CREATE TABLE` generation in preview ([ADR 0009](adr/0009-cubrid-native-migrations.md)); schema diffing and `ALTER` generation open | [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163) |
-| Prepared-query reuse and streaming | [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165) |
-| Real-server verification beyond CUBRID 11.4 | [#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164) |
-| CUBRID-only dialect boundary enforcement | [#192](https://github.com/cubrid-lab/drizzle-cubrid/issues/192) |
+| Item | Status | Issue |
+| --- | --- | --- |
+| Independent Drizzle extension boundaries | Decided (ADR 0007) | [#156](https://github.com/cubrid-lab/drizzle-cubrid/issues/156) |
+| Native table and column builders, constraints, indexes, foreign keys | Implemented | [#157](https://github.com/cubrid-lab/drizzle-cubrid/issues/157) |
+| Native SELECT and relational query generation (relational `with`) | Implemented | [#158](https://github.com/cubrid-lab/drizzle-cubrid/issues/158) |
+| Native INSERT/UPDATE/DELETE and generated keys; `MERGE INTO` not yet | Implemented | [#159](https://github.com/cubrid-lab/drizzle-cubrid/issues/159) |
+| Driver and row mapping rebuilt around cubrid-client | Implemented | [#160](https://github.com/cubrid-lab/drizzle-cubrid/issues/160) |
+| Native transactions and savepoints | Implemented | [#161](https://github.com/cubrid-lab/drizzle-cubrid/issues/161) |
+| Native collection and scalar type codecs | Implemented | [#162](https://github.com/cubrid-lab/drizzle-cubrid/issues/162) |
+| CUBRID-native schema migrations (no Drizzle Kit MySQL mode) | Applier and initial `CREATE TABLE` generation implemented, experimental ([ADR 0009](adr/0009-cubrid-native-migrations.md)); schema diffing and `ALTER` generation open | [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163) |
+| Prepared-query reuse and streaming | Implemented (ADR 0008); streaming inside transactions and of relational queries refused | [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165) |
+| Native dialect as the root entry; 0.x API deprecated | From 0.3 (ADR 0010); 0.x removed in 1.0 | [#155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155) |
+| Real-server verification beyond CUBRID 11.4 | Open | [#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164) |
+| CUBRID-only dialect boundary enforcement | Guard in CI; the 0.x baseline goes to zero when `drizzle-cubrid/legacy` is removed in 1.0 | [#192](https://github.com/cubrid-lab/drizzle-cubrid/issues/192) |
 
-Goals for that design: full Drizzle integration (schema, queries, relations)
-on CUBRID SQL only, CUBRID-specific DML such as `MERGE INTO` where verified, migrations
-verified on a real server, and live tests for every supported server version.
+Remaining goals: CUBRID-specific DML such as `MERGE INTO` where verified,
+schema diffing and `ALTER` generation, live tests for every supported server
+version, and removal of the 0.x API in 1.0.
 
 ## Non-Goals
 

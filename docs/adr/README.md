@@ -15,6 +15,7 @@ ADRs preserve **why** a consequential technical or release decision was made, th
 | [0007](0007-drizzle-extension-boundary.md) | Build the native dialect on Drizzle's database-neutral modules | Accepted (2026-11-14, #227) |
 | [0008](0008-prepared-queries-and-streaming.md) | Prepared queries are client-side plans; streaming uses cubrid-client's `stream()` with literal semantics, outside transactions | Proposed |
 | [0009](0009-cubrid-native-migrations.md) | Apply CUBRID schema migrations as ordered SQL files, one transaction per migration | Proposed |
+| [0010](0010-promote-native-root-deprecate-0x.md) | Promote the native dialect to the root entry and deprecate the 0.x API (removed in 1.0) | Proposed |
 
 The CUBRID-native architecture ADR 0003 was merged as Proposed in #166, together with [the architecture plan](../CUBRID_NATIVE_ARCHITECTURE.md) and [design sign-off checklist](../DESIGN_SIGNOFF.md), and accepted after ADR 0001 in #225. Acceptance approves the direction; it does not sign off the design checklist or claim any implementation exists.
 

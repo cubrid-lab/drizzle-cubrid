@@ -83,3 +83,23 @@ These are outstanding verifications, not proof of failure. Existing code and cur
 4. Run real CUBRID and downstream consumer tests on the final release candidate; document exact versions and test counts; do not publish based on mocks alone.
 
 **Design PR:** #166 (merged as Proposed). This file is a **sign-off checklist**, not a signed-off design.
+
+## Evidence links for the reviewer (not sign-off)
+
+Pointers added with [ADR 0010](adr/0010-promote-native-root-deprecate-0x.md)
+(native dialect promoted to the root entry, 0.x deprecated). They are inputs
+for the maintainer's review; no box above is checked by them.
+
+- **CUBRID-only acceptance:** the root entry `drizzle-cubrid` is built from
+  `src/native/index.ts` only; the #192 guard treats the packed root
+  (`dist/index.*`, its `.d.ts` included) as native code that can never be
+  baselined, and the remaining 0.x findings are pinned under `dist/legacy.*`
+  and `src/` 0.x files only, until 1.0 removes them
+  (`scripts/check-dialect-boundary.mjs`, `tests/dialect-boundary.test.ts`).
+- **Legacy 0.x imports as blockers:** they are deprecated, not grandfathered:
+  `drizzle-cubrid/legacy` warns at load (`DRIZZLE_CUBRID_LEGACY`) and is
+  scheduled for removal in 1.0, with a migration guide
+  ([MIGRATING_FROM_0X.md](MIGRATING_FROM_0X.md)).
+- **Packed consumer on Node 18:** `scripts/packed-exports-smoke.cjs` (root
+  and `/native` are one module, `/legacy` warns once, Node's deprecation flags
+  apply) and `scripts/packed-types-check.mjs` (packed `.d.ts`).

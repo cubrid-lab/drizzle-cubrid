@@ -8,7 +8,9 @@
 
 **Drizzle ORM dialect for the CUBRID database** — TypeScript-first, type-safe schema definition and query builder for Node.js.
 
-> **Community adapter:** `drizzle-cubrid` is independently maintained by CUBRID Lab. It is not an official `drizzle-orm` dialect or a built-in Drizzle Kit integration. Drizzle Kit is not supported in any dialect; do not assume that its MySQL dialect is compatible with CUBRID. An experimental CUBRID-native migrator for `drizzle-cubrid/native` applies hand-written or generated CUBRID SQL files (see [Schema migrations](docs/MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)) and [native dialect design](https://github.com/cubrid-lab/drizzle-cubrid/issues/155).
+> **Community adapter:** `drizzle-cubrid` is independently maintained by CUBRID Lab. It is not an official `drizzle-orm` dialect or a built-in Drizzle Kit integration. Drizzle Kit is not supported in any dialect; do not assume that its MySQL dialect is compatible with CUBRID. A CUBRID-native migrator applies hand-written or generated CUBRID SQL files (see [Schema migrations](docs/MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)).
+
+> **0.3 changes the root entry.** `drizzle-cubrid` is now the CUBRID-native dialect, which until 0.2 was the `drizzle-cubrid/native` preview (still available as an alias). The 0.x API built on Drizzle's MySQL classes moved to **`drizzle-cubrid/legacy`**: it is deprecated, prints a one-time `DRIZZLE_CUBRID_LEGACY` deprecation warning, and will be removed in 1.0. See [Migrating from 0.x](docs/MIGRATING_FROM_0X.md) and [ADR 0010](docs/adr/0010-promote-native-root-deprecate-0x.md).
 
 [🇰🇷 한국어](docs/README.ko.md) · [🇺🇸 English](README.md)
 
@@ -24,33 +26,30 @@
 
 ## Why drizzle-cubrid?
 
-[Drizzle ORM](https://orm.drizzle.team/) is a modern TypeScript ORM with a SQL-like query API, zero dependencies, and first-class type inference. Until now, there was no Drizzle dialect for CUBRID.
-
-`drizzle-cubrid` bridges that gap:
+[Drizzle ORM](https://orm.drizzle.team/) is a modern TypeScript ORM with a SQL-like query API, zero dependencies, and first-class type inference. `drizzle-cubrid` brings it to CUBRID with a dialect written for CUBRID, not adapted from another database's ([ADR 0003](docs/adr/0003-native-architecture-boundaries.md), [ADR 0007](docs/adr/0007-drizzle-extension-boundary.md)):
 
 - **Type-safe queries** — Full TypeScript inference from schema to query results
-- **Drizzle query API** — `select()`, `insert()`, `update()`, `delete()` with the familiar Drizzle chain syntax
-- **CUBRID-specific types** — `SET`, `MULTISET`, `SEQUENCE`, `MONETARY` as native column builders
-- **Transactions with savepoints** — Nested transaction support via CUBRID savepoints
-- **Relational queries** — `db.query.users.findMany()` / `findFirst()` with `where`, `columns`, `orderBy` and `limit`; loading relations with `with` is not supported yet (#200)
-- **Tested** — offline unit tests with a 95% coverage gate, plus a live CUBRID 11.4 suite on every code change in CI
+- **Drizzle query API** — `select()` with joins, subqueries and set operations, `insert()`, `update()`, `delete()`, `$returningId()`
+- **CUBRID types with codecs** — `SET`, `MULTISET`, `SEQUENCE`, `MONETARY`, `NUMERIC` as exact strings, `BIGINT` as `bigint`, `BIT` as `Buffer`
+- **Transactions with savepoints** — each transaction on its own connection; nested transactions are savepoints
+- **Relational queries** — `db.query.users.findMany({ with: { posts: true } })`, without `LATERAL` or JSON
+- **Prepared queries and streaming** — `prepare()` on every query, `iterator()` on selects
+- **Schema migrations** — ordered CUBRID SQL files, one transaction per migration
+- **Tested** — offline unit tests with a 95% coverage gate, a live CUBRID 11.4 suite and a packed-tarball live suite on every code change in CI
+
+The API is pre-1.0: it can still change in a minor release, with migration notes ([ADR 0001](docs/adr/0001-release-governance.md)).
 
 ### Architecture
 
 ```mermaid
 flowchart TD
-    A[Application] --> B[Drizzle ORM]
-    B --> C[drizzle-cubrid dialect<br/>CubridDialect]
+    A[Application] --> B[Drizzle ORM<br/>database-neutral modules]
+    B --> C[drizzle-cubrid<br/>CUBRID dialect, SQL compiler, codecs]
     C --> D[cubrid-client]
     D --> E[CUBRID Server]
 ```
 
 **Node support policy:** The planned `drizzle-cubrid@1.x` line will support **Node 18 throughout all 1.x releases**, matching `cubrid-client@1.x`'s runtime generation without synchronizing patch/minor versions. Node 22 is used for modern development tools only. Raising the runtime minimum is a possible **2.0 MAJOR** change requiring review, never a 1.x tooling fix. See [ADR 0006](docs/adr/0006-node-18-support-through-1x.md); the packed adapter and its tested peer dependencies require independent Node 18 consumer checks.
-
-### Native dialect preview
-
-`drizzle-cubrid/native` is an **experimental preview** of the CUBRID-native dialect that will replace the MySQL-derived classes ([ADR 0007](docs/adr/0007-drizzle-extension-boundary.md)). Today it has `cubridTable()` and column builders with CUBRID types and codecs (`smallint`, `integer`, `bigint`, `numeric`, `float`, `double`, `char`, `varchar`, `string`, `boolean`, date and time, `monetary`, `set`/`multiset`/`sequence`) and `drizzle(client, { schema? })` with `select()` (joins, grouping, subqueries, set operations, placeholders), `insert()`/`update()`/`delete()`, `transaction()`, relational queries with `with` (`db.query`), `prepare()` on
-every query and `iterator()` streaming of selects, but its API can still change, so it is **not for production**. See [docs/NATIVE_API.md](docs/NATIVE_API.md).
 
 ## Installation
 
@@ -66,29 +65,53 @@ npm install drizzle-cubrid drizzle-orm cubrid-client
 
 **Requirements**: Node.js 18+, CUBRID 11.4 (the version tested in CI; other server versions are unverified), `drizzle-orm` `>=0.44.1 <0.46.0`, `cubrid-client` `>=1.4.0 <2.0.0` (see [peer dependency compatibility](docs/COMPATIBILITY.md) and [what is verified](docs/COMPATIBILITY.md#what-is-verified-and-what-is-not))
 
+### Entry points
+
+| Import | What it is |
+| --- | --- |
+| `drizzle-cubrid` | The CUBRID-native dialect: tables, column builders, `drizzle()`, and Drizzle's operators (`eq`, `and`, `sql`, …) |
+| `drizzle-cubrid/migrator` | `migrate()` and `readMigrationFiles()` for CUBRID SQL migrations ([MIGRATIONS.md](docs/MIGRATIONS.md)) |
+| `drizzle-cubrid/native`, `drizzle-cubrid/native/migrator` | Aliases of the two above, kept through 1.x; the same modules, so the same classes |
+| `drizzle-cubrid/legacy` | **Deprecated** 0.x API (MySQL-based), removed in 1.0 ([migration guide](docs/MIGRATING_FROM_0X.md)) |
+
 ## Quick Start
 
 ### 1. Define Your Schema
 
 ```ts
 // schema.ts
-import { cubridTable, int, varchar, timestamp } from "drizzle-cubrid";
+import { cubridTable, datetime, integer, set, varchar } from "drizzle-cubrid";
 
 export const users = cubridTable("users", {
-  id: int("id").primaryKey().autoincrement(),
-  name: varchar("name", { length: 100 }).notNull(),
-  email: varchar("email", { length: 200 }).notNull().unique(),
-  created_at: timestamp("created_at").defaultNow(),
+  id: integer().primaryKey().autoIncrement(),
+  name: varchar({ length: 100 }).notNull(),
+  email: varchar({ length: 200 }).notNull().unique(),
+  tags: set({ element: varchar({ length: 20 }) }),
+  createdAt: datetime("created_at").$defaultFn(() => new Date()),
 });
 ```
 
-### 2. Connect and Query
+A builder called without a name uses its key as the column name. See the
+[column builders](docs/NATIVE_API.md#column-builders) for every type and its
+codec.
+
+### 2. Create the Table
+
+```ts
+import { generateInitialMigration } from "drizzle-cubrid";
+import * as schema from "./schema";
+
+// Write this to migrations/0001_init.sql and apply it with migrate() (below).
+console.log(generateInitialMigration(schema));
+```
+
+### 3. Connect and Query
 
 ```ts
 // app.ts
 import { createClient } from "cubrid-client";
-import { drizzle } from "drizzle-cubrid";
-import { eq } from "drizzle-cubrid";
+import { drizzle, eq } from "drizzle-cubrid";
+import { migrate } from "drizzle-cubrid/migrator";
 import { users } from "./schema";
 
 const client = createClient({
@@ -101,50 +124,43 @@ const client = createClient({
 });
 
 const db = drizzle(client);
+await migrate(db, { migrationsFolder: "./migrations" });
 
-// Insert
-await db.insert(users).values({
-  name: "Alice",
-  email: "alice@example.com",
-});
+// Insert, with the generated key
+const [{ id }] = await db
+  .insert(users)
+  .values({ name: "Alice", email: "alice@example.com", tags: ["admin"] })
+  .$returningId();
 
 // Select with type-safe results
 const allUsers = await db.select().from(users);
-// allUsers: { id: number; name: string; email: string; created_at: Date | null }[]
+// { id: number; name: string; email: string; tags: (string | null)[] | null; createdAt: Date | null }[]
 
 // Where clause
-const alice = await db
-  .select()
-  .from(users)
-  .where(eq(users.name, "Alice"));
+const alice = await db.select().from(users).where(eq(users.name, "Alice"));
 
-// Update
-await db
-  .update(users)
-  .set({ name: "Alicia" })
-  .where(eq(users.id, 1));
+// Update and delete
+await db.update(users).set({ name: "Alicia" }).where(eq(users.id, id));
+await db.delete(users).where(eq(users.id, id));
 
-// Delete
-await db.delete(users).where(eq(users.id, 1));
-
-// Close connection
 await client.close();
 ```
+
+See the [native API reference](docs/NATIVE_API.md) for queries, writes,
+relational queries, prepared queries and streaming.
 
 ## Parameters
 
 Values are sent as typed binds by default (cubrid-client's `queryPrepared()` /
-`executePrepared()`), so no value becomes part of the SQL text. Pass
-`drizzle(client, { binding: "literal" })` to send them as escaped SQL literals,
-one round trip fewer per statement. See
-[how values reach the server](docs/QUERIES.md#how-values-reach-the-server).
+`executePrepared()`), so no value becomes part of the SQL text, and every value
+goes through its column's codec first. Pass
+`drizzle(client, { binding: "literal" })` to send them as escaped SQL literals.
+See [Binding](docs/NATIVE_API.md#binding).
 
 ## Date and time columns
 
-`datetime`, `timestamp`, `date` and `time` keep Drizzle's MySQL builders,
-options and TypeScript types. They follow Drizzle's MySQL convention: **the
-stored wall clock is UTC**. A `Date` is written as its UTC fields and read back
-as the same instant.
+`datetime`, `timestamp`, `date` and `time` store a **UTC wall clock**: a
+`Date` is written as its UTC fields and read back as the same instant.
 
 Reading these columns needs a client that decodes in UTC. Create it with
 `timezone: "utc"`, or run the process with `TZ=UTC`:
@@ -153,167 +169,78 @@ Reading these columns needs a client that decodes in UTC. Create it with
 const client = createClient({ host, port, database, user, timezone: "utc" });
 ```
 
-Otherwise any select of a date or time column, or of a collection of them, is
-refused before it is sent. See [Date and time columns](docs/SCHEMA.md#date-and-time-columns)
-for each mode's values. Server-side defaults such as `NOW()` or
-`SYS_DATETIME` store the server's wall clock, which is UTC only when the
-server's time zone is.
+Otherwise a select of a date or time column is refused before it is sent. See
+[Date and time](docs/NATIVE_API.md#date-and-time) for each mode's values and
+ranges.
 
 ## CUBRID-Specific Column Types
 
-Beyond standard SQL types, CUBRID has collection types and a monetary type:
-
 ```ts
-import { cubridTable, int, varchar } from "drizzle-cubrid";
-import { cubridSet, cubridMultiset, cubridSequence, monetary } from "drizzle-cubrid";
+import { cubridTable, integer, monetary, multiset, sequence, set, varchar } from "drizzle-cubrid";
 
 export const products = cubridTable("products", {
-  id: int("id").primaryKey().autoincrement(),
-  name: varchar("name", { length: 100 }),
-
-  // SET — unordered unique values → SET(VARCHAR(50))
-  tags: cubridSet("tags", { element: varchar("tag_item", { length: 50 }) }),
-
-  // MULTISET — unordered, allows duplicates → MULTISET(VARCHAR(50))
-  categories: cubridMultiset("categories", { element: varchar("category_item", { length: 50 }) }),
-
-  // SEQUENCE — ordered, allows duplicates → SEQUENCE(INTEGER), number[]
-  rankings: cubridSequence<number>("rankings", { element: int("rank_item") }),
-
-  // MONETARY — CUBRID native monetary type → MONETARY
-  price: monetary("price"),
+  id: integer().primaryKey().autoIncrement(),
+  name: varchar({ length: 100 }),
+  tags: set({ element: varchar({ length: 50 }) }),               // SET(VARCHAR(50))
+  categories: multiset({ element: varchar({ length: 50 }) }),    // MULTISET(VARCHAR(50))
+  rankings: sequence({ element: integer() }),                    // SEQUENCE(INTEGER), (number | null)[]
+  price: monetary(),                                             // MONETARY, read as a string
 });
 ```
 
-```ts
-// Insert with collection values
-await db.insert(products).values({
-  name: "Widget",
-  tags: ["sale", "new"],           // string[] → SET
-  categories: ["electronics"],     // string[] → MULTISET
-  rankings: [1, 3, 5],             // number[] → SEQUENCE
-});
-
-// Select — collections return arrays; elements keep their JavaScript types
-const rows = await db.select().from(products);
-console.log(rows[0].tags); // ["sale", "new"]
-```
+Collections are arrays in both directions; each element goes through the
+element column's codec. See [Collections](docs/NATIVE_API.md#collections).
 
 ## Transactions
 
-### Automatic (Recommended)
-
-```ts
-await db.transaction(async (tx) => {
-  await tx.insert(users).values({ name: "Alice", email: "a@example.com" });
-  await tx.insert(users).values({ name: "Bob", email: "b@example.com" });
-  // Auto-committed on success, auto-rolled back on error
-});
-```
-
-Each `db.transaction()` runs on its own connection, taken through
-`cubrid-client`'s `transaction(callback, options)` on a `CubridClient` or a
-`CubridPool`. Queries made through `db` outside the callback, including from
-concurrent requests, never join, commit or roll back that transaction. The
-error the callback throws (including the `TransactionRollbackError` from
-`tx.rollback()`) is rethrown as the same object. The driver's own error is
-added to it as `error.transactionError`, and a failed rollback also as
-`error.rollbackError`.
-
-`isolationLevel` accepts `"read committed"`, `"repeatable read"` and
-`"serializable"`, and needs cubrid-client 1.3.0 or later (`createPool()` needs
-1.4.0). CUBRID has no `"read uncommitted"` level, read-only mode or
-consistent-snapshot start, so `accessMode`, `withConsistentSnapshot` and
-`"read uncommitted"` are rejected before the transaction starts:
-
-```ts
-await db.transaction(async (tx) => {
-  // ...
-}, { isolationLevel: "serializable" });
-```
-
-A custom client object passed to `drizzle()` must return each row as an array
-of its values in select-list order from `query(sql, params, { rowMode: "array" })`,
-as cubrid-client 1.4.0 does; selects that map fields refuse object rows, because
-a column label shared by two tables keeps only one value in an object. A custom
-client with a `transaction(callback, options?)` method must
-run `callback` with a client for the transaction's connection, commit when it
-resolves and roll back when it rejects. One without `transaction()` falls back
-to `BEGIN`/`COMMIT` on its single connection, which is only safe if nothing
-else uses that connection at the same time.
-
-### Nested Transactions (Savepoints)
-
 ```ts
 await db.transaction(async (tx) => {
   await tx.insert(users).values({ name: "Alice", email: "a@example.com" });
 
-  try {
-    await tx.transaction(async (tx2) => {
-      // SAVEPOINT sp1
-      await tx2.insert(users).values({ name: "Bob", email: "b@example.com" });
+  // A nested transaction is a savepoint: its failure undoes only its own work.
+  await tx
+    .transaction(async (inner) => {
+      await inner.insert(users).values({ name: "Bob", email: "b@example.com" });
       throw new Error("rollback inner only");
-      // ROLLBACK TO SAVEPOINT sp1
-    });
-  } catch {
-    // Inner rolled back, outer continues
-  }
-
-  await tx.insert(users).values({ name: "Charlie", email: "c@example.com" });
-  // Alice + Charlie committed, Bob rolled back
-});
+    })
+    .catch(() => undefined);
+}, { isolationLevel: "repeatable read" });
 ```
+
+Each `db.transaction()` runs on its own connection through cubrid-client's
+`transaction()`; statements of `db` outside the callback never join it.
+`tx.rollback()` throws `CubridTransactionRollbackError`. CUBRID has no
+`"read uncommitted"` level and no read-only transactions; both are refused.
+See [Transactions](docs/NATIVE_API.md#transactions) and
+[Failures](docs/NATIVE_API.md#failures).
 
 ## Relations
 
 ```ts
-import { cubridTable, int, varchar } from "drizzle-cubrid";
 import { relations } from "drizzle-orm";
+import { cubridTable, drizzle, integer, varchar } from "drizzle-cubrid";
 
 export const users = cubridTable("users", {
-  id: int("id").primaryKey().autoincrement(),
-  name: varchar("name", { length: 100 }).notNull(),
+  id: integer().primaryKey().autoIncrement(),
+  name: varchar({ length: 100 }).notNull(),
 });
-
 export const posts = cubridTable("posts", {
-  id: int("id").primaryKey().autoincrement(),
-  title: varchar("title", { length: 200 }).notNull(),
-  author_id: int("author_id").notNull(),
+  id: integer().primaryKey().autoIncrement(),
+  title: varchar({ length: 200 }).notNull(),
+  authorId: integer("author_id").notNull().references(() => users.id),
 });
-
-export const usersRelations = relations(users, ({ many }) => ({
-  posts: many(posts),
-}));
-
+export const usersRelations = relations(users, ({ many }) => ({ posts: many(posts) }));
 export const postsRelations = relations(posts, ({ one }) => ({
-  author: one(users, {
-    fields: [posts.author_id],
-    references: [users.id],
-  }),
+  author: one(users, { fields: [posts.authorId], references: [users.id] }),
 }));
+
+const db = drizzle(client, { schema: { users, posts, usersRelations, postsRelations } });
+const withPosts = await db.query.users.findMany({ with: { posts: true }, limit: 10 });
 ```
 
-```ts
-import { drizzle, eq } from "drizzle-cubrid";
-import * as schema from "./schema";
-import { posts, users } from "./schema";
-
-const db = drizzle(client, { schema, mode: "default" });
-
-const alice = await db.query.users.findFirst({ where: eq(users.id, 1) });
-const alicesPosts = await db.select().from(posts).where(eq(posts.author_id, 1));
-```
-
-Loading relations with `with` is not supported on CUBRID yet and throws:
-Drizzle's MySQL SQL for it uses `LEFT JOIN LATERAL` (`mode: "default"`), which
-CUBRID lacks, or JSON aggregation (`mode: "planetscale"`), which CUBRID rejects
-for DATE/DATETIME values and which garbles non-ASCII text in an ISO-8859-1
-database; Drizzle also reads that JSON with `JSON.parse`, which rounds BIGINT
-values beyond 2^53
-([#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200)). Query the
-related table separately or use a join. The experimental `drizzle-cubrid/native`
-entry loads `with` without LATERAL or JSON
-([Relational queries](docs/NATIVE_API.md#relational-queries), #158).
+Relations are loaded with one statement per level (`IN` lists of the parent
+keys), not with `LATERAL` or JSON, so types such as `BIGINT` and dates keep
+their codecs. See [Relational queries](docs/NATIVE_API.md#relational-queries).
 
 ## Error Handling
 
@@ -336,24 +263,24 @@ try {
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| `INSERT ... RETURNING` | ❌ Not supported | Use `$returningId()` for a one-row INSERT, `lastInsertId`, or a separate SELECT ([details](docs/QUERIES.md#affected-rows-and-generated-keys)) |
-| Streaming / `.iterator()` | ❌ Not implemented (throws) | Use LIMIT/OFFSET for pagination. The experimental `drizzle-cubrid/native` streams selects ([Streaming](docs/NATIVE_API.md#streaming), [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)) |
-| Relational queries with `with` | ❌ Refused | See [Relations](#relations) ([#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200)) |
-| Schema migrations | ⚠️ Experimental, `drizzle-cubrid/native` only | `migrate()` from `drizzle-cubrid/native/migrator` applies ordered CUBRID SQL files; `generateInitialMigration()` writes the first one. No schema diff, `ALTER` generation, reflection or Drizzle Kit ([details](docs/MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)) |
-| JSON, BLOB and CLOB columns | ⚠️ No builder exported | Not exposed or tested by this adapter; a `customType` is unverified |
-| Native BOOLEAN | ❌ Not supported | Declare `boolean()` columns as SMALLINT (0/1) |
-| Sequence objects (`CREATE SERIAL`) | ❌ No builder | Use `.autoincrement()`; `sequence()` here is the SEQUENCE collection type |
+| `INSERT ... RETURNING` | ❌ Not supported | Use `$returningId()` or `lastInsertId` ([Results](docs/NATIVE_API.md#results)) |
+| Streaming inside `db.transaction()` or of relational queries | ❌ Refused | Stream a `select()` outside a transaction ([Streaming](docs/NATIVE_API.md#streaming)) |
+| Schema diffing, `ALTER` generation, reflection, Drizzle Kit | ❌ Not provided | `migrate()` applies CUBRID SQL files; `generateInitialMigration()` writes the first one; later changes are hand-written ([details](docs/MIGRATIONS.md), [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)) |
+| JSON, BLOB, CLOB, ENUM, zone-aware date types | ❌ No builder | See [Not supported](docs/NATIVE_API.md#not-supported-in-the-native-dialect) |
+| Native BOOLEAN | ❌ Not in CUBRID | `boolean()` is `SMALLINT` 1/0 |
+| FULL JOIN, LATERAL, `for('share')` | ❌ Not in CUBRID | Refused before sending ([Errors and refusals](docs/NATIVE_API.md#errors-and-refusals)) |
 | CUBRID versions other than 11.4 | ⚠️ Unverified | Only 11.4 runs in CI ([#164](https://github.com/cubrid-lab/drizzle-cubrid/issues/164)) |
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [Schema Guide](docs/SCHEMA.md) | Column types, CUBRID types, relations, custom types |
-| [Queries Guide](docs/QUERIES.md) | SELECT, INSERT, UPDATE, DELETE, joins, aggregations, raw SQL |
+| [Native API](docs/NATIVE_API.md) | Tables, column builders, codecs, queries, writes, transactions, relational queries, prepared queries and streaming |
+| [Schema migrations](docs/MIGRATIONS.md) | CUBRID-native migrator: file format, refusals, recovery, what is not implemented |
+| [Migrating from 0.x](docs/MIGRATING_FROM_0X.md) | From the deprecated MySQL-based API (`drizzle-cubrid/legacy`) to the native one |
+| [Compatibility](docs/COMPATIBILITY.md) | Peer ranges and what is verified |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common errors, TypeScript issues, performance tips |
-| [Native API preview](docs/NATIVE_API.md) | Experimental `drizzle-cubrid/native` tables, column builders, codecs, queries, writes, transactions, relational queries, prepared queries and streaming |
-| [Schema migrations](docs/MIGRATIONS.md) | Experimental CUBRID-native migrator for `drizzle-cubrid/native`: file format, refusals, recovery, what is not implemented |
+| [0.x schema guide](docs/SCHEMA.md), [0.x queries guide](docs/QUERIES.md) | The deprecated `drizzle-cubrid/legacy` API, until it is removed in 1.0 |
 
 ## Development
 

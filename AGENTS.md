@@ -22,7 +22,8 @@ query building, and migration support for CUBRID via the `cubrid-client` TypeScr
 ```mermaid
 flowchart TD
     A[drizzle-cubrid/] --> B[src/]
-    B --> B1[index.ts - Public API exports]
+    B --> B0[native/ - CUBRID-native dialect; native/index.ts is the root entry drizzle-cubrid]
+    B --> B1[legacy.ts - deprecated 0.x entry drizzle-cubrid/legacy]
     B --> B2[driver.ts - Driver and drizzle factory]
     B --> B3[session.ts - Session, prepared query, transaction]
     B --> B4[columns.ts - mysql-core re-exports plus CUBRID columns]
@@ -46,6 +47,8 @@ flowchart TD
 
 ### Module Responsibilities
 
+The rows for `driver.ts`, `session.ts`, `columns.ts`, `table.ts` and `types.ts` describe the deprecated 0.x API (`drizzle-cubrid/legacy`); the native dialect is in `src/native/` ([docs/NATIVE_API.md](docs/NATIVE_API.md)).
+
 | Module | Role |
 |---|---|
 | `driver.ts` | `CubridDriver` class creates sessions. `CubridDatabase` extends `MySqlDatabase`. `drizzle()` factory function creates database instance from `CubridClient`. |
@@ -53,7 +56,8 @@ flowchart TD
 | `columns.ts` | Re-exports all mysql-core column types + defines CUBRID-specific columns (SET, MULTISET, SEQUENCE, MONETARY). |
 | `table.ts` | `cubridTable()` — table schema builder function (wraps `mysqlTable` with CUBRID defaults). |
 | `types.ts` | Custom Drizzle column types for CUBRID: `CubridSet`, `CubridMultiset`, `CubridSequence`, `CubridMonetary`. |
-| `index.ts` | Public API surface — re-exports everything users need. |
+| `native/index.ts` | Public API of the root entry `drizzle-cubrid` (and its alias `drizzle-cubrid/native`) since 0.3 (ADR 0010). |
+| `legacy.ts` | The deprecated 0.x entry `drizzle-cubrid/legacy`: re-exports the MySQL-based modules below and emits the `DRIZZLE_CUBRID_LEGACY` warning once (`deprecation.ts`). Removed in 1.0. |
 
 ### Drizzle Extension Pattern
 

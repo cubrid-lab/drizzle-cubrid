@@ -1,14 +1,16 @@
 # Queries Guide
 
+> **Deprecated 0.x API.** This guide describes the MySQL-based 0.x API. Since 0.3 it is imported from `drizzle-cubrid/legacy` (deprecated, removed in 1.0); the root entry `drizzle-cubrid` is the CUBRID-native dialect, documented in [NATIVE_API.md](NATIVE_API.md). See [MIGRATING_FROM_0X.md](MIGRATING_FROM_0X.md).
+
 This guide covers all query operations in `drizzle-cubrid` — SELECT, INSERT, UPDATE, DELETE, transactions, and raw SQL.
 
 ## Setup
 
 ```ts
 import { createClient } from "cubrid-client";
-import { drizzle } from "drizzle-cubrid";
-import { cubridTable, int, varchar, timestamp } from "drizzle-cubrid";
-import { eq, gt, lt, gte, lte, ne, and, or, not, sql } from "drizzle-cubrid";
+import { drizzle } from "drizzle-cubrid/legacy";
+import { cubridTable, int, varchar, timestamp } from "drizzle-cubrid/legacy";
+import { eq, gt, lt, gte, lte, ne, and, or, not, sql } from "drizzle-cubrid/legacy";
 
 // Define schema
 const users = cubridTable("users", {
@@ -89,7 +91,7 @@ const result2 = await db
 | `or(...conds)` | `OR` | `or(eq(...), eq(...))` |
 | `not(cond)` | `NOT` | `not(eq(users.name, "Alice"))` |
 
-`drizzle-cubrid` re-exports only these operators plus `asc`, `desc`, `count`,
+`drizzle-cubrid/legacy` re-exports only these operators plus `asc`, `desc`, `count`,
 `sum`, `avg`, `min`, `max`, `sql` and `placeholder`. Import any other Drizzle
 helper, such as `like`, `inArray`, `isNull`, `between` or `relations`, from
 `drizzle-orm`.
@@ -97,7 +99,7 @@ helper, such as `like`, `inArray`, `isNull`, `between` or `relations`, from
 ### ORDER BY
 
 ```ts
-import { asc, desc } from "drizzle-cubrid";
+import { asc, desc } from "drizzle-cubrid/legacy";
 
 const sorted = await db
   .select()
@@ -153,7 +155,7 @@ value instead: `onDuplicateKeyUpdate({ set: { n: 43 } })`.
 ### Aggregations
 
 ```ts
-import { count, sum, avg, min, max } from "drizzle-cubrid";
+import { count, sum, avg, min, max } from "drizzle-cubrid/legacy";
 
 const stats = await db
   .select({
@@ -437,7 +439,7 @@ await db.transaction(async (tx) => {
 Use `sql` tagged template for raw SQL expressions:
 
 ```ts
-import { sql } from "drizzle-cubrid";
+import { sql } from "drizzle-cubrid/legacy";
 
 // Raw query
 const result = await db.execute(sql`SELECT COUNT(*) as cnt FROM users WHERE age > ${18}`);
@@ -511,7 +513,7 @@ padding, under both bindings: `` eq(t.code, sql`concat(…)`) `` and
 expression or subquery column to `CHAR` (`` sql`cast(concat(…) as CHAR(10))` ``).
 
 `binary()` and `varbinary()` throw in the 0.x API (#216); use the
-`Buffer`-based builders of `drizzle-cubrid/native` (see
+`Buffer`-based builders of the native `drizzle-cubrid` (see
 [SCHEMA.md](SCHEMA.md#binary-types)).
 
 A custom client passed to `drizzle()` needs `queryPrepared()` (and
@@ -525,7 +527,7 @@ statement on the server.
 Use `placeholder()` to create reusable prepared queries:
 
 ```ts
-import { placeholder } from "drizzle-cubrid";
+import { placeholder } from "drizzle-cubrid/legacy";
 
 const prepared = db
   .select()

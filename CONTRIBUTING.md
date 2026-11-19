@@ -150,17 +150,20 @@ reports:
   built on Drizzle's MySQL classes. Adding a dependency to native code means
   adding it to the allowlist in the script, in a reviewed PR
 - in native code (`src/native/**`) and the packed native entries
-  (`dist/native*.{js,cjs,mjs}`), ways to load code that evade the checks above
+  (`dist/index.*`, the root entry since 0.3, and `dist/native*.*`, as
+  JavaScript), ways to load code that evade the checks above
   (rule `native-dynamic`): `eval`, `Function` (`new Function`, `Function(...)`,
   an alias or `globalThis.Function`), a call of `.constructor(...)`,
   `import(expr)` or `require(expr)` with a non-literal argument, and `'eval'`,
   `'Function'`, `'require'` or `'createRequire'` as a computed key
   (`module['require']`, `Reflect.get(m, 'require')`). Strings, comments, types
-  and properties such as `.function` do not match. The 0.x code and the root
-  entry are not scanned for it, so the baseline is unchanged
+  and properties such as `.function` do not match. The 0.x code
+  (`dist/legacy.*`, `drizzle-cubrid/legacy`) is not scanned for it
 
-Native code may have no findings at all (`native-dynamic` is refused in the
-baseline too). The 0.x code's existing findings are
+Native code may have no findings at all: neither `src/native/**` nor a packed
+native entry (`dist/index.*`, `dist/native*.*`, declarations included) can be
+baselined ([ADR 0010](docs/adr/0010-promote-native-root-deprecate-0x.md)). The
+0.x code's existing findings (`src/` 0.x modules and `dist/legacy.*`) are
 pinned by file, rule and count in `scripts/dialect-boundary-baseline.json`: a
 new or increased finding fails, and so does an entry that no longer occurs, so
 the baseline only shrinks as the native replacements land. Run

@@ -2,6 +2,30 @@
 
 Solutions for common issues when using `drizzle-cubrid`.
 
+> **0.3 moved the 0.x API.** Since 0.3 the root entry `drizzle-cubrid` is the
+> CUBRID-native dialect ([NATIVE_API.md](NATIVE_API.md)) and the MySQL-based
+> 0.x API is `drizzle-cubrid/legacy` (deprecated, removed in 1.0). Sections
+> below that use `int(...).autoincrement()`, `cubridSet()` or `mode` describe
+> the 0.x API and import from `drizzle-cubrid/legacy`. See
+> [MIGRATING_FROM_0X.md](MIGRATING_FROM_0X.md).
+
+## Since 0.3: the root entry changed
+
+### `[DRIZZLE_CUBRID_LEGACY] DeprecationWarning: drizzle-cubrid/legacy is the 0.x API …`
+
+The process loaded `drizzle-cubrid/legacy`. It still works until 1.0; move the
+code to the native API ([MIGRATING_FROM_0X.md](MIGRATING_FROM_0X.md)). Until
+then `node --trace-deprecation` shows which import loads it, and
+`--no-deprecation` (or `--disable-warning=DRIZZLE_CUBRID_LEGACY` on Node
+20.11+/21.3+) silences it. It is printed once per process.
+
+### `drizzle-cubrid: cubridSet() is a 0.x export that moved to 'drizzle-cubrid/legacy' in 0.3`
+
+Thrown as `CubridRemovedExportError` (or reported by TypeScript as
+`Type 'RemovedFromRoot<…>' has no call signatures`) when 0.x code imports a
+0.x-only name from the root entry. Use the native replacement the message
+names, or import the 0.x API from `drizzle-cubrid/legacy`.
+
 ## Installation Issues
 
 ### Peer dependency warnings
@@ -94,11 +118,11 @@ const db2 = drizzle({ client });
 
 ### `cubridTable is not a function`
 
-Make sure you import from `drizzle-cubrid`, not from `drizzle-orm/mysql-core`:
+Make sure you import from `drizzle-cubrid` (native) or `drizzle-cubrid/legacy` (0.x), not from `drizzle-orm/mysql-core`:
 
 ```ts
 // ✅ Correct
-import { cubridTable, int, varchar } from "drizzle-cubrid";
+import { cubridTable, int, varchar } from "drizzle-cubrid/legacy";
 
 // ⚠️ Also works (cubridTable is an alias for mysqlTable)
 import { mysqlTable } from "drizzle-orm/mysql-core";
@@ -106,10 +130,10 @@ import { mysqlTable } from "drizzle-orm/mysql-core";
 
 ### CUBRID-specific types not available
 
-Import collection types directly from `drizzle-cubrid`:
+Import the 0.x collection types from `drizzle-cubrid/legacy` (the native ones are `set`, `multiset` and `sequence` from `drizzle-cubrid`):
 
 ```ts
-import { set, multiset, sequence, monetary } from "drizzle-cubrid";
+import { set, multiset, sequence, monetary } from "drizzle-cubrid/legacy";
 ```
 
 These are custom types — they won't be available from `drizzle-orm`.
@@ -145,8 +169,9 @@ result.affectedRows; // 1
 
 ### `Streaming is not supported by the CUBRID driver`
 
-drizzle-cubrid does not implement streaming
-([#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)). Use
+The 0.x API (`drizzle-cubrid/legacy`) does not implement streaming
+([#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)); the native
+API streams selects ([Streaming](NATIVE_API.md#streaming)). With the 0.x API, use
 `LIMIT`/`OFFSET` for pagination:
 
 ```ts
@@ -328,7 +353,7 @@ Create `drizzle()` once and reuse:
 ```ts
 // db.ts
 import { createClient } from "cubrid-client";
-import { drizzle } from "drizzle-cubrid";
+import { drizzle } from "drizzle-cubrid/legacy";
 
 const client = createClient({
   host: "localhost",
@@ -346,7 +371,7 @@ binding, each `execute()` still prepares and releases its own statement on the
 server, so this saves the query building, not a server round trip.
 
 ```ts
-import { placeholder } from "drizzle-cubrid";
+import { placeholder } from "drizzle-cubrid/legacy";
 
 const getUserById = db
   .select()
