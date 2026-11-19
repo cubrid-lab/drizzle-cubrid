@@ -83,6 +83,16 @@ export interface CubridArrayRowOptions {
 }
 
 /**
+ * What `iterator()` reads of an `AbortSignal`. Declared here so the published
+ * declarations never name `AbortSignal`, which needs the DOM lib or
+ * `@types/node`: a Node or DOM `AbortSignal` is assignable to it.
+ */
+export interface CubridAbortSignal {
+	readonly aborted: boolean;
+	readonly reason?: unknown;
+}
+
+/**
  * Options of `iterator()` on a native select, set operation or prepared
  * select. `signal`, `fetchSize` and `consumerTimeout` are passed to
  * cubrid-client's `stream()` (see its `StreamOptions`); `literal` is the
@@ -105,7 +115,7 @@ export interface CubridStreamOptions {
 	 * cursor (and a pool's connection) is released. Aborted before the stream
 	 * took a connection, nothing is sent.
 	 */
-	signal?: AbortSignal;
+	signal?: CubridAbortSignal;
 	/** Rows asked for in each FETCH (1 to 2^31 − 1); CUBRID 10.2 to 11.4 answer about 16 KiB of rows per FETCH whatever it says. */
 	fetchSize?: number;
 	/**
@@ -123,7 +133,7 @@ const MAX_INT32 = 2 ** 31 - 1;
 
 /** What this session passes to `stream()`: cubrid-client's options and positional rows. */
 export interface CubridStreamCallOptions {
-	signal?: AbortSignal;
+	signal?: CubridAbortSignal;
 	fetchSize?: number;
 	consumerTimeout?: number;
 	rowMode: 'array';
@@ -496,7 +506,7 @@ export class CubridSession {
 		return (async function* () {
 			if (readsTemporal) await assertUtcDecoding(zoneClient);
 			// Aborted before the first read: nothing is sent, so nothing is logged.
-			call.signal?.throwIfAborted();
+			if (call.signal?.aborted) throw call.signal.reason;
 			send(sql, params);
 			// Driver errors are passed through unchanged; leaving this loop early
 			// calls return() on cubrid-client's stream.

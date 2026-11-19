@@ -185,6 +185,7 @@ export {
 	unionAll,
 } from './select.js';
 export {
+	type CubridAbortSignal,
 	type CubridBinding,
 	type CubridDmlResult,
 	type CubridIsolationLevel,
