@@ -4611,6 +4611,9 @@ describe('drizzle-cubrid/native indexes and foreign keys on CUBRID (#157)', () =
 				},
 				(t) => [
 					native.unique().on(t.a, t.b),
+					// Named unique constraints on columns that already have one are accepted.
+					native.unique(ix('k_c_ab')).on(t.a, t.b),
+					native.unique(ix('k_c_e')).on(t.e),
 					native.index(ix('k_ba')).on(t.b, t.a),
 					native.uniqueIndex(ix('k_u_id')).on(t.id),
 					native.uniqueIndex(ix('k_u_e')).on(t.e),
@@ -4639,6 +4642,10 @@ describe('drizzle-cubrid/native indexes and foreign keys on CUBRID (#157)', () =
 			for (const statement of refused) {
 				expect(await driverError(client.query(statement)), statement).toMatchObject({ code: -272 });
 			}
+			// A repeated column, which getTableConfig() also refuses.
+			expect(await driverError(client.query(`CREATE INDEX "${ix('k_x7')}" ON "${keysName}" ("f", "f")`))).toMatchObject(
+				{ code: -494 },
+			);
 		},
 		DDL_TIMEOUT,
 	);

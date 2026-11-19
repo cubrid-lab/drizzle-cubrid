@@ -196,6 +196,17 @@ export function getTableConfig(table: CubridTable): CubridTableConfigInfo {
 		else if (value instanceof CubridForeignKey) foreignKeys.push(value);
 		else throw new TypeError(`Unsupported table extra config value on table ${tableName}`);
 	}
+	for (const value of [...primaryKeys, ...uniqueConstraints, ...indexes]) {
+		if (new Set(value.columns).size !== value.columns.length) {
+			const kind =
+				value instanceof CubridIndex
+					? 'Index'
+					: value instanceof CubridPrimaryKey
+						? 'Primary key'
+						: 'Unique constraint';
+			throw new Error(`${kind}${value.name ? ` ${value.name}` : ''} on table ${tableName} names a column twice`);
+		}
+	}
 	const owned = [...primaryKeys, ...uniqueConstraints, ...indexes].map((value) => value.columns);
 	for (const foreignKey of foreignKeys) {
 		const { columns: keyColumns, foreignColumns } = foreignKey.getReference();
@@ -219,7 +230,9 @@ type KeyKind = 'primary key' | 'unique constraint' | 'foreign key' | 'unique ind
  * Refuses what CUBRID 11.4 refuses with -272 when the DDL runs, measured on
  * the ordered column list of each key (the same columns in another order
  * never clash):
- * - two unique constraints, or two foreign keys, on the same columns;
+ * - two foreign keys on the same columns, even with other names or referenced
+ *   tables (two unnamed unique constraints on the same columns clash by their
+ *   generated name; named ones are accepted);
  * - an index on the columns of the primary key, a unique constraint, a
  *   unique index or another index (a foreign key does not clash);
  * - a unique index on the columns of an index or a foreign key (the primary
@@ -262,7 +275,7 @@ function checkNamesAndKeys(
 	const clashes = (a: KeyKind, b: KeyKind): boolean => {
 		if (b === 'index') return a !== 'foreign key';
 		if (b === 'unique index') return a === 'index' || a === 'foreign key';
-		return a === b && (a === 'unique constraint' || a === 'foreign key');
+		return a === b && a === 'foreign key';
 	};
 	const names = new Map<string, string>();
 	for (const [i, key] of keys.entries()) {

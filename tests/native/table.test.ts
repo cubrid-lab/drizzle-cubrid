@@ -321,7 +321,11 @@ describe('indexes (#157)', () => {
 				(t) => [uniqueIndex('u').on(t.p)],
 				/unique index u \(p\) .* as foreign key \(p\)/,
 			],
-			['two unique constraints', (t) => [unique().on(t.e)], /unique constraint \(e\) .* as unique constraint \(e\)/],
+			[
+				'two unnamed unique constraints (same generated name)',
+				(t) => [unique().on(t.e)],
+				/uses the index or constraint name u_k_e twice/,
+			],
 		];
 		for (const [label, extra, message] of refused) {
 			expect(() => getTableConfig(make(extra)), label).toThrow(message);
@@ -340,6 +344,9 @@ describe('indexes (#157)', () => {
 			['two unique indexes', (t) => [uniqueIndex('u').on(t.f), uniqueIndex('v').on(t.f)]],
 			['an index on a foreign key', (t) => [index('i').on(t.p)]],
 			['an index on part of a key', (t) => [index('i').on(t.a)]],
+			['two named unique constraints on the same columns', (t) => [unique('ua').on(t.f), unique('ub').on(t.f)]],
+			['a named unique() on a column .unique()', (t) => [unique('ub').on(t.e)]],
+			['a named and an unnamed unique() on the same columns', (t) => [unique('ub').on(t.a, t.b)]],
 		];
 		for (const [label, extra] of accepted) {
 			expect(() => getTableConfig(make(extra)), label).not.toThrow();
@@ -441,6 +448,14 @@ describe('foreign keys (#157)', () => {
 		expect(() => getTableConfig(repeatedForeign)).toThrow(/Foreign key on table rf names a column twice/);
 		const repeated = fk('rc', (t) => foreignKey({ columns: [t.a, t.a], foreignColumns: [pairs.a, pairs.b] }));
 		expect(() => getTableConfig(repeated)).toThrow(/Foreign key on table rc names a column twice/);
+		for (const [label, build] of [
+			['Index ix', (t: { a: CubridColumn }) => index('ix').on(t.a, t.a)],
+			['Unique constraint ux', (t: { a: CubridColumn }) => unique('ux').on(t.a, t.a)],
+			['Primary key', (t: { a: CubridColumn }) => primaryKey({ columns: [t.a, t.a] })],
+		] as const) {
+			const table = cubridTable('rep', { a: integer().notNull() }, (t) => [build(t)]);
+			expect(() => getTableConfig(table)).toThrow(new RegExp(`${label} on table rep names a column twice`));
+		}
 		const twoTables = fk('tt', (t) => foreignKey({ columns: [t.a, t.b], foreignColumns: [users.id, pairs.a] }));
 		expect(() => getTableConfig(twoTables)).toThrow(/references columns of more than one table/);
 		const notKey = fk('nk', (t) => foreignKey({ name: 'fk_nk', columns: [t.a], foreignColumns: [users.name] }));

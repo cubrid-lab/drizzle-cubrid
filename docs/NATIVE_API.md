@@ -1035,7 +1035,10 @@ each with a message that names the table and the key:
     (`unique()` or a column's `.unique()`), a `uniqueIndex()` or another
     `index()`;
   - a `uniqueIndex()` on the columns of an `index()` or a foreign key;
-  - two unique constraints, or two foreign keys, on the same columns.
+  - two foreign keys on the same columns, even with different names or
+    referenced tables. Two unique constraints on the same columns are
+    accepted when their names differ; two unnamed ones get the same
+    generated name and are refused by the name rule below.
 
   Accepted, also measured: a `uniqueIndex()` on the primary key, a unique
   constraint or another `uniqueIndex()`, an `index()` on a foreign key's
@@ -1047,8 +1050,10 @@ each with a message that names the table and the key:
   and `fk_<table>_<columns>`, lower case, columns joined with `_`
   (`pk_orders_id_line`). So `index('fk_posts_author_id')` clashes with an
   unnamed `.references()` on `author_id`.
-- A key that names a column twice (`foreignColumns: [pairs.a, pairs.a]` is
-  refused by CUBRID with -920).
+- A key or index that names a column twice: CUBRID refuses
+  `foreignColumns: [pairs.a, pairs.a]` with -920, `index('ix').on(t.id, t.id)`
+  with -494, and `unique('ux').on(t.id, t.id)` and
+  `primaryKey({ columns: [t.id, t.id] })` with -965.
 - Anything but a column in `index().on()`: descending (`DESC`),
   function-based and filtered (`WHERE`) indexes exist on CUBRID 11.4 but are
   not built here, and there is no `.using()` (CUBRID indexes are B-trees).
