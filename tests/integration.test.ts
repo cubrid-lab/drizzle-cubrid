@@ -2347,19 +2347,24 @@ describe('drizzle-cubrid/native transactions (#161)', () => {
 	it('refuses a statement of the enclosing level while a nested transaction runs, so its rollback cannot undo it', async () => {
 		await client.query(`DELETE FROM ${table()}`);
 		const db = native.drizzle(client);
-		const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+		// Gates, not sleeps: the enclosing level's insert is tried only once the
+		// nested transaction has run its own, and the nested one fails only after
+		// that insert settled, so the insert always meets a running nested level.
+		const nestedInserted = gate();
+		const outerTried = gate();
 		const settled = await db.transaction(async (tx) => {
 			await tx.insert(items).values({ id: 1 });
 			const results = await Promise.allSettled([
 				tx.transaction(async (n) => {
 					await n.insert(items).values({ id: 10 });
-					await sleep(50);
+					nestedInserted.open();
+					await outerTried.opened;
 					throw new Error('nested');
 				}),
 				(async () => {
-					await sleep(10);
+					await nestedInserted.opened;
 					return tx.insert(items).values({ id: 20 });
-				})(),
+				})().finally(() => outerTried.open()),
 			]);
 			// The nested callback using the captured outer tx is refused too.
 			const captured = await tx
