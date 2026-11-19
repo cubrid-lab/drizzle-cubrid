@@ -85,7 +85,10 @@ export interface CubridArrayRowOptions {
 /**
  * What `iterator()` reads of an `AbortSignal`. Declared here so the published
  * declarations never name `AbortSignal`, which needs the DOM lib or
- * `@types/node`: a Node or DOM `AbortSignal` is assignable to it.
+ * `@types/node`: a Node or DOM `AbortSignal` is assignable to it. It is not a
+ * duck-typing contract: `iterator()` still requires a real `AbortSignal` at run
+ * time and refuses any other object (a plain `{ aborted: false }`, or a signal
+ * from another realm such as jsdom) with a `TypeError`.
  */
 export interface CubridAbortSignal {
 	readonly aborted: boolean;
