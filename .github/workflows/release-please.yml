@@ -1,0 +1,54 @@
+name: Prepare reviewed Release PR
+
+# PR-only: this workflow proposes the next version and CHANGELOG in a Release
+# PR. It never tags, creates a GitHub Release or publishes to npm; tagging stays
+# a manual maintainer step that triggers publish.yml (docs/RELEASE_PROCESS.md).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # A GitHub Release alone does not establish npm publication. The exact
+      # current version must exist in both before proposing another, so a merged
+      # but untagged Release PR is never followed by a newer one.
+      - name: Wait for the current published version before proposing the next
+        id: current-version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          if ! gh release view "v$version" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo "::notice::v$version has no GitHub Release; do not generate the next release PR."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$(npm view "drizzle-cubrid@$version" version 2>/dev/null || true)" == "$version" ]]; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Exact npm version drizzle-cubrid@$version is absent or unverified; do not generate a newer Release PR. Finish publishing the existing tag first."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Propose version, lockfile and changelog in a Release PR
+        if: steps.current-version.outputs.released == 'true'
+        uses: googleapis/release-please-action@v5
+        with:
+          # Supply a restricted PAT for automatic PR CI (or mint an App token per run).
+          # With GITHUB_TOKEN, manually rerun CI on generated Release PRs.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true

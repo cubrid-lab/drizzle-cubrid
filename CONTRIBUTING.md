@@ -247,7 +247,8 @@ scrutiny. No existing repository CI or release safeguards are waived.
 - Write a clear title and description explaining _what_ and _why_.
 - Reference any related issues (e.g., `Fixes #42`).
 - Update documentation if your change affects the public API.
-- Update `CHANGELOG.md` with a summary of your change.
+- Title the PR as a Conventional Commit, `type: description` or `type(scope): description` (for example `feat(native): add indexes` or `feat!: ...` for a breaking change). PRs are squash-merged, so the title becomes the commit subject on `main`; `.github/workflows/pr-title.yml` checks it, and Release Please uses it to choose the next version.
+- Do **not** edit `CHANGELOG.md`. Release Please generates it in the Release PR; describe user-visible and breaking changes in the PR description instead. See [the release process](docs/RELEASE_PROCESS.md).
 
 ### Review Process
 
