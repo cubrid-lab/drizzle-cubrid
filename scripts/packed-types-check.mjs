@@ -10,7 +10,9 @@ import { join } from 'node:path';
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-execFileSync(npm, ['install', '--no-save', '--no-audit', '--no-fund', 'typescript@5', '@types/node@18'], {
+// Exact versions, so a new TypeScript or @types/node release cannot fail this
+// step on its own: TypeScript is the repository's locked version.
+execFileSync(npm, ['install', '--no-save', '--no-audit', '--no-fund', 'typescript@5.9.3', '@types/node@18.19.130'], {
 	stdio: 'inherit',
 });
 
