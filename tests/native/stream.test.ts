@@ -380,6 +380,8 @@ describe('iterator() refusals before anything is sent', () => {
 		[{ consumerTimeout: -1 }, /consumerTimeout must be an integer from 0/],
 		[{ consumerTimeout: 'soon' }, /consumerTimeout must be an integer from 0/],
 		[{ signal: {} }, /signal must be an AbortSignal/],
+		[{ signal: { aborted: false } }, /signal must be an AbortSignal/],
+		[{ signal: { aborted: true, reason: new Error('stop') } }, /signal must be an AbortSignal/],
 		[{ literal: 'yes' }, /literal must be a boolean/],
 	])('refuses option %o when iterator() is called', (options, message) => {
 		const client = fakeClient();

@@ -9,6 +9,16 @@
 //   and drizzle-cubrid/legacy still type-checks the 0.x API, under both
 //   `moduleResolution: nodenext` (package.json exports) and `node10`
 //   (package.json typesVersions).
+// - Declarations that name no global of the DOM lib or @types/node (#252): a
+//   consumer with `lib: ["es2022"]`, no @types/node and `skipLibCheck: false`
+//   compiles every entry, and a real AbortSignal, from Node's types or from lib
+//   dom, is accepted as the `signal` of `iterator()`. drizzle-orm's own
+//   declarations (Buffer, TextDecoder, mysql2, gel, ...) and cubrid-client's
+//   (Buffer, node:stream, AbortSignal) need Node's types or other packages and
+//   fail under `skipLibCheck: false` whatever this package does, so these
+//   cases assert that no error comes from a file of drizzle-cubrid or of the
+//   consumer, and ignore the ones under node_modules/drizzle-orm and
+//   node_modules/cubrid-client.
 // Usage (from the consumer directory): node packed-types-check.mjs
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -67,6 +77,33 @@ export { mysqlEnum } from 'drizzle-cubrid';
 export const old = legacy.cubridTable('old', { id: legacy.int('id').primaryKey(), tags: legacy.cubridSet('tags') });
 `;
 
+// `iterator()`'s signal, with the signal each environment has (#252).
+const signalSource = (
+	signal,
+) => `import { cubridTable, integer, type CubridDatabase, type CubridStreamOptions } from 'drizzle-cubrid';
+export const t = cubridTable('t', { id: integer().primaryKey() });
+declare const db: CubridDatabase;
+export const options: CubridStreamOptions = { signal: ${signal} };
+export const stream = db.select().from(t).iterator(undefined, { literal: true, signal: ${signal} });
+// @ts-expect-error a signal is an object, not a string
+export const bad: CubridStreamOptions = { signal: 'abort' };
+`;
+
+const entries = `import * as root from 'drizzle-cubrid';
+import * as native from 'drizzle-cubrid/native';
+import * as migrator from 'drizzle-cubrid/migrator';
+import * as nativeMigrator from 'drizzle-cubrid/native/migrator';
+import * as legacy from 'drizzle-cubrid/legacy';
+export const all = [root, native, migrator, nativeMigrator, legacy];
+`;
+
+// [name, lib, types, source]: skipLibCheck is false in all of them.
+const strictCases = [
+	['strict-no-libs', ['es2022'], [], entries + signalSource('{ aborted: false }')],
+	['strict-node-signal', ['es2022'], ['node'], signalSource('new AbortController().signal')],
+	['strict-dom-signal', ['es2022', 'dom'], [], signalSource('new AbortController().signal')],
+];
+
 const dir = mkdtempSync(join(process.cwd(), 'types-check-'));
 try {
 	writeFileSync(join(dir, 'schema.ts'), schema);
@@ -110,6 +147,43 @@ try {
 		writeFileSync(config, JSON.stringify({ compilerOptions, files: ['layout.ts'] }));
 		execFileSync(npx, ['tsc', '-p', config], { stdio: 'inherit' });
 		console.log(`export layout (root = native, /native alias, /migrator, /legacy), ${resolution}: ok`);
+	}
+	for (const [name, lib, types, source] of strictCases) {
+		writeFileSync(join(dir, `${name}.ts`), source);
+		const config = join(dir, `tsconfig.${name}.json`);
+		writeFileSync(
+			config,
+			JSON.stringify({
+				compilerOptions: {
+					strict: true,
+					noEmit: true,
+					module: 'nodenext',
+					moduleResolution: 'nodenext',
+					target: 'es2022',
+					skipLibCheck: false,
+					lib,
+					types,
+				},
+				files: [`${name}.ts`],
+			}),
+		);
+		let output = '';
+		try {
+			execFileSync(npx, ['tsc', '-p', config, '--pretty', 'false'], { encoding: 'utf8', stdio: 'pipe' });
+		} catch (error) {
+			output = `${error.stdout ?? ''}${error.stderr ?? ''}`;
+		}
+		const errors = output.split('\n').filter((line) => /error TS\d+/.test(line));
+		const own = errors.filter((line) => !/(^|[\\/])node_modules[\\/](drizzle-orm|cubrid-client)[\\/]/.test(line));
+		if (own.length > 0) {
+			console.error(own.join('\n'));
+			throw new Error(
+				`${name}: ${own.length} type error(s) outside drizzle-orm's and cubrid-client's own declarations`,
+			);
+		}
+		console.log(
+			`skipLibCheck: false, lib ${lib.join('+')}, types [${types.join()}] (${name}): ok, ${errors.length} error(s) in drizzle-orm and cubrid-client ignored`,
+		);
 	}
 } finally {
 	rmSync(dir, { recursive: true, force: true });
