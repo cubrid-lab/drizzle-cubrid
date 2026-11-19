@@ -198,7 +198,10 @@ export class CubridTime extends MySqlTime<ColumnBaseConfig<'string', 'MySqlTime'
 	}
 }
 
-/** Drizzle's `datetime()` with cubrid-client's `Date` decoded; same signature and types. */
+/**
+ * Drizzle's `datetime()` with cubrid-client's `Date` decoded; same signature and types.
+ * @deprecated Use `datetime({ mode })` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
+ */
 export const datetime = ((a?: unknown, b?: { mode?: 'date' | 'string'; fsp?: number }) => {
 	const { name, config } = nameAndConfig(a, b);
 	return config?.mode === 'string'
@@ -206,7 +209,10 @@ export const datetime = ((a?: unknown, b?: { mode?: 'date' | 'string'; fsp?: num
 		: new CubridDateTimeBuilder(name, config as AnyConfig);
 }) as typeof drizzleDatetime;
 
-/** Drizzle's `timestamp()` with cubrid-client's `Date` decoded; same signature and types. */
+/**
+ * Drizzle's `timestamp()` with cubrid-client's `Date` decoded; same signature and types.
+ * @deprecated Use `timestamp({ mode })` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
+ */
 export const timestamp = ((a?: unknown, b: { mode?: 'date' | 'string'; fsp?: number } = {}) => {
 	const { name, config } = nameAndConfig(a, b);
 	return config?.mode === 'string'
@@ -214,13 +220,19 @@ export const timestamp = ((a?: unknown, b: { mode?: 'date' | 'string'; fsp?: num
 		: new CubridTimestampBuilder(name, config as AnyConfig);
 }) as typeof drizzleTimestamp;
 
-/** Drizzle's `date()` with cubrid-client's `Date` decoded; same signature and types. */
+/**
+ * Drizzle's `date()` with cubrid-client's `Date` decoded; same signature and types.
+ * @deprecated Use `date({ mode })` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
+ */
 export const date = ((a?: unknown, b?: { mode?: 'date' | 'string' }) => {
 	const { name, config } = nameAndConfig(a, b);
 	return config?.mode === 'string' ? new CubridDateStringBuilder(name) : new CubridDateBuilder(name);
 }) as typeof drizzleDate;
 
-/** Drizzle's `time()` with cubrid-client's `Date` decoded; same signature and types. */
+/**
+ * Drizzle's `time()` with cubrid-client's `Date` decoded; same signature and types.
+ * @deprecated Use `time()` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
+ */
 export const time = ((a?: unknown, b?: { fsp?: number }) => {
 	const { name, config } = nameAndConfig(a, b);
 	return new CubridTimeBuilder(name, config as AnyConfig);

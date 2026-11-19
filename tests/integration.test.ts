@@ -6,6 +6,10 @@
 // CUBRID_TEST_PASSWORD (empty). Without CUBRID_TEST_HOST the run fails instead
 // of skipping, so a missing database can never look like a pass.
 // CUBRID_TEST_EXPECT_VERSION, when set, must prefix the server version.
+//
+// The 0.x API is imported from its deprecated entry, drizzle-cubrid/legacy
+// (src/legacy.ts), and keeps its live tests until it is removed in 1.0
+// (ADR 0010). The native API is the root entry, src/native/index.ts.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,23 +55,23 @@ import {
 	cubridMultiset,
 	cubridSequence,
 	cubridSet,
+	cubridTable,
 	date,
 	datetime,
 	decimal,
 	double,
+	drizzle,
 	int,
+	monetary,
 	mysqlEnum,
 	time,
 	timestamp,
 	varchar,
-} from '../src/columns';
-import { drizzle } from '../src/driver';
+} from '../src/legacy';
 import { createIndexSql, createTableSql } from '../src/native/ddl';
 import * as native from '../src/native/index';
 import { CubridMigrationError, migrate } from '../src/native/migrator';
 import { RELATIONAL_KEY_CHUNK } from '../src/native/relational';
-import { cubridTable } from '../src/table';
-import { monetary } from '../src/types';
 
 const host = process.env.CUBRID_TEST_HOST;
 if (!host) {

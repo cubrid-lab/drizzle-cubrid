@@ -1,13 +1,40 @@
-// drizzle-cubrid/native: the CUBRID-native dialect (experimental preview).
+// drizzle-cubrid (the root entry) and drizzle-cubrid/native: the CUBRID-native dialect.
+//
+// Since 0.3 this module is the package's root entry; drizzle-cubrid/native is
+// an alias of it (same files, so the same module instance and classes) and
+// stays through 1.x (ADR 0010). The 0.x API moved to drizzle-cubrid/legacy.
 //
 // Tables with constraints, indexes and foreign keys, column builders with codecs, and drizzle() with select(), insert(),
 // update(), delete(), execute(), transaction() and relational queries
 // (db.query) (#158, #159, #160, #161), and generateInitialMigration() for the
-// migrator entry drizzle-cubrid/native/migrator (#163).
+// migrator entry drizzle-cubrid/migrator (#163).
 // See docs/NATIVE_API.md and docs/MIGRATIONS.md.
 // It must never import the 0.x modules, which are built on Drizzle's MySQL
 // classes (ADR 0003, ADR 0007); scripts/check-dialect-boundary.mjs enforces it.
 
+// Drizzle's operators and aggregates, as the 0.x root exported them, so that
+// `import { eq, sql } from 'drizzle-cubrid'` keeps working. They are
+// drizzle-orm's own objects, not copies.
+export {
+	and,
+	asc,
+	avg,
+	count,
+	desc,
+	eq,
+	gt,
+	gte,
+	lt,
+	lte,
+	max,
+	min,
+	ne,
+	not,
+	or,
+	placeholder,
+	sql,
+	sum,
+} from 'drizzle-orm';
 export {
 	type AnyCubridColumnBuilder,
 	bigint,
@@ -118,6 +145,24 @@ export {
 	CubridRelationalQuery,
 	CubridRelationalQueryBuilder,
 } from './relational.js';
+export {
+	CubridPreparedQuery,
+	CubridRemovedExportError,
+	cubridMultiset,
+	cubridSequence,
+	cubridSet,
+	customType,
+	longtext,
+	mediumint,
+	mediumtext,
+	type RemovedFromRoot,
+	real,
+	serial,
+	text,
+	tinyint,
+	tinytext,
+	year,
+} from './removed.js';
 export {
 	type CubridAliasedSelection,
 	CubridPreparedSelect,

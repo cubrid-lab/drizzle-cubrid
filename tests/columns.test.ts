@@ -16,9 +16,11 @@ describe('columns exports', () => {
 
 	it('refuses binary() and varbinary(), which do not round-trip on CUBRID (#216)', () => {
 		expect(() => columns.binary('hash', { length: 4 })).toThrow(
-			/^binary\(\) is not supported by drizzle-cubrid \(0\.x\): .*\(#216\)\. Use binary\(\) from drizzle-cubrid\/native, which reads and writes Buffer values/,
+			/^binary\(\) is not supported by drizzle-cubrid \(0\.x\): .*\(#216\)\. Use binary\(\) from drizzle-cubrid \(the native API\), which reads and writes Buffer values/,
 		);
-		expect(() => columns.varbinary('data', { length: 8 })).toThrow(/varbinary\(\) from drizzle-cubrid\/native/);
+		expect(() => columns.varbinary('data', { length: 8 })).toThrow(
+			/varbinary\(\) from drizzle-cubrid \(the native API\)/,
+		);
 		expect(() => columns.varbinary()).toThrow(/#216/);
 	});
 

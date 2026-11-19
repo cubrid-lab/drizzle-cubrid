@@ -1,5 +1,5 @@
-// The schema the example migrations create (drizzle-cubrid/native).
-import { cubridTable, integer, varchar } from 'drizzle-cubrid/native';
+// The schema the example migrations create (drizzle-cubrid).
+import { cubridTable, integer, varchar } from 'drizzle-cubrid';
 
 export const users = cubridTable('users', {
 	id: integer().primaryKey().autoIncrement(),

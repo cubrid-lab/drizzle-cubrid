@@ -1,13 +1,13 @@
-# CUBRID schema migrations (experimental, `drizzle-cubrid/native`)
+# CUBRID schema migrations (experimental)
 
 This example applies two CUBRID SQL migrations with the CUBRID-native
-migrator, `drizzle-cubrid/native/migrator`. Full guide:
+migrator, `drizzle-cubrid/migrator` (also `drizzle-cubrid/native/migrator`). Full guide:
 [docs/MIGRATIONS.md](../../docs/MIGRATIONS.md); design and measured CUBRID
 behavior: [ADR 0009](../../docs/adr/0009-cubrid-native-migrations.md).
 
 | File                                                             | What it is                                                                                   |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| [`schema.ts`](schema.ts)                                         | The `drizzle-cubrid/native` schema after both migrations                                     |
+| [`schema.ts`](schema.ts)                                         | The `drizzle-cubrid` schema after both migrations                                            |
 | [`migrations/0001_initial.sql`](migrations/0001_initial.sql)     | `CREATE TABLE`, written by `generateInitialMigration()` from the first version of the schema |
 | [`migrations/0002_add_email.sql`](migrations/0002_add_email.sql) | `ALTER TABLE` and `CREATE UNIQUE INDEX`, written by hand                                     |
 | [`migrate.ts`](migrate.ts)                                       | A dry run, then `migrate()`                                                                  |
@@ -28,7 +28,7 @@ to run (its checksum is recorded); add a new numbered file instead.
   migration (`CREATE TABLE`) from a native schema.
 - **Not implemented:** schema diffing and `ALTER` generation (write later
   migrations by hand), catalog reflection (`pull`), `push`, down migrations,
-  migrations for the 0.x `drizzle-cubrid` entry, and CUBRID versions other
+  migrations for the deprecated 0.x API (`drizzle-cubrid/legacy`), and CUBRID versions other
   than 11.4.
 - **Unsupported:** drizzle-kit (`generate`, `migrate`, `push`, `pull`) in any
   dialect. The former `drizzle.config.ts` with `dialect: 'mysql'` was removed

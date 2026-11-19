@@ -6,14 +6,18 @@
 // versions, or the floors of the peer ranges in package.json) into a new
 // consumer project outside this repository, copies tests/integration.test.ts
 // there and runs it with every `../src/<entry>` import pointing at the
-// installed package (`../src/native/migrator` at drizzle-cubrid/native/migrator),
-// so the code under test is the tarball's ESM build. Two
-// test helpers that are not public are taken from src without touching the
+// installed package, so the code under test is the tarball's ESM build
+// (ADR 0010 export layout):
+//   ../src/native/index    -> drizzle-cubrid (the root entry, the native API)
+//   ../src/native/migrator -> drizzle-cubrid/migrator
+//   ../src/legacy          -> drizzle-cubrid/legacy (the deprecated 0.x API)
+// Two test helpers that are not public are taken from src without touching the
 // package: createTableSql (src/native/ddl.ts, copied with its imports pointed at
-// drizzle-cubrid/native) and the RELATIONAL_KEY_CHUNK constant. Any other
-// `../src/...` import stays unresolved and fails the run. A CommonJS smoke test
-// (scripts/packed-live-cjs.cjs) then exercises require() of both entry points
-// against the same server.
+// drizzle-cubrid/native, so every live DDL statement also proves that the
+// /native alias shares the root's classes) and the RELATIONAL_KEY_CHUNK
+// constant. Any other `../src/...` import stays unresolved and fails the run.
+// A CommonJS smoke test (scripts/packed-live-cjs.cjs) then exercises require()
+// of every entry point against the same server.
 //
 // It writes live-results.json (vitest JSON, for check-live-results.mjs),
 // evidence.json and evidence.md to the report dir (default: <consumer>/report)
@@ -129,7 +133,13 @@ if (entry?.integrity !== integrity) {
 	fail(`Installed drizzle-cubrid integrity ${entry?.integrity} is not the tarball's ${integrity}`);
 }
 if (installedVersion('drizzle-cubrid') !== packed.version) fail('Installed drizzle-cubrid is not the tarball version');
-for (const specifier of ['drizzle-cubrid', 'drizzle-cubrid/native', 'drizzle-cubrid/native/migrator']) {
+for (const specifier of [
+	'drizzle-cubrid',
+	'drizzle-cubrid/native',
+	'drizzle-cubrid/migrator',
+	'drizzle-cubrid/native/migrator',
+	'drizzle-cubrid/legacy',
+]) {
 	const path = require.resolve(specifier);
 	if (!path.startsWith(join(consumer, 'node_modules', 'drizzle-cubrid', 'dist'))) {
 		fail(`${specifier} resolves to ${path}, not the installed tarball`);
@@ -157,9 +167,9 @@ writeFileSync(
 export default defineConfig({
 	resolve: {
 		alias: [
-			{ find: /^\\.\\.\\/src\\/(columns|driver|table|types)$/, replacement: 'drizzle-cubrid' },
-			{ find: /^\\.\\.\\/src\\/native\\/index$/, replacement: 'drizzle-cubrid/native' },
-			{ find: /^\\.\\.\\/src\\/native\\/migrator$/, replacement: 'drizzle-cubrid/native/migrator' },
+			{ find: /^\\.\\.\\/src\\/legacy$/, replacement: 'drizzle-cubrid/legacy' },
+			{ find: /^\\.\\.\\/src\\/native\\/index$/, replacement: 'drizzle-cubrid' },
+			{ find: /^\\.\\.\\/src\\/native\\/migrator$/, replacement: 'drizzle-cubrid/migrator' },
 			{ find: /^\\.\\.\\/src\\/native\\/(ddl|relational)$/, replacement: ${JSON.stringify(join(consumer, 'tests', 'support'))} + '/$1.ts' },
 		],
 	},
@@ -246,7 +256,7 @@ const markdown = [
 	`| drizzle-orm | \`${evidence.drizzleOrm}\` |`,
 	`| cubrid-client | \`${evidence.cubridClient}\` |`,
 	`| ESM live suite (vitest ${evidence.vitest}) | exit ${esm.status}: ${counts} |`,
-	`| CJS smoke (both entry points) | exit ${cjs.status} |`,
+	`| CJS smoke (root, /native, /migrator, /legacy) | exit ${cjs.status} |`,
 	'',
 ].join('\n');
 writeFileSync(join(report, 'evidence.md'), markdown);

@@ -29,7 +29,10 @@ import { assertUtcDecoding } from './timezone.js';
 
 type QueryRow = Record<string, unknown>;
 
-/** What cubrid-client's `execute()` reports for INSERT, UPDATE and DELETE. */
+/**
+ * What cubrid-client's `execute()` reports for INSERT, UPDATE and DELETE.
+ * @deprecated Use `CubridDmlResult` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
+ */
 export interface CubridExecuteResult {
 	affectedRows: number;
 	/** The generated AUTO_INCREMENT value; a `bigint` beyond `Number.MAX_SAFE_INTEGER`. */
@@ -40,6 +43,7 @@ export interface CubridExecuteResult {
  * Rows for a SELECT. For INSERT, UPDATE and DELETE built with Drizzle's query
  * builders it is an empty array carrying `affectedRows` and, when the server
  * reported one, `lastInsertId`.
+ * @deprecated `db.execute()` of `drizzle-cubrid` returns the driver's rows. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
  */
 export type CubridRawQueryResult = QueryRow[] & Partial<CubridExecuteResult>;
 
@@ -50,14 +54,19 @@ export type CubridRawQueryResult = QueryRow[] & Partial<CubridExecuteResult>;
  *   `queryPrepared()`/`executePrepared()`, so no value ever becomes SQL text.
  * - `'literal'`: the driver writes each value into the SQL text as an escaped
  *   literal (`query()`/`execute()`). One round trip fewer per statement.
+ * @deprecated Use `CubridBinding` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
  */
 export type CubridBinding = 'prepared' | 'literal';
 
-/** Transaction settings `cubrid-client` accepts in `transaction(callback, options)`. */
+/**
+ * Transaction settings `cubrid-client` accepts in `transaction(callback, options)`.
+ * @deprecated Use `CubridTransactionConfig` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md.
+ */
 export interface CubridTransactionOptions {
 	isolationLevel?: 'read committed' | 'repeatable read' | 'serializable';
 }
 
+/** @deprecated Use `CubridNativeClient` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export interface CubridQueryable {
 	query<T extends QueryRow = QueryRow>(sql: string, params?: readonly unknown[]): Promise<T[]>;
 	/**
@@ -290,6 +299,7 @@ function readsTemporal(field: unknown): boolean {
 	return is(decoder, Column) && typeof elementType === 'string' && TEMPORAL_COLUMN_TYPES.has(elementType);
 }
 
+/** @deprecated Call `prepare()` on a `drizzle-cubrid` query (`CubridPreparedSelect`, `CubridPreparedWrite`, `CubridPreparedRelationalQuery`). The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MySqlPreparedQuery<T> {
 	static override readonly [entityKind] = 'CubridPreparedQuery';
 
@@ -417,6 +427,7 @@ export class CubridPreparedQuery<T extends MySqlPreparedQueryConfig> extends MyS
 	}
 }
 
+/** @deprecated Use `CubridSession` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export class CubridSession<
 	TFullSchema extends Record<string, unknown>,
 	TSchema extends TablesRelationalConfig,
@@ -609,6 +620,7 @@ export class CubridSession<
 	}
 }
 
+/** @deprecated Use `CubridTransaction` from `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export class CubridTransaction<
 	TFullSchema extends Record<string, unknown>,
 	TSchema extends TablesRelationalConfig,
@@ -658,10 +670,12 @@ export class CubridTransaction<
 	}
 }
 
+/** @deprecated No counterpart in `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export interface CubridQueryResultHKT extends MySqlQueryResultHKT {
 	type: CubridRawQueryResult;
 }
 
+/** @deprecated No counterpart in `drizzle-cubrid`. The 0.x API (drizzle-cubrid/legacy) is removed in 1.0; see docs/MIGRATING_FROM_0X.md. */
 export interface CubridPreparedQueryHKT extends MySqlPreparedQueryHKT {
 	type: CubridPreparedQuery<Assume<this['config'], MySqlPreparedQueryConfig>>;
 }

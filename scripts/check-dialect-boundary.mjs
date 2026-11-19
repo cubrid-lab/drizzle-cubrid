@@ -31,7 +31,7 @@
 //                 reach the 0.x modules built on Drizzle's MySQL classes
 //
 //   - native-dynamic: in native code (src/native/** and the packed native
-//                 entries dist/native*.{js,cjs,mjs}), code loading the
+//                 entries dist/index.* and dist/native*.* as JavaScript), code loading the
 //                 literal-specifier checks above cannot see: `eval`,
 //                 `Function` (new Function, Function(...), globalThis.Function,
 //                 an alias), a call of `.constructor(...)`, import(expr) with
@@ -46,8 +46,11 @@
 // findings is pinned in scripts/dialect-boundary-baseline.json by scope,
 // file, rule and match, with a count. A new or larger finding fails, and so
 // does an entry that no longer occurs, so the baseline only shrinks unless a
-// PR visibly regenerates it. Native code (src/native/**) can never be
-// baselined.
+// PR visibly regenerates it. Native code can never be baselined: src/native/**
+// and the packed native entries, dist/index.* (the root entry since 0.3,
+// ADR 0010) and dist/native*.*, including their .d.ts. The 0.x findings in the
+// package are pinned under dist/legacy.*, the deprecated drizzle-cubrid/legacy
+// entry.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -83,8 +86,23 @@ const FOREIGN_DIALECT_SETTING = /^(?:mysql2?|postgres(?:ql)?|pg|sqlite|singlesto
 
 const NATIVE_DIR = 'src/native/';
 const NATIVE_SHIM = 'src/native/internal.ts';
-/** The packed native entries (dist/native.*, dist/native-migrator.*); they bundle only src/native. */
-const NATIVE_PACKED = /^dist\/native(?:-[\w-]+)?\.(?:js|cjs|mjs)$/;
+/**
+ * The packed native entries: dist/index.* (the root entry and its
+ * drizzle-cubrid/native alias, ADR 0010) and dist/native*.* (the migrator);
+ * they bundle only src/native. NATIVE_PACKED_JS is their JavaScript, which the
+ * native-dynamic rule reads.
+ */
+const NATIVE_PACKED = /^dist\/(?:index|native(?:-[\w-]+)?)\.(?:js|cjs|mjs|d\.ts|d\.cts|d\.mts)$/;
+const NATIVE_PACKED_JS = /^dist\/(?:index|native(?:-[\w-]+)?)\.(?:js|cjs|mjs)$/;
+
+/** A finding (or baseline entry) in native code, which is never allowed. */
+function isNative(scope, file, rule) {
+	return (
+		rule === 'native-dynamic' ||
+		(scope === 'src' && file.startsWith(NATIVE_DIR)) ||
+		(scope === 'package' && NATIVE_PACKED.test(file))
+	);
+}
 /** Names that load or build code when reached by a computed key. */
 const DYNAMIC_KEYS = new Set(['eval', 'Function', 'require', 'createRequire']);
 const CODE_RUNNING_BUILTINS = new Set(['node:module', 'node:vm', 'node:worker_threads', 'node:child_process']);
@@ -135,7 +153,7 @@ export function scanText(file, text, scope = 'src') {
 	const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file));
 	const inNative = scope === 'src' && file.startsWith(NATIVE_DIR);
 	const checkInternals = inNative && file !== NATIVE_SHIM;
-	const checkDynamic = inNative || (scope === 'package' && NATIVE_PACKED.test(file));
+	const checkDynamic = inNative || (scope === 'package' && NATIVE_PACKED_JS.test(file));
 	const findings = [];
 	const add = (rule, match, pos) => {
 		findings.push({ file, rule, match, line: source.getLineAndCharacterOfPosition(pos).line + 1 });
@@ -409,7 +427,7 @@ export function compare(findings, baselineEntries, scope) {
 	const allowed = new Map(baselineEntries.filter((e) => e.scope === scope).map((e) => [key(e), e]));
 
 	for (const entry of baselineEntries) {
-		if (entry.rule === 'native-dynamic' || (entry.scope === 'src' && entry.file.startsWith(NATIVE_DIR))) {
+		if (isNative(entry.scope, entry.file, entry.rule)) {
 			problems.push(`baseline entry for native code is not allowed: ${entry.file} ${entry.rule} ${entry.match}`);
 		}
 	}
@@ -420,7 +438,7 @@ export function compare(findings, baselineEntries, scope) {
 			.join(', ');
 		const b = allowed.get(key(a));
 		allowed.delete(key(a));
-		if (a.rule === 'native-dynamic' || (a.scope === 'src' && a.file.startsWith(NATIVE_DIR))) {
+		if (isNative(a.scope, a.file, a.rule)) {
 			problems.push(`${a.file}:${lines} ${a.rule} "${a.match}" is not allowed in native code`);
 		} else if (!b) {
 			problems.push(`${a.file}:${lines} new ${a.rule} "${a.match}" (x${a.count})`);
@@ -495,9 +513,7 @@ export function main(argv, options = {}) {
 	const baseline = readBaseline(baselinePath);
 
 	if (update) {
-		const native = findings.filter(
-			(f) => f.rule === 'native-dynamic' || (scope === 'src' && f.file.startsWith(NATIVE_DIR)),
-		);
+		const native = findings.filter((f) => isNative(scope, f.file, f.rule));
 		if (native.length > 0) {
 			for (const f of native) console.error(`${f.file}:${f.line} ${f.rule} "${f.match}" is not allowed in native code`);
 			return 1;
