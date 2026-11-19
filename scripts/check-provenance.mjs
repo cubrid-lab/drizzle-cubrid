@@ -13,7 +13,7 @@
 //     node_modules/...) and embeds them as they are in the repository.
 //
 //   node scripts/check-provenance.mjs similarity [--version=<v>]... [--upstream=<dir>]...
-//       [--min-raw=<tokens>] [--min-normalized=<tokens>] [--reviewed=<file>|none] [--verbose]
+//       [--min-raw=<tokens>] [--min-normalized=<tokens>] [--reviewed=<file>|none] [--verbose] [--emit]
 //     Compares src/**/*.ts with drizzle-orm's TypeScript source and prints
 //     every run of identical tokens at least --min-raw tokens long (default
 //     25), and every run of the same token shape (identifiers, strings and
@@ -22,12 +22,15 @@
 //     drizzle-orm release with `npm pack` (network) and reads the TypeScript
 //     source embedded in its source maps; each --upstream reads .ts files from
 //     a directory instead. Defaults to the installed drizzle-orm version.
-//     Hits are leads for a manual review, not findings. A hit inside a range
-//     listed in scripts/provenance-reviewed.json (file, lines, maxTokens, why)
-//     was reviewed and is only counted; every other hit fails (exit 1) until it
-//     is reviewed and recorded there and in docs/PROVENANCE.md. Editing a file
-//     can move a reviewed range; the hit then fails again and is re-reviewed.
+//     Hits are leads for a manual review, not findings. A hit recorded in
+//     scripts/provenance-reviewed.json (file, comparison, sha256 of its tokens,
+//     length) was reviewed and is only counted; every other hit fails (exit 1)
+//     until it is reviewed and recorded there and in docs/PROVENANCE.md. Moving
+//     reviewed code keeps it reviewed; changing it, or a longer run, does not.
+//     --emit prints the unreviewed hits as entry skeletons; --verbose lists the
+//     reviewed ones.
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, normalize, relative, resolve, sep } from 'node:path';
@@ -228,6 +231,8 @@ export function findRuns(ours, theirs, field, min) {
 			if (best && best.n >= min) {
 				runs.push({
 					file: file.name,
+					field,
+					sha256: runHash(field, tokens.slice(i, i + best.n)),
 					start: tokens[i].line,
 					end: tokens[i + best.n - 1].line,
 					ours: `${file.name}:${tokens[i].line}-${tokens[i + best.n - 1].line}`,
@@ -245,10 +250,21 @@ export function findRuns(ours, theirs, field, min) {
 	return runs;
 }
 
-/** A run is reviewed when an entry names its file, contains its lines and allows its length. */
-function reviewedEntry(entries, run) {
+/** SHA-256 of a run's tokens as compared (`field` 'raw' or 'norm'), independent of lines and whitespace. */
+export function runHash(field, tokens) {
+	return createHash('sha256')
+		.update(`${field}\u0000${tokens.map((t) => t[field]).join('\u0000')}`)
+		.digest('hex');
+}
+
+/**
+ * The reviewed entry of a run: same file and comparison, same token content
+ * (sha256) and no longer than reviewed. Lines and `where` are hints only, so
+ * moving the code passes and changing it or a longer run needs a new review.
+ */
+export function reviewedEntry(entries, run) {
 	return entries.find(
-		(e) => e.file === run.file && e.lines[0] <= run.start && run.end <= e.lines[1] && run.tokens <= e.maxTokens,
+		(e) => e.file === run.file && e.field === run.field && e.sha256 === run.sha256 && run.tokens <= e.tokens,
 	);
 }
 
@@ -262,6 +278,8 @@ function checkSimilarity(argv) {
 	const reviewedPath = opt('reviewed', join(REPO, 'scripts/provenance-reviewed.json'));
 	const reviewed = reviewedPath === 'none' ? [] : JSON.parse(readFileSync(reviewedPath, 'utf8')).entries;
 	const verbose = argv.includes('--verbose');
+	const emit = argv.includes('--emit');
+	const unreviewed = [];
 	let versions = argv.filter((a) => a.startsWith('--version=')).map((a) => a.slice(10));
 	const dirs = argv.filter((a) => a.startsWith('--upstream=')).map((a) => a.slice(11));
 	if (versions.length === 0 && dirs.length === 0) {
@@ -291,10 +309,21 @@ function checkSimilarity(argv) {
 				if (entry) {
 					reviewedHits++;
 					if (verbose) console.log(`reviewed (${entry.category}) ${line}`);
-				} else problems.push(`${line}\n    ${run.text}`);
+				} else {
+					problems.push(`${line}\n    ${run.text}`);
+					unreviewed.push({
+						file: run.file,
+						field: run.field,
+						tokens: run.tokens,
+						sha256: run.sha256,
+						lines: `${run.start}-${run.end}`,
+						upstream: run.theirs,
+					});
+				}
 			}
 		}
 		console.log(`${reviewedHits} hit(s) match reviewed entries in ${relative(REPO, reviewedPath) || reviewedPath}`);
+		if (emit) console.log(JSON.stringify(unreviewed, null, '\t'));
 		return problems;
 	} finally {
 		rmSync(tmp, { recursive: true, force: true });

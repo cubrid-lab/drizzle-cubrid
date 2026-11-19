@@ -2,14 +2,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { findRuns, tokenize } from '../scripts/check-provenance.mjs';
+import { findRuns, reviewedEntry, tokenize } from '../scripts/check-provenance.mjs';
 
 // Controls for the similarity scan of scripts/check-provenance.mjs (#220,
 // docs/PROVENANCE.md): a renamed copy of drizzle-orm code must be found, also
 // after a template literal, which a plain scanner would mis-tokenise.
 
 type Token = { raw: string; norm: string; line: number };
-type Run = { file: string; start: number; end: number; tokens: number };
+type Run = { file: string; field: string; sha256: string; start: number; end: number; tokens: number };
 
 /** The TypeScript source of an installed drizzle-orm module, from its source map. */
 function upstream(module: string): string {
@@ -99,5 +99,45 @@ describe('similarity controls', () => {
 	it('reports nothing for unrelated code', () => {
 		const code = 'export function add(a: number, b: number): number {\n\treturn a + b;\n}\n'.repeat(3);
 		expect(runs(code, upstream('mysql2/session'), 'norm', 50)).toEqual([]);
+	});
+});
+
+describe('reviewed entries', () => {
+	const session = upstream('mysql2/session');
+	const copy = session.slice(
+		session.indexOf('export class MySql2Session'),
+		session.indexOf('export class MySql2Transaction'),
+	);
+	const scan = (text: string) => [...runs(text, session, 'raw', 25), ...runs(text, session, 'norm', 50)];
+	// Recorded as scripts/provenance-reviewed.json records a reviewed hit.
+	const entries = scan(copy).map((r) => ({ file: r.file, field: r.field, tokens: r.tokens, sha256: r.sha256 }));
+	const unreviewed = (text: string) => scan(text).filter((r) => !reviewedEntry(entries, r));
+
+	it('records the hits of the reviewed code', () => {
+		expect(entries.length).toBeGreaterThan(0);
+		expect(unreviewed(copy)).toEqual([]);
+	});
+
+	it('keeps moved code reviewed: lines inserted before it and reindented', () => {
+		const moved = `const unrelatedA = 1;\nconst unrelatedB = 2;\n\n${copy.replace(/\t/g, '    ')}`;
+		expect(scan(moved).some((r) => r.start > 3)).toBe(true);
+		expect(unreviewed(moved)).toEqual([]);
+	});
+
+	it('needs a new review when the matched code changes', () => {
+		const changed = copy.replace('this.logger.logQuery(', 'this.logger.logQuery(String(0) &&');
+		expect(changed).not.toBe(copy);
+		expect(unreviewed(changed).length).toBeGreaterThan(0);
+	});
+
+	it('needs a new review when a run gets longer', () => {
+		const shorter = copy.slice(copy.indexOf('constructor('));
+		const reviewedShorter = scan(shorter).map((r) => ({
+			file: r.file,
+			field: r.field,
+			tokens: r.tokens,
+			sha256: r.sha256,
+		}));
+		expect(scan(copy).some((r) => !reviewedEntry(reviewedShorter, r))).toBe(true);
 	});
 });

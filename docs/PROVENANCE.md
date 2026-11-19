@@ -70,11 +70,17 @@ comparisons:
 The scan reports every run of at least 25 identical or 50 same-shape tokens (the defaults). The audit itself also
 ran at 20 identical / 40 same-shape tokens and measured the longest run per file; every hit at the defaults was
 read by hand, and every subclass of a drizzle-orm class in the 0.x code was also compared by hand with the matching
-mysql2/mysql-proxy driver class. Reviewed hits are recorded in `scripts/provenance-reviewed.json`, each with its
-file, line range, maximum length, category (`api`: dictated by Drizzle's public API; `attributed`: covered by the
-Apache-2.0 notice) and reason. Any other hit fails the scan.
+mysql2/mysql-proxy driver class. Reviewed hits are recorded in `scripts/provenance-reviewed.json` by content: file,
+comparison (`raw` identical or `norm` same-shape), length and the SHA-256 of the compared tokens, with a category
+(`api`: dictated by Drizzle's public API; `attributed`: covered by the Apache-2.0 notice) and the reason. The
+enclosing declaration (`where`), line range and upstream file are recorded as hints only. A hit is accepted when
+its content hash matches and it is not longer than reviewed, so moving reviewed code (lines inserted above it,
+reindenting) keeps it reviewed, while changing a matched token or a longer run fails the scan. Any other hit fails
+too. The 41 entries cover the hits of drizzle-orm 0.38.4, 0.44.1 and 0.45.4 compared alone and together (which
+upstream file matches best, and so a run's extent, depends on the versions compared).
 
-Controls (`tests/provenance-scan.test.ts`, run by `npm test`): 120 lines of `mysql-core/dialect.ts` with `MySql`
+Controls (`tests/provenance-scan.test.ts`, run by `npm test`; it also checks that reviewed entries survive inserted
+lines and reindenting, and that a changed or longer run needs a new review): 120 lines of `mysql-core/dialect.ts` with `MySql`
 renamed to `Cubrid`, `sql` renamed and the indentation changed are found as one same-shape run of more than 200
 tokens; a renamed copy of `MySql2Session` placed after template literals is found as a run of more than 300 tokens.
 The scan also flags the 0.1.0 tree (commit `78f4680`) against drizzle-orm 0.38.4 with 18 hits, among them
@@ -170,8 +176,10 @@ Add the peer floor and the locked drizzle-orm version if they changed. The simil
 match `scripts/provenance-reviewed.json` (`--verbose` lists them) and fails on any other hit. For each new hit,
 read both sides: if Drizzle's public API dictates it, add an `api` entry with the reason; if new code follows
 upstream code, rewrite it or attribute it (file header, THIRD_PARTY_NOTICES.md, an `attributed` entry and the
-matrix). Editing a file can move a reviewed range out of its entry; the hit then fails again and is reviewed
-again. `--upstream=<dir>` compares with a local checkout, `--min-raw`/`--min-normalized` change the thresholds and
+matrix). `--emit` prints the unreviewed hits as entry skeletons (file, field, tokens, sha256 and the hints) to
+complete with `where`, `category` and `reason` after the review. Unrelated edits elsewhere in a file never
+invalidate an entry; editing the matched code does, and the hit is reviewed again. Delete entries whose code is
+gone. `--upstream=<dir>` compares with a local checkout, `--min-raw`/`--min-normalized` change the thresholds and
 `--reviewed=none` shows every hit.
 
 The pack check fails when a file is missing or unexpected, LICENSE is not MIT, THIRD_PARTY_NOTICES.md or the
