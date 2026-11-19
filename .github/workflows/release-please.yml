@@ -1,0 +1,65 @@
+name: Prepare reviewed Release PR
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Release Please can propose a version bump; it must not create tags or releases.
+# The existing tag-triggered publish.yml owns the independently reviewed gate.
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Verify the current manifest version was actually published
+        id: current-version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const pkg = require('./package.json');
+          const lock = require('./package-lock.json');
+          const manifest = require('./.release-please-manifest.json');
+          if (!/^\d+\.\d+\.\d+$/.test(pkg.version) ||
+              pkg.version !== lock.version ||
+              pkg.version !== lock.packages[''].version ||
+              pkg.version !== manifest['.']) {
+            throw new Error('Package, lockfile and Release Please manifest versions must agree');
+          }
+          NODE
+          version=$(node -p "require('./package.json').version")
+          if ! gh release view "v$version" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo "::notice::v$version has no GitHub Release; wait for the reviewed release before proposing another."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          elif ! gh api "repos/$GH_REPO/git/ref/tags/v$version" >/dev/null 2>&1; then
+            echo "::warning::v$version has no tag; investigate the release before advancing."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          elif ! npm view "drizzle-cubrid@$version" version >/dev/null 2>&1; then
+            echo "::warning::drizzle-cubrid@$version is not verified on npm; recover that version before advancing."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Propose reviewed version, lockfile and changelog update
+        if: steps.current-version.outputs.released == 'true'
+        uses: googleapis/release-please-action@v5
+        with:
+          # Prefer a restricted token to trigger required PR CI; GITHUB_TOKEN
+          # creates PRs but does not trigger pull_request workflows.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
