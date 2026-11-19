@@ -66,9 +66,9 @@ columns, `AUTO_INCREMENT`, literal defaults, `NOT NULL`, primary keys, unique
 constraints and foreign keys (as table constraints, with their `ON DELETE` /
 `ON UPDATE` actions), each table followed by a `CREATE [UNIQUE] INDEX` per
 `index()`/`uniqueIndex()`, in declaration order. Tables come in the order
-given, except that a table comes after every table its foreign keys reference
-(a self-reference stays in its own `CREATE TABLE`), so the output depends only
-on the schema. It throws for a table that is not a `drizzle-cubrid/native`
+given, except that a referenced table is moved before the first table that
+references it (recursively; a self-reference stays in its own `CREATE TABLE`),
+so the output depends only on the schema. It throws for a table that is not a `drizzle-cubrid/native`
 table, for `.default(sql\`…\`)`, for two primary keys on one table, for a
 foreign key to a table that is not in the schema, and for a cycle of foreign
 keys between tables (`a -> b -> a`), with the cycle in the message. A cycle

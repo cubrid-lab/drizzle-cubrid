@@ -174,7 +174,13 @@ export interface CubridTableConfigInfo {
 	indexes: CubridIndex[];
 }
 
-/** The columns, table constraints and indexes of a native table. */
+/**
+ * The columns, table constraints and indexes of a native table. It calls the
+ * table's `extraConfig` and every `.references()` callback and checks the
+ * keys, so call it after every table of the schema is defined, never while
+ * the schema modules are still loading (a referenced table would still be
+ * in its temporal dead zone).
+ */
 export function getTableConfig(table: CubridTable): CubridTableConfigInfo {
 	const tableName = getTableName(table);
 	const columns = Object.values(getColumns(table));
@@ -203,17 +209,82 @@ export function getTableConfig(table: CubridTable): CubridTableConfigInfo {
 			}
 		}
 	}
-	// CUBRID keeps index and constraint names in one namespace per table and
-	// compares them without case (-272).
-	const names = new Set<string>();
-	const declared = [...primaryKeys, ...uniqueConstraints, ...foreignKeys, ...indexes].map((value) => value.name);
-	for (const name of [...columns.map((column) => column.uniqueName), ...declared]) {
-		if (name === undefined) continue;
-		const key = name.toLowerCase();
-		if (names.has(key)) throw new Error(`Table ${tableName} declares the index or constraint name ${name} twice`);
-		names.add(key);
-	}
+	checkNamesAndKeys(tableName, columns, primaryKeys, uniqueConstraints, foreignKeys, indexes);
 	return { name: tableName, columns, primaryKeys, uniqueConstraints, foreignKeys, indexes };
+}
+
+type KeyKind = 'primary key' | 'unique constraint' | 'foreign key' | 'unique index' | 'index';
+
+/**
+ * Refuses what CUBRID 11.4 refuses with -272 when the DDL runs, measured on
+ * the ordered column list of each key (the same columns in another order
+ * never clash):
+ * - two unique constraints, or two foreign keys, on the same columns;
+ * - an index on the columns of the primary key, a unique constraint, a
+ *   unique index or another index (a foreign key does not clash);
+ * - a unique index on the columns of an index or a foreign key (the primary
+ *   key, a unique constraint or another unique index do not clash);
+ * - a name used twice, compared without case, counting the names CUBRID
+ *   gives unnamed keys: `pk_`, `u_` and `fk_` + `<table>_<columns>`, joined
+ *   with `_` and in lower case.
+ * Indexes are checked in declaration order, after the table's constraints,
+ * as `createIndexSql()` creates them.
+ */
+function checkNamesAndKeys(
+	tableName: string,
+	columns: readonly CubridColumn[],
+	primaryKeys: readonly CubridPrimaryKey[],
+	uniqueConstraints: readonly CubridUniqueConstraint[],
+	foreignKeys: readonly CubridForeignKey[],
+	indexes: readonly CubridIndex[],
+): void {
+	const keys: { kind: KeyKind; name: string | undefined; columns: readonly CubridColumn[] }[] = [];
+	const primary = primaryKeys[0] ?? { name: undefined, columns: columns.filter((column) => column.primary) };
+	if (primary.columns.length > 0) keys.push({ kind: 'primary key', ...primary });
+	for (const column of columns) {
+		if (column.isUnique) keys.push({ kind: 'unique constraint', name: column.uniqueName, columns: [column] });
+	}
+	for (const { name, columns: list } of uniqueConstraints)
+		keys.push({ kind: 'unique constraint', name, columns: list });
+	for (const foreignKey of foreignKeys) {
+		keys.push({ kind: 'foreign key', name: foreignKey.name, columns: foreignKey.getReference().columns });
+	}
+	for (const { name, columns: list, unique: isUnique } of indexes) {
+		keys.push({ kind: isUnique ? 'unique index' : 'index', name, columns: list });
+	}
+	const prefix: Partial<Record<KeyKind, string>> = {
+		'primary key': 'pk',
+		'unique constraint': 'u',
+		'foreign key': 'fk',
+	};
+	const describe = (key: (typeof keys)[number]) =>
+		`${key.kind}${key.name === undefined ? '' : ` ${key.name}`} (${key.columns.map((c) => c.name).join(', ')})`;
+	const clashes = (a: KeyKind, b: KeyKind): boolean => {
+		if (b === 'index') return a !== 'foreign key';
+		if (b === 'unique index') return a === 'index' || a === 'foreign key';
+		return a === b && (a === 'unique constraint' || a === 'foreign key');
+	};
+	const names = new Map<string, string>();
+	for (const [i, key] of keys.entries()) {
+		const columnsKey = key.columns.map((c) => c.name.toLowerCase()).join('\0');
+		for (const other of keys.slice(0, i)) {
+			if (other.columns.map((c) => c.name.toLowerCase()).join('\0') !== columnsKey) continue;
+			if (clashes(other.kind, key.kind)) {
+				throw new Error(
+					`Table ${tableName} declares ${describe(key)} on the same columns, in the same order, as ${describe(other)}; CUBRID refuses that (-272)`,
+				);
+			}
+		}
+		const name = key.name ?? `${prefix[key.kind]}_${tableName}_${key.columns.map((c) => c.name).join('_')}`;
+		const lower = name.toLowerCase();
+		const earlier = names.get(lower);
+		if (earlier !== undefined) {
+			throw new Error(
+				`Table ${tableName} uses the index or constraint name ${name} twice (${earlier} and ${describe(key)}); CUBRID compares these names without case, and names an unnamed key pk_/u_/fk_<table>_<columns>`,
+			);
+		}
+		names.set(lower, describe(key));
+	}
 }
 
 function checkForeignKey(
@@ -228,6 +299,9 @@ function checkForeignKey(
 	}
 	if (columns.length === 0 || columns.length !== foreignColumns.length) {
 		throw new Error(`${label} needs as many columns as foreign columns, and at least one`);
+	}
+	if (new Set(columns).size !== columns.length || new Set(foreignColumns).size !== foreignColumns.length) {
+		throw new Error(`${label} names a column twice`);
 	}
 	const foreignTable = foreignColumns[0]!.table;
 	if (!(foreignTable instanceof CubridTable)) {

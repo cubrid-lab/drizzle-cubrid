@@ -235,9 +235,128 @@ describe('indexes (#157)', () => {
 			unique('Name_A').on(self.a),
 			index('name_a').on(self.b),
 		]);
-		expect(() => getTableConfig(t)).toThrow(/Table dups declares the index or constraint name name_a twice/);
-		const column = cubridTable('dups2', { a: integer().unique('u_a') }, (self) => [index('U_A').on(self.a)]);
-		expect(() => getTableConfig(column)).toThrow(/Table dups2 declares the index or constraint name U_A twice/);
+		expect(() => getTableConfig(t)).toThrow(
+			/Table dups uses the index or constraint name name_a twice \(unique constraint Name_A \(a\) and index name_a \(b\)\)/,
+		);
+		const column = cubridTable('dups2', { a: integer().unique('u_a'), b: integer() }, (self) => [
+			index('U_A').on(self.b),
+		]);
+		expect(() => getTableConfig(column)).toThrow(/Table dups2 uses the index or constraint name U_A twice/);
+	});
+
+	it('counts the names CUBRID gives unnamed keys: pk_/u_/fk_<table>_<columns>, in lower case', () => {
+		const parent = cubridTable('par', { id: integer().primaryKey() });
+		const q = (extra: (t: { id: CubridColumn; e: CubridColumn; u: CubridColumn; x: CubridColumn }) => CubridIndex) =>
+			cubridTable(
+				'Q',
+				{
+					id: integer().primaryKey(),
+					e: integer().unique(),
+					u: integer().references(() => parent.id),
+					x: integer(),
+				},
+				(t) => [extra(t)],
+			);
+		for (const name of ['pk_q_id', 'U_Q_E', 'fk_q_u']) {
+			expect(() => getTableConfig(q((t) => index(name).on(t.x)))).toThrow(
+				new RegExp(`Table Q uses the index or constraint name ${name} twice`),
+			);
+		}
+		const composite = cubridTable('c', { a: integer().notNull(), b: integer().notNull(), x: integer() }, (t) => [
+			primaryKey({ columns: [t.a, t.b] }),
+			unique().on(t.b, t.a),
+			index('u_c_b_a').on(t.x),
+		]);
+		expect(() => getTableConfig(composite)).toThrow(/name u_c_b_a twice \(unique constraint \(b, a\) and index/);
+		// A named key frees its generated name.
+		const named = cubridTable('n', { id: integer(), x: integer() }, (t) => [
+			primaryKey({ name: 'pk_n', columns: [t.id] }),
+			index('pk_n_id').on(t.x),
+		]);
+		expect(getTableConfig(named).indexes).toHaveLength(1);
+	});
+
+	it('refuses an index on the same ordered columns as a key CUBRID would clash with (-272)', () => {
+		const parent = cubridTable('par', { id: integer().primaryKey() });
+		const make = (
+			extra: (t: Record<'id' | 'e' | 'a' | 'b' | 'f' | 'p', CubridColumn>) => (CubridIndex | CubridUniqueConstraint)[],
+		) =>
+			cubridTable(
+				'k',
+				{
+					id: integer().primaryKey(),
+					e: integer().unique(),
+					a: integer(),
+					b: integer(),
+					f: integer(),
+					p: integer().references(() => parent.id),
+				},
+				(t) => [unique().on(t.a, t.b), ...extra(t)],
+			);
+		const refused: [
+			string,
+			(t: Record<'id' | 'e' | 'a' | 'b' | 'f' | 'p', CubridColumn>) => (CubridIndex | CubridUniqueConstraint)[],
+			RegExp,
+		][] = [
+			[
+				'index on the primary key',
+				(t) => [index('i').on(t.id)],
+				/index i \(id\) on the same columns, in the same order, as primary key \(id\); CUBRID refuses that \(-272\)/,
+			],
+			['index on a column .unique()', (t) => [index('i').on(t.e)], /index i \(e\) .* as unique constraint \(e\)/],
+			['index on a unique()', (t) => [index('i').on(t.a, t.b)], /index i \(a, b\) .* as unique constraint \(a, b\)/],
+			['two indexes', (t) => [index('i').on(t.f), index('j').on(t.f)], /index j \(f\) .* as index i \(f\)/],
+			[
+				'index after a unique index',
+				(t) => [uniqueIndex('u').on(t.f), index('i').on(t.f)],
+				/index i \(f\) .* as unique index u \(f\)/,
+			],
+			[
+				'unique index after an index',
+				(t) => [index('i').on(t.f), uniqueIndex('u').on(t.f)],
+				/unique index u \(f\) .* as index i \(f\)/,
+			],
+			[
+				'unique index on a foreign key',
+				(t) => [uniqueIndex('u').on(t.p)],
+				/unique index u \(p\) .* as foreign key \(p\)/,
+			],
+			['two unique constraints', (t) => [unique().on(t.e)], /unique constraint \(e\) .* as unique constraint \(e\)/],
+		];
+		for (const [label, extra, message] of refused) {
+			expect(() => getTableConfig(make(extra)), label).toThrow(message);
+		}
+		const accepted: [
+			string,
+			(t: Record<'id' | 'e' | 'a' | 'b' | 'f' | 'p', CubridColumn>) => (CubridIndex | CubridUniqueConstraint)[],
+		][] = [
+			['an index on the same columns in another order', (t) => [index('i').on(t.b, t.a)]],
+			['a unique index on the same columns in another order', (t) => [uniqueIndex('u').on(t.b, t.a)]],
+			['a unique index on the primary key', (t) => [uniqueIndex('u').on(t.id)]],
+			[
+				'a unique index on a unique column and constraint',
+				(t) => [uniqueIndex('u').on(t.e), uniqueIndex('v').on(t.a, t.b)],
+			],
+			['two unique indexes', (t) => [uniqueIndex('u').on(t.f), uniqueIndex('v').on(t.f)]],
+			['an index on a foreign key', (t) => [index('i').on(t.p)]],
+			['an index on part of a key', (t) => [index('i').on(t.a)]],
+		];
+		for (const [label, extra] of accepted) {
+			expect(() => getTableConfig(make(extra)), label).not.toThrow();
+		}
+		const twoForeignKeys = cubridTable('two', {
+			p: integer()
+				.references(() => parent.id)
+				.references(() => parent.id, { onDelete: 'cascade' }),
+		});
+		expect(() => getTableConfig(twoForeignKeys)).toThrow(/foreign key \(p\) .* as foreign key \(p\)/);
+		const uniqueOnPrimaryAndForeign = cubridTable('ok', {
+			id: integer()
+				.primaryKey()
+				.unique()
+				.references(() => parent.id),
+		});
+		expect(() => getTableConfig(uniqueOnPrimaryAndForeign)).not.toThrow();
 	});
 });
 
@@ -318,6 +437,10 @@ describe('foreign keys (#157)', () => {
 			cubridTable(name, { a: integer(), b: integer().notNull() }, (t) => [build(t)]);
 		const mismatched = fk('m', (t) => foreignKey({ columns: [t.a, t.b], foreignColumns: [users.id] }));
 		expect(() => getTableConfig(mismatched)).toThrow(/needs as many columns as foreign columns/);
+		const repeatedForeign = fk('rf', (t) => foreignKey({ columns: [t.a, t.b], foreignColumns: [pairs.a, pairs.a] }));
+		expect(() => getTableConfig(repeatedForeign)).toThrow(/Foreign key on table rf names a column twice/);
+		const repeated = fk('rc', (t) => foreignKey({ columns: [t.a, t.a], foreignColumns: [pairs.a, pairs.b] }));
+		expect(() => getTableConfig(repeated)).toThrow(/Foreign key on table rc names a column twice/);
 		const twoTables = fk('tt', (t) => foreignKey({ columns: [t.a, t.b], foreignColumns: [users.id, pairs.a] }));
 		expect(() => getTableConfig(twoTables)).toThrow(/references columns of more than one table/);
 		const notKey = fk('nk', (t) => foreignKey({ name: 'fk_nk', columns: [t.a], foreignColumns: [users.name] }));

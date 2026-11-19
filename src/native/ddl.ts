@@ -113,9 +113,9 @@ export function createIndexSql(table: CubridTable): string[] {
 }
 
 /**
- * `tables` with every table after the tables its foreign keys reference, and
- * otherwise in the given order (a depth-first walk in schema order, following
- * foreign keys in declaration order). A referenced table missing from
+ * `tables` in the given order, except that a referenced table is moved before
+ * the first table that references it (a depth-first walk in schema order,
+ * following foreign keys in declaration order). A referenced table missing from
  * `tables` and a cycle of foreign keys are refused.
  */
 function referencedFirst(tables: readonly CubridTable[]): CubridTable[] {
@@ -153,8 +153,8 @@ function referencedFirst(tables: readonly CubridTable[]): CubridTable[] {
  * `schema` (an object of tables and relations, as given to `drizzle()`, or an
  * array of tables), each followed by its `CREATE INDEX` statements, as CUBRID
  * SQL for a `0001_<name>.sql` file of drizzle-cubrid/native/migrator. Tables
- * come in the given order, except that a table referenced by a foreign key
- * comes before the tables that reference it. Relations and other values are
+ * come in the given order, except that a referenced table is moved before
+ * the first table that references it. Relations and other values are
  * skipped; a table that is not a drizzle-cubrid/native table, a foreign key
  * to a table outside the schema and a cycle of foreign keys between tables
  * are refused. It does not compare the schema with a database or an earlier

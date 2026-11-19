@@ -1029,9 +1029,26 @@ each with a message that names the table and the key:
 - A different number of columns and foreign columns, foreign columns of two
   tables, key or index columns of another table, and an index without a name
   or columns.
-- Two indexes or constraints of one table with the same name, compared
-  without case: CUBRID keeps index and constraint names in one namespace per
-  table (-272).
+- Keys CUBRID refuses with -272 when the DDL runs, compared on the ordered
+  column list (the same columns in another order never clash):
+  - an `index()` on the columns of the primary key, a unique constraint
+    (`unique()` or a column's `.unique()`), a `uniqueIndex()` or another
+    `index()`;
+  - a `uniqueIndex()` on the columns of an `index()` or a foreign key;
+  - two unique constraints, or two foreign keys, on the same columns.
+
+  Accepted, also measured: a `uniqueIndex()` on the primary key, a unique
+  constraint or another `uniqueIndex()`, an `index()` on a foreign key's
+  columns, and a `.unique()` on the primary key column. Indexes are checked
+  in declaration order, after the table's constraints, as they are created.
+- A name used twice in one table, compared without case. CUBRID keeps index
+  and constraint names in one namespace per table (-272), and that includes
+  the names it gives unnamed keys: `pk_<table>_<columns>`, `u_<table>_<columns>`
+  and `fk_<table>_<columns>`, lower case, columns joined with `_`
+  (`pk_orders_id_line`). So `index('fk_posts_author_id')` clashes with an
+  unnamed `.references()` on `author_id`.
+- A key that names a column twice (`foreignColumns: [pairs.a, pairs.a]` is
+  refused by CUBRID with -920).
 - Anything but a column in `index().on()`: descending (`DESC`),
   function-based and filtered (`WHERE`) indexes exist on CUBRID 11.4 but are
   not built here, and there is no `.using()` (CUBRID indexes are B-trees).
@@ -1048,6 +1065,12 @@ with `kind: 'foreign-key-violation'`: code -922 for a missing parent row,
 -924 for deleting a parent row that is still referenced under
 `RESTRICT`/`NO ACTION`. CUBRID also creates an index on the foreign key's
 columns.
+
+`getTableConfig(table)`, `generateInitialMigration()` and the DDL functions
+call each table's `extraConfig` and `.references()` callbacks and run these
+checks. Call them after every table of the schema is defined, not while the
+schema modules are still loading: a table that is not defined yet makes a
+`.references()` callback throw.
 
 `relations()` do not read foreign keys: relational queries still take
 `fields` and `references` from `one()`, as in Drizzle.

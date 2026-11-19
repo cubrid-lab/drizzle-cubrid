@@ -62,7 +62,7 @@ import {
 	varchar,
 } from '../src/columns';
 import { drizzle } from '../src/driver';
-import { createTableSql } from '../src/native/ddl';
+import { createIndexSql, createTableSql } from '../src/native/ddl';
 import * as native from '../src/native/index';
 import { CubridMigrationError, migrate } from '../src/native/migrator';
 import { RELATIONAL_KEY_CHUNK } from '../src/native/relational';
@@ -4594,6 +4594,54 @@ describe('drizzle-cubrid/native indexes and foreign keys on CUBRID (#157)', () =
 		await db.delete(nodes).where(eq(nodes.id, 1));
 		expect(await db.select().from(nodes)).toEqual([]);
 	});
+
+	it(
+		'accepts the keys getTableConfig() accepts and refuses with -272 the ones it refuses',
+		async () => {
+			const keysName = name('fk_keys');
+			const keys = native.cubridTable(
+				keysName,
+				{
+					id: native.integer().primaryKey(),
+					e: native.integer().unique(),
+					a: native.integer(),
+					b: native.integer(),
+					f: native.integer(),
+					p: native.integer().references(() => parents.id),
+				},
+				(t) => [
+					native.unique().on(t.a, t.b),
+					native.index(ix('k_ba')).on(t.b, t.a),
+					native.uniqueIndex(ix('k_u_id')).on(t.id),
+					native.uniqueIndex(ix('k_u_e')).on(t.e),
+					native.uniqueIndex(ix('k_u_ab')).on(t.a, t.b),
+					native.uniqueIndex(ix('k_u_f')).on(t.f),
+					native.uniqueIndex(ix('k_u_f2')).on(t.f),
+					native.index(ix('k_p')).on(t.p),
+					native.index(ix('k_a')).on(t.a),
+				],
+			);
+			created.push(`"${keysName}"`);
+			await client.query(createTableSql(keys));
+			for (const statement of createIndexSql(keys)) await client.query(statement);
+			// Each statement is what a declaration refused by getTableConfig() would emit.
+			const refused = [
+				`CREATE INDEX "${ix('k_x1')}" ON "${keysName}" ("id")`,
+				`CREATE INDEX "${ix('k_x2')}" ON "${keysName}" ("e")`,
+				`CREATE INDEX "${ix('k_x3')}" ON "${keysName}" ("a", "b")`,
+				`CREATE INDEX "${ix('k_x4')}" ON "${keysName}" ("f")`,
+				`CREATE INDEX "${ix('k_x5')}" ON "${keysName}" ("b", "a")`,
+				`CREATE UNIQUE INDEX "${ix('k_x6')}" ON "${keysName}" ("p")`,
+				`CREATE INDEX "pk_${keysName}_id" ON "${keysName}" ("f", "a")`,
+				`CREATE INDEX "U_${keysName}_E" ON "${keysName}" ("f", "a")`,
+				`CREATE INDEX "fk_${keysName}_p" ON "${keysName}" ("f", "a")`,
+			];
+			for (const statement of refused) {
+				expect(await driverError(client.query(statement)), statement).toMatchObject({ code: -272 });
+			}
+		},
+		DDL_TIMEOUT,
+	);
 
 	it('raises a unique-violation ConstraintError for a unique index', async () => {
 		const db = native.drizzle(client);
