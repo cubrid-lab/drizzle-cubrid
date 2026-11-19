@@ -41,7 +41,7 @@ import {
 	sum,
 	TransactionRollbackError,
 } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
 	bigint,
@@ -2347,19 +2347,24 @@ describe('drizzle-cubrid/native transactions (#161)', () => {
 	it('refuses a statement of the enclosing level while a nested transaction runs, so its rollback cannot undo it', async () => {
 		await client.query(`DELETE FROM ${table()}`);
 		const db = native.drizzle(client);
-		const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+		// Gates, not sleeps: the enclosing level's insert is tried only once the
+		// nested transaction has run its own, and the nested one fails only after
+		// that insert settled, so the insert always meets a running nested level.
+		const nestedInserted = gate();
+		const outerTried = gate();
 		const settled = await db.transaction(async (tx) => {
 			await tx.insert(items).values({ id: 1 });
 			const results = await Promise.allSettled([
 				tx.transaction(async (n) => {
 					await n.insert(items).values({ id: 10 });
-					await sleep(50);
+					nestedInserted.open();
+					await outerTried.opened;
 					throw new Error('nested');
 				}),
 				(async () => {
-					await sleep(10);
+					await nestedInserted.opened;
 					return tx.insert(items).values({ id: 20 });
-				})(),
+				})().finally(() => outerTried.open()),
 			]);
 			// The nested callback using the captured outer tx is refused too.
 			const captured = await tx
@@ -2380,20 +2385,26 @@ describe('drizzle-cubrid/native transactions (#161)', () => {
 	it('rolls back instead of committing when a nested transaction is still running as the callback returns', async () => {
 		await client.query(`DELETE FROM ${table()}`);
 		const db = native.drizzle(client);
-		const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+		// Gates, not sleeps: the callback returns only once the nested transaction
+		// has run its insert, and the nested one fails only after that, so the
+		// nested statement can never be refused by an outer level that ended first.
+		const nestedInserted = gate();
+		const outerSettled = gate();
 		let pending!: Promise<unknown>;
 		const error = await db
 			.transaction(async (tx) => {
 				await tx.insert(items).values({ id: 1 });
 				pending = tx.transaction(async (n) => {
 					await n.insert(items).values({ id: 2 });
-					await sleep(30);
+					nestedInserted.open();
+					await outerSettled.opened;
 					throw new Error('late');
 				});
 				pending.catch(() => undefined);
-				await sleep(5);
+				await nestedInserted.opened;
 			})
 			.catch((e: Error) => e.message);
+		outerSettled.open();
 		expect(error).toMatch(/was still running/);
 		await expect(pending).rejects.toThrow('late');
 		expect(await itemIds()).toEqual([]);
@@ -3755,8 +3766,12 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 	});
 
 	it('rejects the first read of a stream beyond the pool max with pool-timeout, not a hang', async () => {
-		const small = createPool({ ...config, timezone: 'utc', max: 2, acquireTimeoutMs: 1000 });
+		// acquireTimeoutMs also covers opening a new connection, which a busy
+		// server can stretch past 1 s: open both connections up front (min: 2,
+		// no acquire timeout applies) so only the third stream waits for one.
+		const small = createPool({ ...config, timezone: 'utc', max: 2, min: 2, acquireTimeoutMs: 1000 });
 		try {
+			await vi.waitFor(() => expect(small.stats().idle).toBe(2), { timeout: 20_000, interval: 10 });
 			const db = native.drizzle(small, { binding: 'literal' });
 			const streams = [0, 1, 2].map(() => db.select({ id: items.id }).from(items).orderBy(items.id).iterator());
 			expect((await (streams[0] as AsyncGenerator<{ id: number }>).next()).value).toEqual({ id: 1 });
