@@ -161,17 +161,28 @@ fractions without an error, in every mode (`.678` in a `Date` or
 
 ### Binary Types
 
+`binary()` and `varbinary()` are **refused by the 0.x API**: calling either
+throws. Drizzle's MySQL builders send and read strings, which CUBRID's `BIT` /
+`BIT VARYING` columns do not round-trip (strings were written as hex digits or
+rejected with -494, and reads came back garbled, [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216)).
+Fixing them in the 0.x code would mean new column classes built on Drizzle's
+MySQL classes, growing the 0.x code's dependence on them (which the
+dialect-boundary check only lets shrink), and the 0.x API is to be deprecated.
+
+Use the builders of `drizzle-cubrid/native`, which read and write `Buffer`
+values; `length` counts bytes:
+
 ```ts
-import { cubridTable, int, binary, varbinary } from "drizzle-cubrid";
+import { cubridTable, integer, binary, varbinary } from "drizzle-cubrid/native";
 
 export const files = cubridTable("files", {
-  id: int("id").primaryKey().autoincrement(),
-  hash: binary("hash", { length: 32 }),
-  file_data: varbinary("file_data", { length: 1024 }),
+  id: integer("id").primaryKey().autoIncrement(),
+  hash: binary("hash", { length: 32 }),            // BIT(256)
+  file_data: varbinary("file_data", { length: 1024 }), // BIT VARYING(8192)
 });
 ```
 
-> **Warning**: these builders do not round-trip on CUBRID's `BIT` / `BIT VARYING` columns: string values are written as hex digits or rejected (-494), and reads come back garbled. Do not use them until [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216) is fixed.
+See [Binary](NATIVE_API.md#binary) for padding, empty values and lengths.
 
 ## CUBRID-Specific Types
 
@@ -275,8 +286,8 @@ set<number>("ids", { element: int("id") }); // SET(INTEGER), number[]
   or `null`; nested arrays and other objects are refused before anything is
   sent. `[]` writes an empty collection. Bytes written into a string collection
   are stored as their hex text.
-- **Element types without a CUBRID mapping** (such as `json`, `binary` and
-  `varbinary` elements) are written without a cast. Under the default typed
+- **Element types without a CUBRID mapping** (such as `json` elements) are
+  written without a cast. Under the default typed
   binding CUBRID refuses to update such a collection (-494); use
   `binding: "literal"` for it.
 - **Placeholders.** `sql.placeholder()` cannot stand for a whole collection

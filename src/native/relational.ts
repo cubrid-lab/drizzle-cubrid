@@ -25,6 +25,7 @@ import {
 import { Param, Placeholder, SQL, sql } from 'drizzle-orm/sql/sql';
 import { getTableName, getTableUniqueName, Table } from 'drizzle-orm/table';
 import type { KnownKeysOnly } from 'drizzle-orm/utils';
+import { CubridBinary, CubridVarbinary } from './columns/binary.js';
 import { CubridCollection } from './columns/collections.js';
 import { describeValue } from './columns/common.js';
 import {
@@ -298,6 +299,12 @@ function planLevel(
 		);
 		if (collection) {
 			throw new Error(`${childPath}: ${collection.name} is a collection column, which cannot be a relation key`);
+		}
+		const bytes = [...normalized.fields, ...normalized.references].find(
+			(column) => column instanceof CubridBinary || column instanceof CubridVarbinary,
+		);
+		if (bytes) {
+			throw new Error(`${childPath}: ${bytes.name} is a binary column, which cannot be a relation key`);
 		}
 		const one = is(relation, One);
 		const child = new Map(value === true ? [] : entriesOf(value, 'with', childPath));

@@ -65,7 +65,7 @@ under *Unreleased* in the [CHANGELOG](../CHANGELOG.md); for example, its
 | Date and time columns | Shipped | needs a UTC client (`timezone: 'utc'`) |
 | `db.query.*.findMany()` / `findFirst()` without `with` | Shipped | |
 | `monetary()` | Shipped | strings; double precision ([#217](https://github.com/cubrid-lab/drizzle-cubrid/issues/217)) |
-| `binary()` / `varbinary()` | Defect, do not use | [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216) |
+| `binary()` / `varbinary()` | Refused (throw); use `drizzle-cubrid/native` | [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216) |
 | Relational `with` | Refused | [#200](https://github.com/cubrid-lab/drizzle-cubrid/issues/200) |
 | `.iterator()` (streaming) | Throws | not implemented |
 | JSON columns, BLOB/CLOB columns | No builder | `customType` only; unverified |

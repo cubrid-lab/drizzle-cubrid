@@ -4679,3 +4679,198 @@ describe('drizzle-cubrid/native indexes and foreign keys on CUBRID (#157)', () =
 		]);
 	});
 });
+
+describe('drizzle-cubrid/native binary() and varbinary() round-trip Buffer values (#216)', () => {
+	const files = native.cubridTable(name('nbinary'), {
+		id: native.integer().primaryKey(),
+		hash: native.binary({ length: 4 }),
+		data: native.varbinary({ length: 8 }),
+		parts: native.set({ element: native.varbinary({ length: 2 }) }),
+		blocks: native.sequence({ element: native.binary({ length: 2 }) }),
+	});
+	const quoted = `"${native.getTableConfig(files).name}"`;
+	const hex = (value: unknown) => (Buffer.isBuffer(value) ? value.toString('hex') : value);
+	const asHex = (row: Record<string, unknown>) =>
+		Object.fromEntries(
+			Object.entries(row).map(([key, value]) => [key, Array.isArray(value) ? value.map(hex) : hex(value)]),
+		);
+
+	beforeAll(async () => {
+		await client.query(createTableSql(files));
+		created.push(quoted);
+	}, DDL_TIMEOUT);
+
+	it('declares BIT(n*8) and BIT VARYING(n*8) columns', async () => {
+		const ddl = createTableSql(files);
+		expect(ddl).toContain('"hash" BIT(32)');
+		expect(ddl).toContain('"data" BIT VARYING(64)');
+		expect(ddl).toContain('"parts" SET(BIT VARYING(16))');
+		const columns = await client.query<{ attr_name: string; data_type: string; prec: number }>(
+			`SELECT attr_name, data_type, prec FROM db_attribute WHERE class_name = ? AND attr_name IN ('hash', 'data') ORDER BY attr_name`,
+			[native.getTableConfig(files).name],
+		);
+		expect(columns).toEqual([
+			{ attr_name: 'data', data_type: 'VARBIT', prec: 64 },
+			{ attr_name: 'hash', data_type: 'BIT', prec: 32 },
+		]);
+	});
+
+	it(
+		'applies a bytes .default() rendered by createTableSql()',
+		async () => {
+			const defaults = native.cubridTable(name('nbindefault'), {
+				id: native.integer().primaryKey(),
+				hash: native.binary({ length: 4 }).default(Buffer.from('ab01', 'hex')),
+				data: native.varbinary({ length: 4 }).default(Buffer.from('000f', 'hex')),
+			});
+			const table = `"${native.getTableConfig(defaults).name}"`;
+			await client.query(createTableSql(defaults));
+			created.push(table);
+			await native.drizzle(client).insert(defaults).values({ id: 1 });
+			const [row] = await native.drizzle(client).select().from(defaults);
+			expect([hex(row?.hash), hex(row?.data)]).toEqual(['ab010000', '000f']);
+		},
+		DDL_TIMEOUT,
+	);
+
+	for (const [binding, base] of [
+		['prepared', 0],
+		['literal', 100],
+	] as const) {
+		describe(`under binding '${binding}'`, () => {
+			const db = () => native.drizzle(client, { binding });
+
+			it('writes and reads Buffer values, padding BIT and keeping BIT VARYING lengths', async () => {
+				await db()
+					.insert(files)
+					.values([
+						{
+							id: base + 1,
+							hash: Buffer.from('deadbeef', 'hex'),
+							data: Buffer.from('hello'),
+							parts: [Buffer.from('01', 'hex'), Buffer.from('0203', 'hex'), null],
+							blocks: [Buffer.from('ff', 'hex'), Buffer.from('0a0b', 'hex')],
+						},
+						{ id: base + 2, hash: Buffer.from('0102', 'hex'), data: new Uint8Array([0, 0, 1]) },
+						{ id: base + 3, hash: Buffer.alloc(0), data: null, parts: [], blocks: null },
+					]);
+				const rows = await db()
+					.select()
+					.from(files)
+					.where(sql`${files.id} between ${base + 1} and ${base + 3}`)
+					.orderBy(files.id);
+				for (const row of rows) {
+					expect(Buffer.isBuffer(row.hash)).toBe(true);
+					expect(row.data === null || Buffer.isBuffer(row.data)).toBe(true);
+				}
+				expect(rows.map(asHex)).toEqual([
+					{ id: base + 1, hash: 'deadbeef', data: '68656c6c6f', parts: expect.any(Array), blocks: ['ff00', '0a0b'] },
+					{ id: base + 2, hash: '01020000', data: '000001', parts: null, blocks: null },
+					{ id: base + 3, hash: '00000000', data: null, parts: [], blocks: null },
+				]);
+				// SET order is the server's.
+				expect([...(rows[0]?.parts ?? [])].map(hex).sort()).toEqual(['01', '0203', null].sort());
+			});
+
+			it('matches a binary column with eq() and inArray(), short BIT values included', async () => {
+				const select = db().select({ id: files.id }).from(files);
+				const inRun = sql`${files.id} between ${base + 1} and ${base + 3}`;
+				expect(await select.where(and(inRun, eq(files.hash, Buffer.from('0102', 'hex'))))).toEqual([{ id: base + 2 }]);
+				expect(await select.where(and(inRun, eq(files.hash, Buffer.from('01020000', 'hex'))))).toEqual([
+					{ id: base + 2 },
+				]);
+				expect(await select.where(and(inRun, eq(files.data, Buffer.from('hello'))))).toEqual([{ id: base + 1 }]);
+				expect(
+					await select
+						.where(and(inRun, inArray(files.data, [Buffer.from('hello'), Buffer.from('000001', 'hex')])))
+						.orderBy(files.id),
+				).toEqual([{ id: base + 1 }, { id: base + 2 }]);
+			});
+
+			it("updates a value and writes an empty BIT VARYING value with sql`X''`", async () => {
+				await db()
+					.update(files)
+					.set({ data: Buffer.from('cafe', 'hex') })
+					.where(eq(files.id, base + 2));
+				await db()
+					.update(files)
+					.set({ data: sql`X''` })
+					.where(eq(files.id, base + 3));
+				const rows = await db()
+					.select({ id: files.id, data: files.data })
+					.from(files)
+					.where(inArray(files.id, [base + 2, base + 3]))
+					.orderBy(files.id);
+				expect(rows.map(asHex)).toEqual([
+					{ id: base + 2, data: 'cafe' },
+					{ id: base + 3, data: '' },
+				]);
+				expect(Buffer.isBuffer(rows[1]?.data)).toBe(true);
+			});
+
+			it('refuses strings, empty BIT VARYING values and values longer than the column before sending', async () => {
+				const before = await ids(quoted);
+				await expect(
+					db()
+						.insert(files)
+						.values({ id: base + 9, hash: 'cafe' as never }),
+				).rejects.toThrow(/BIT\(32\) column value must be a Buffer or Uint8Array, got string "cafe"/);
+				await expect(
+					db()
+						.insert(files)
+						.values({ id: base + 9, data: Buffer.alloc(0) }),
+				).rejects.toThrow(/BIT VARYING\(64\) column value is empty/);
+				await expect(
+					db()
+						.insert(files)
+						.values({ id: base + 9, hash: Buffer.alloc(5) }),
+				).rejects.toThrow(/BIT\(32\) column value has 5 bytes, more than the column's 4/);
+				await expect(
+					db()
+						.insert(files)
+						.values({ id: base + 9, parts: [Buffer.alloc(3)] }),
+				).rejects.toThrow(/BIT VARYING\(16\) column value has 3 bytes/);
+				expect(await ids(quoted)).toEqual(before);
+			});
+		});
+	}
+
+	it('streams binary values (literal SQL)', async () => {
+		const rows: unknown[] = [];
+		const stream = native
+			.drizzle(client, { binding: 'literal' })
+			.select({ id: files.id, hash: files.hash })
+			.from(files)
+			.where(eq(files.hash, Buffer.from('deadbeef', 'hex')))
+			.orderBy(files.id);
+		for await (const row of stream.iterator()) rows.push(asHex(row));
+		expect(rows).toEqual([
+			{ id: 1, hash: 'deadbeef' },
+			{ id: 101, hash: 'deadbeef' },
+		]);
+	});
+
+	it('the server refuses a longer value only when a dropped byte is not zero, so the codec checks the length', async () => {
+		const insert = `INSERT INTO ${quoted} ("id", "hash", "data") VALUES (?, ?, ?)`;
+		// BIT(32) is 4 bytes and BIT VARYING(64) 8: one byte too many each.
+		const hashOne = Buffer.from('0102030401', 'hex');
+		const dataOne = Buffer.from('010203040506070801', 'hex');
+		const hashZero = Buffer.from('0102030400', 'hex');
+		const dataZero = Buffer.from('010203040506070800', 'hex');
+		for (const send of [client.executePrepared.bind(client), client.execute.bind(client)]) {
+			await expect(send(insert, [900, hashOne, null])).rejects.toMatchObject({ code: -494 });
+			await expect(send(insert, [900, null, dataOne])).rejects.toMatchObject({ code: -494 });
+		}
+		// Without the codec's check, the trailing zero byte is silently dropped.
+		await client.executePrepared(insert, [901, hashZero, dataZero]);
+		await client.execute(insert, [902, hashZero, dataZero]);
+		const rows = await client.query<{ hash: Buffer; data: Buffer }>(
+			`SELECT "hash", "data" FROM ${quoted} WHERE "id" IN (901, 902) ORDER BY "id"`,
+		);
+		expect(rows.map((row) => [row.hash.toString('hex'), row.data.toString('hex')])).toEqual([
+			['01020304', '0102030405060708'],
+			['01020304', '0102030405060708'],
+		]);
+		await client.execute(`DELETE FROM ${quoted} WHERE "id" IN (901, 902)`);
+	});
+});

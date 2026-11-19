@@ -4,7 +4,9 @@ import { describe, expectTypeOf, it } from 'vitest';
 
 import {
 	bigint,
+	binary,
 	boolean,
+	type CubridBytes,
 	type CubridColumn,
 	type CubridForeignKeyAction,
 	type CubridForeignKeyUpdateAction,
@@ -31,6 +33,7 @@ import {
 	timestamp,
 	unique,
 	uniqueIndex,
+	varbinary,
 	varchar,
 } from '../../src/native/index';
 
@@ -272,5 +275,43 @@ describe('indexes and foreign keys (#157)', () => {
 		foreignKey({ columns: [], foreignColumns: [] });
 		// @ts-expect-error no USING / WHERE builders
 		index('ix').on(parents.id).where;
+	});
+});
+
+describe('binary columns (#216)', () => {
+	const files = cubridTable('files', {
+		id: integer().primaryKey(),
+		hash: binary({ length: 32 }).notNull(),
+		data: varbinary('data', { length: 1024 }),
+		parts: set({ element: varbinary({ length: 4 }) }),
+	});
+
+	it('reads and writes bytes: Buffer with Node types, Uint8Array without them', () => {
+		// tests/native has no Node types, so CubridBytes is Uint8Array here;
+		// a consumer with @types/node gets Buffer (scripts/packed-types-check.mjs
+		// checks the packed tarball both ways in the Node 18 consumer jobs).
+		expectTypeOf<CubridBytes>().toEqualTypeOf<Uint8Array>();
+		expectTypeOf(files.$inferSelect).toEqualTypeOf<{
+			id: number;
+			hash: CubridBytes;
+			data: CubridBytes | null;
+			parts: (CubridBytes | null)[] | null;
+		}>();
+		expectTypeOf(files.$inferInsert).toEqualTypeOf<{
+			id: number;
+			hash: CubridBytes;
+			data?: CubridBytes | null | undefined;
+			parts?: (CubridBytes | null)[] | null | undefined;
+		}>();
+	});
+
+	it('refuses strings and a missing length', () => {
+		// @ts-expect-error a binary value is bytes, not hex text
+		const row: typeof files.$inferInsert = { id: 1, hash: 'cafe' };
+		expectTypeOf(row).not.toBeAny();
+		// @ts-expect-error binary needs a length
+		binary('x');
+		// @ts-expect-error varbinary needs a length
+		varbinary();
 	});
 });

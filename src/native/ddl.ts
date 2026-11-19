@@ -26,6 +26,10 @@ import { CubridTable, type CubridTableConfigInfo, getTableConfig } from './table
 function literal(value: unknown, column: CubridColumn): string {
 	if (typeof value === 'number' || typeof value === 'bigint') return String(value);
 	if (typeof value === 'string') return `'${value.replaceAll("'", "''")}'`;
+	// binary()/varbinary(): bytes already padded and length-checked by the codec.
+	if (value instanceof Uint8Array) {
+		return `X'${Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('')}'`;
+	}
 	throw new Error(`DEFAULT for column ${column.name} cannot be rendered: ${typeof value}`);
 }
 

@@ -917,6 +917,8 @@ The 0.x API (`drizzle-cubrid`) is unchanged: its `iterator()` still throws.
 | `varchar({ length })` | `VARCHAR(n)` | `string` | `length` is required |
 | `string()` | `STRING` | `string` | `VARCHAR(1073741823)` |
 | `boolean()` | `SMALLINT` | `boolean` | Writes 1/0, reads 1/0; any other value throws on read and write |
+| `binary({ length })` | `BIT(length * 8)` | `Buffer` | `length` is in **bytes** (`binary({ length: 32 })` is `BIT(256)`). See [Binary](#binary) |
+| `varbinary({ length })` | `BIT VARYING(length * 8)` | `Buffer` | Up to `length` bytes, read back at the length written. See [Binary](#binary) |
 | `datetime({ mode? })` | `DATETIME` | `Date` (default) or `string` | `YYYY-MM-DD HH:MM:SS.mmm` |
 | `timestamp({ mode? })` | `TIMESTAMP` | `Date` or `string` | `YYYY-MM-DD HH:MM:SS`; whole seconds |
 | `date({ mode? })` | `DATE` | `Date` or `string` | `YYYY-MM-DD`; a `Date` is midnight UTC |
@@ -946,6 +948,58 @@ before anything is sent, instead of being written as `+010000-…`. A
 `timestamp()` `Date` must also lie within 1970-01-01 00:00:01 to
 2038-01-19 03:14:07 UTC (verified on CUBRID 11.4 with a UTC session; the
 server reads TIMESTAMP text in the session time zone).
+
+### Binary
+
+`binary({ length })` and `varbinary({ length })` store bytes in CUBRID's
+`BIT(length * 8)` and `BIT VARYING(length * 8)`: `length` counts bytes, as in
+Drizzle's MySQL builders, and the column holds 8 bits per byte. `length` is
+required, from 1 to 134217727 (CUBRID's limit of 1073741823 bits). Values are
+`Buffer` in both directions:
+
+- **Writes** take a `Buffer` or a `Uint8Array` (sent as a `Buffer` over the
+  same bytes). A string is refused with a `TypeError` before anything is sent
+  (CUBRID would read it as hex digits or refuse it); pass
+  `Buffer.from(text, 'hex')` for hex text.
+- **Reads** return the `Buffer` cubrid-client decodes, unchanged.
+- **`BIT(n)` is fixed length.** A shorter value is padded with zero bytes
+  before it is sent, which is how the server stores it, so
+  `eq(t.hash, Buffer.from('0102', 'hex'))` matches the stored
+  `01020000`; reads always return `length` bytes. An empty `Buffer` writes
+  `length` zero bytes.
+- **`BIT VARYING(n)`** reads back at the length written. An empty `Buffer` is
+  refused with a `RangeError` under both bindings: cubrid-client cannot send
+  an empty `Buffer` as a typed parameter (it would be NULL). Write
+  `` sql`X''` `` for an empty value; it reads back as an empty `Buffer`.
+- **Longer than `length` bytes** is refused with a `RangeError` by the codec,
+  before anything is sent, in writes and comparisons. The server cannot be
+  relied on for this: CUBRID 11.4 refuses a longer value (-494) only when a
+  byte beyond the length is not zero, and silently drops trailing zero bytes
+  otherwise, for `BIT` and `BIT VARYING` under both bindings (verified live).
+- Comparisons such as `eq()` and `inArray()` send the value through the same
+  codec under both bindings; `iterator()` sends it as an `X'…'` literal.
+- **Placeholder and raw `sql` values bypass the codec.** The value of a
+  `sql.placeholder()` (`eq(t.hash, sql.placeholder('h'))`) and a value written
+  into a raw template (`` sql`${t.hash} = ${buf}` ``) are sent as given: a
+  `BIT` value is not padded, so a short one silently matches nothing, and a
+  string is not refused. Pass such values as `Buffer`s, padded to the full
+  `BIT(n)` length yourself.
+- Binary elements in `set()`, `multiset()` and `sequence()` use the same
+  codec (`set({ element: varbinary({ length: 16 }) })` is
+  `SET(BIT VARYING(128))`), including the length check and the refusal of an
+  empty `varbinary` element.
+- A binary column cannot be a relation key in relational queries (refused
+  before anything is sent).
+- `.default(Buffer)` goes through the same codec (padded, length-checked, an
+  empty `varbinary` default refused) and `generateInitialMigration()` writes
+  it as an `X'…'` literal.
+
+The TypeScript type is `CubridBytes`: Node's `Buffer` when the program has
+Node's types (`@types/node`), `Uint8Array` otherwise. The declarations never
+name `Buffer`, so they compile either way; CI type-checks the packed tarball
+both ways (`scripts/packed-types-check.mjs`, Node 18 consumer jobs). With Node's types, `$inferInsert`
+takes a `Buffer`; a plain `Uint8Array` is accepted at run time but needs a
+cast (`Buffer.from(bytes)` avoids it).
 
 ### Collections
 
@@ -1095,7 +1149,7 @@ are not in `drizzle-cubrid/native`:
 | `mysqlEnum` | `varchar({ length }).$type<'a' \| 'b'>()`; CUBRID `ENUM` has no builder (see [Not supported in the native dialect](#not-supported-in-the-native-dialect)) |
 | `text`, `tinytext`, `mediumtext`, `longtext` | `string()` or `varchar({ length })` |
 | `real` | `double()` |
-| `binary`, `varbinary` | See [Not supported in the native dialect](#not-supported-in-the-native-dialect) |
+| `binary`, `varbinary` | `binary({ length })`, `varbinary({ length })`, with `Buffer` values (the 0.x builders throw, #216); see [Binary](#binary) |
 | `blob` | No builder; see [Not supported in the native dialect](#not-supported-in-the-native-dialect) |
 | `json` | No builder; see [Not supported in the native dialect](#not-supported-in-the-native-dialect) |
 
@@ -1115,11 +1169,11 @@ converted for you.
 | `BLOB`, `CLOB` | No builder. Raw `sql` only | Not supported; open an issue to request it |
 | `ENUM` | No builder. Store the value in `varchar({ length }).$type<'a' \| 'b'>()` instead; that column is a `VARCHAR`, so CUBRID does not enforce the allowed values. Raw `sql` for a real `ENUM` column | Not supported; open an issue to request it |
 | `JSON` | No builder. Store text in `string()` and parse it in your code, or use raw `sql` | Not supported; open an issue to request it |
-| `BIT`, `BIT VARYING` (binary) | No builder yet | Tracked in [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216) (`Buffer` design approved, not implemented or released yet) |
 
 ## Known CUBRID behaviors
 
 - `CHAR(n)` values come back padded with spaces to `n`.
+- `BIT(n)` (`binary()`) values come back padded with zero bytes to `n` bits.
 - A `CHAR` column compared with a `VARCHAR` operand compares without space
   padding, so `'ab'` stored in `CHAR(10)` does not equal it. That covers an
   `IN` list of two or more untyped bound values, which CUBRID types `VARCHAR`

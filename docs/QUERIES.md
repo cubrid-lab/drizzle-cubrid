@@ -510,9 +510,9 @@ padding, under both bindings: `` eq(t.code, sql`concat(…)`) `` and
 `` inArray(t.code, sql`(select varcharCol …)`) `` match no row. Cast such an
 expression or subquery column to `CHAR` (`` sql`cast(concat(…) as CHAR(10))` ``).
 
-`binary()` and `varbinary()` encode their value as a string, which a CUBRID
-`BIT VARYING` column accepts only from a literal: use `binding: "literal"` for
-them, or a `customType` that passes a `Buffer`.
+`binary()` and `varbinary()` throw in the 0.x API (#216); use the
+`Buffer`-based builders of `drizzle-cubrid/native` (see
+[SCHEMA.md](SCHEMA.md#binary-types)).
 
 A custom client passed to `drizzle()` needs `queryPrepared()` (and
 `executePrepared()` for write counts) for the default; without them it is

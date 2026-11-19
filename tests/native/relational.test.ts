@@ -8,6 +8,7 @@ import { desc, relations, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	bigint,
+	binary,
 	type CubridNativeClient,
 	char,
 	cubridTable,
@@ -15,6 +16,7 @@ import {
 	integer,
 	numeric,
 	set,
+	varbinary,
 	varchar,
 } from '../../src/native/index';
 import { RELATIONAL_KEY_CHUNK } from '../../src/native/relational';
@@ -604,6 +606,23 @@ describe('keys and config edge cases', () => {
 		await expect(drizzle(client, { schema: local }).query.scores.findMany({ with: { byTags: true } })).rejects.toThrow(
 			'scores.byTags: tags is a collection column, which cannot be a relation key',
 		);
+		expect(client.calls).toEqual([]);
+	});
+
+	it('refuses a binary column as a relation key before sending anything (#216)', async () => {
+		const files = cubridTable('files', { hash: binary({ length: 4 }).primaryKey() });
+		const parts = cubridTable('parts', { id: integer().primaryKey(), fileHash: varbinary({ length: 4 }) });
+		const binarySchema = {
+			files,
+			parts,
+			partsRelations: relations(parts, ({ one }) => ({
+				file: one(files, { fields: [parts.fileHash], references: [files.hash] }),
+			})),
+		};
+		const client = fakeClient();
+		await expect(
+			drizzle(client, { schema: binarySchema }).query.parts.findMany({ with: { file: true } }),
+		).rejects.toThrow('parts.file: fileHash is a binary column, which cannot be a relation key');
 		expect(client.calls).toEqual([]);
 	});
 
