@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-08 (proposed)
-- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #PRNUM
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #260
 - **Scope:** `drizzle-cubrid` npm consumer runtime, peer compatibility and test separation
 - **Coordinated driver contract:** `cubrid-client` retains Node 18 for its 1.x releases
 

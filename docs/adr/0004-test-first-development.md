@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-07 (proposed)
-- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #PRNUM
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #260
 - **Scope:** drizzle-cubrid design-to-implementation workflow
 - **Prerequisite:** Release governance ADR 0001 and the relevant architecture/contract ADR must be reviewed before implementation work is presented as complete.
 

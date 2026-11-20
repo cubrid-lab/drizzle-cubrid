@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-18 (proposed)
-- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #PRNUM
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #260
 - **Decision scope:** What `prepare()` and `iterator()` mean on `drizzle-cubrid/native`: selects, set operations, writes and relational queries; cursor, connection and transaction lifetime of a stream
 - **Prerequisites:** [ADR 0003](0003-native-architecture-boundaries.md), [ADR 0007](0007-drizzle-extension-boundary.md), issue [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)
 

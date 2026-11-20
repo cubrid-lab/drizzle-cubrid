@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-18 (proposed)
-- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #PRNUM
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #260
 - **Decision scope:** How drizzle-cubrid generates and applies schema migrations for `drizzle-cubrid/native`: the `drizzle-cubrid/native/migrator` entry, its file format, metadata table, transaction boundary, concurrency guard, SQL refusals and recovery policy; what stays unsupported
 - **Prerequisites:** [ADR 0003](0003-native-architecture-boundaries.md) (accepted), [ADR 0007](0007-drizzle-extension-boundary.md) (accepted), issue [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)
 

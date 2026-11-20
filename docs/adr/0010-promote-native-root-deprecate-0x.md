@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-19 (proposed)
-- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #PRNUM
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #260
 - **Decision scope:** The package's export map (`drizzle-cubrid`, `drizzle-cubrid/native`, `drizzle-cubrid/migrator`, `drizzle-cubrid/native/migrator`, `drizzle-cubrid/legacy`), the runtime and type-level deprecation of the MySQL-based 0.x API, and the plan to remove it in 1.0
 - **Prerequisites:** [ADR 0001](0001-release-governance.md) (accepted), [ADR 0003](0003-native-architecture-boundaries.md) (accepted), [ADR 0006](0006-node-18-support-through-1x.md), [ADR 0007](0007-drizzle-extension-boundary.md) (accepted), [ADR 0009](0009-cubrid-native-migrations.md); epic [#155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155), boundary issue [#192](https://github.com/cubrid-lab/drizzle-cubrid/issues/192)
 

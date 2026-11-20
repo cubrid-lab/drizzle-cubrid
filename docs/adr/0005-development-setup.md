@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-07 (proposed)
-- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #PRNUM
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #260
 - **Scope:** TypeScript/Drizzle developer setup, quality tooling and environment contracts
 - **Prerequisites:** Release governance ADR 0001 and TDD ADR 0004; architecture ADR 0003 (accepted 2026-11-13).
 

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-07 (proposed)
-- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #PRNUM
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #260
 - **Scope:** drizzle-cubrid correctness obligations and review evidence
 
 ## Context
