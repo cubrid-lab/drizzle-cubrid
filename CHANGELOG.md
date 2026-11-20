@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/cubrid-lab/drizzle-cubrid/compare/v0.2.1...v0.3.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* promote the native dialect to the root entry, deprecate the 0.x API ([#254](https://github.com/cubrid-lab/drizzle-cubrid/issues/254))
+
+### Features
+
+* add CUBRID collection types and migration example ([2ad5852](https://github.com/cubrid-lab/drizzle-cubrid/commit/2ad5852c993ed4b19610853d228b9883d3457d79))
+* **native:** add drizzle-cubrid/native tables, column builders and codecs ([#229](https://github.com/cubrid-lab/drizzle-cubrid/issues/229)) ([fcdd928](https://github.com/cubrid-lab/drizzle-cubrid/commit/fcdd92801247f98cc91337efd5aa04bdd01ac9ad))
+* **native:** add drizzle() with a native SELECT builder and session ([#230](https://github.com/cubrid-lab/drizzle-cubrid/issues/230)) ([0e9193f](https://github.com/cubrid-lab/drizzle-cubrid/commit/0e9193fedb65c76d49b27d4500edc69d9f754121))
+* **native:** add INSERT, UPDATE and DELETE with CUBRID result semantics ([#231](https://github.com/cubrid-lab/drizzle-cubrid/issues/231)) ([27704a9](https://github.com/cubrid-lab/drizzle-cubrid/commit/27704a92664163e797682fa1d826374d87c9d3bd)), closes [#159](https://github.com/cubrid-lab/drizzle-cubrid/issues/159)
+* **native:** add relational queries (db.query) with batched loading ([#236](https://github.com/cubrid-lab/drizzle-cubrid/issues/236)) ([67a8992](https://github.com/cubrid-lab/drizzle-cubrid/commit/67a8992d571c3d3b1fd6ae5c0b120fec362625e6)), closes [#158](https://github.com/cubrid-lab/drizzle-cubrid/issues/158)
+* **native:** add set operations and scalar subqueries ([#235](https://github.com/cubrid-lab/drizzle-cubrid/issues/235)) ([0bae5cc](https://github.com/cubrid-lab/drizzle-cubrid/commit/0bae5cc6e9950e1cd0266fab6dc11c42cc6af6e4)), closes [#158](https://github.com/cubrid-lab/drizzle-cubrid/issues/158)
+* **native:** add transactions with savepoints on driver-owned connections ([#232](https://github.com/cubrid-lab/drizzle-cubrid/issues/232)) ([73e5d12](https://github.com/cubrid-lab/drizzle-cubrid/commit/73e5d12e22ff8a2753eeee6fea9f0fa5eed56459)), closes [#161](https://github.com/cubrid-lab/drizzle-cubrid/issues/161)
+* **native:** Buffer-based binary() and varbinary(); refuse the 0.x builders ([#251](https://github.com/cubrid-lab/drizzle-cubrid/issues/251)) ([fcc193e](https://github.com/cubrid-lab/drizzle-cubrid/commit/fcc193e5a9cbdff38abde8e8257365ee0df7e4be)), closes [#216](https://github.com/cubrid-lab/drizzle-cubrid/issues/216)
+* **native:** CUBRID-native schema migrations ([#244](https://github.com/cubrid-lab/drizzle-cubrid/issues/244)) ([a751998](https://github.com/cubrid-lab/drizzle-cubrid/commit/a75199832928bab3aafee3496b60538bd76d6b4e)), closes [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)
+* **native:** indexes and foreign keys ([#250](https://github.com/cubrid-lab/drizzle-cubrid/issues/250)) ([5dfbf2f](https://github.com/cubrid-lab/drizzle-cubrid/commit/5dfbf2f0787dde087771ade05950cb6971433d73)), closes [#157](https://github.com/cubrid-lab/drizzle-cubrid/issues/157)
+* **native:** prepared queries as client-side plans and iterator() streaming ([#243](https://github.com/cubrid-lab/drizzle-cubrid/issues/243)) ([31cd77f](https://github.com/cubrid-lab/drizzle-cubrid/commit/31cd77fee3920f9c4d4e10233211485527846b9d)), closes [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)
+* promote the native dialect to the root entry, deprecate the 0.x API ([#254](https://github.com/cubrid-lab/drizzle-cubrid/issues/254)) ([d7b9a7f](https://github.com/cubrid-lab/drizzle-cubrid/commit/d7b9a7fa5f989c2afbe8dfcfa0fc46d411993c46))
+
+
+### Bug Fixes
+
+* **ci:** fix badge-sync action version [@v1](https://github.com/v1) → [@v0](https://github.com/v0).4.0 ([43782f0](https://github.com/cubrid-lab/drizzle-cubrid/commit/43782f069a4e9b5db4a3c6a13c91999e8b970494))
+* **ci:** pin typescript to 5.9.x to unblock typecheck ([#87](https://github.com/cubrid-lab/drizzle-cubrid/issues/87)) ([b8f162e](https://github.com/cubrid-lab/drizzle-cubrid/commit/b8f162e50f2ea83fe050e5fe7448fefb95437672))
+* **ci:** resolve cubrid-client from npm registry instead of local path ([60474c2](https://github.com/cubrid-lab/drizzle-cubrid/commit/60474c2d35e555e014153707a4df72eb8116fe30))
+* correct npm metadata and disclose community Drizzle adapter status ([#188](https://github.com/cubrid-lab/drizzle-cubrid/issues/188)) ([d6107eb](https://github.com/cubrid-lab/drizzle-cubrid/commit/d6107ebadbfc9ff34c468f180a2a953e1a7c4454))
+* decide relational date refusals from the selected columns ([#214](https://github.com/cubrid-lab/drizzle-cubrid/issues/214)) ([bafffa0](https://github.com/cubrid-lab/drizzle-cubrid/commit/bafffa057785ae74609ea1987e23b9c27e1e6add)), closes [#210](https://github.com/cubrid-lab/drizzle-cubrid/issues/210)
+* make db.$count() work on CUBRID ([#205](https://github.com/cubrid-lab/drizzle-cubrid/issues/205)) ([9796c8f](https://github.com/cubrid-lab/drizzle-cubrid/commit/9796c8f0e0c7c0e73cd52e2d6dfbdd74caa2ba0c))
+* map selected fields from array rows, not object values ([#197](https://github.com/cubrid-lab/drizzle-cubrid/issues/197)) ([d78295f](https://github.com/cubrid-lab/drizzle-cubrid/commit/d78295f1f19e394355adbc725ab4ddcaa6957813))
+* match CHAR columns against multi-value IN lists under prepared binding ([#238](https://github.com/cubrid-lab/drizzle-cubrid/issues/238)) ([7582dc8](https://github.com/cubrid-lab/drizzle-cubrid/commit/7582dc82064fac52b9da4c5e78bf377d78169dc8)), closes [#237](https://github.com/cubrid-lab/drizzle-cubrid/issues/237)
+* match CHAR columns against placeholder IN lists under typed binds ([#240](https://github.com/cubrid-lab/drizzle-cubrid/issues/240)) ([2b24269](https://github.com/cubrid-lab/drizzle-cubrid/commit/2b24269d1eae16151d223b5ef2ef75880b22d2f3)), closes [#239](https://github.com/cubrid-lab/drizzle-cubrid/issues/239)
+* prevent case-colliding GitHub PR templates ([edddd54](https://github.com/cubrid-lab/drizzle-cubrid/commit/edddd54a4fe20bbbcee49312daec541853ccae50))
+* refuse relational queries that load relations with 'with' ([#206](https://github.com/cubrid-lab/drizzle-cubrid/issues/206)) ([749c667](https://github.com/cubrid-lab/drizzle-cubrid/commit/749c66738a1d36ef5b3f32fe5306997b8ab50ebe))
+* refuse SQL that CUBRID always rejects before sending it ([#218](https://github.com/cubrid-lab/drizzle-cubrid/issues/218)) ([bb64849](https://github.com/cubrid-lab/drizzle-cubrid/commit/bb64849de081cc2d91a8159b0afd54cb93053897)), closes [#189](https://github.com/cubrid-lab/drizzle-cubrid/issues/189)
+* report affected rows and generated keys for Drizzle writes ([#198](https://github.com/cubrid-lab/drizzle-cubrid/issues/198)) ([89c045e](https://github.com/cubrid-lab/drizzle-cubrid/commit/89c045e26094801b1548c8613888afcd472f9b97)), closes [#182](https://github.com/cubrid-lab/drizzle-cubrid/issues/182)
+* resolve vitest/@vitest/coverage-v8 peer dependency conflict ([587f707](https://github.com/cubrid-lab/drizzle-cubrid/commit/587f7077053a851ebaae252f334e2abc0f526dac))
+* return monetary() values as the declared string ([#221](https://github.com/cubrid-lab/drizzle-cubrid/issues/221)) ([50b5963](https://github.com/cubrid-lab/drizzle-cubrid/commit/50b5963a549c2f88b7f8f9d419775565fadda39f)), closes [#217](https://github.com/cubrid-lab/drizzle-cubrid/issues/217)
+* run Drizzle transactions on a driver-owned connection ([#195](https://github.com/cubrid-lab/drizzle-cubrid/issues/195)) ([c46597b](https://github.com/cubrid-lab/drizzle-cubrid/commit/c46597ba6b0cffe1b31c9545048f8241c3c9a546))
+* send Drizzle statement values as typed binds by default ([#204](https://github.com/cubrid-lab/drizzle-cubrid/issues/204)) ([4cd1ce4](https://github.com/cubrid-lab/drizzle-cubrid/commit/4cd1ce4d18798f72b271db217e535530f6458017)), closes [#191](https://github.com/cubrid-lab/drizzle-cubrid/issues/191)
+* **types:** published declarations no longer name AbortSignal ([#255](https://github.com/cubrid-lab/drizzle-cubrid/issues/255)) ([894dabf](https://github.com/cubrid-lab/drizzle-cubrid/commit/894dabf84e810108ce9167dd2291889fa8af7731)), closes [#252](https://github.com/cubrid-lab/drizzle-cubrid/issues/252)
+* update CubridPreparedQuery for drizzle-orm 0.44+ constructor (closes [#15](https://github.com/cubrid-lab/drizzle-cubrid/issues/15)) ([bcbcb19](https://github.com/cubrid-lab/drizzle-cubrid/commit/bcbcb1908b788810edabda56a652b774a8a1a107))
+* update package-lock.json for cubrid-client@^1.0.0 ([be6709c](https://github.com/cubrid-lab/drizzle-cubrid/commit/be6709cf1b99c8626999c9a9e242cb9d6fd931bb))
+* write collections as typed literals and read the driver's arrays ([#201](https://github.com/cubrid-lab/drizzle-cubrid/issues/201)) ([0b9693b](https://github.com/cubrid-lab/drizzle-cubrid/commit/0b9693b6db9d9e86a27cdff43a33ae458c51b8f1)), closes [#184](https://github.com/cubrid-lab/drizzle-cubrid/issues/184)
+
 ## [Unreleased]
 
 ### Upgrade notes
