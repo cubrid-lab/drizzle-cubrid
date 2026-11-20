@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0](https://github.com/cubrid-lab/drizzle-cubrid/compare/v0.2.1...v0.3.0) (2026-11-20)
 
 ### Upgrade notes
 - **Breaking: the root entry `drizzle-cubrid` is now the CUBRID-native dialect** ([ADR 0010](docs/adr/0010-promote-native-root-deprecate-0x.md)): it exports what `drizzle-cubrid/native` exported, plus Drizzle's operators as the 0.x root did (`and`, `asc`, `avg`, `count`, `desc`, `eq`, `gt`, `gte`, `lt`, `lte`, `max`, `min`, `ne`, `not`, `or`, `placeholder`, `sql`, `sum`, drizzle-orm's own objects). Code that imports the 0.x API from `'drizzle-cubrid'` must change that import to **`'drizzle-cubrid/legacy'`** (one import change per file; names, objects and behaviour unchanged), or move to the native API. See [docs/MIGRATING_FROM_0X.md](docs/MIGRATING_FROM_0X.md) for the import-by-import mapping and the behaviour differences.
@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Selected fields are now read from `query(sql, params, { rowMode: 'array' })` in select-list order instead of `Object.values()` of object rows. Joins whose tables share column names (`id`, `name`) returned one table's values under the other's fields; a partial select could return the wrong column under a field name (#183).
 - `db.transaction()` now runs on a connection owned by `cubrid-client`'s `transaction()` instead of `BEGIN`/`COMMIT` on the shared client, so concurrent queries can no longer join, commit or roll back another request's transaction (#185).
 - A failed `ROLLBACK TO SAVEPOINT` no longer replaces the nested callback's error; it is attached as `rollbackError`.
+- npm metadata: the `repository`, `bugs` and `homepage` fields point to `cubrid-lab/drizzle-cubrid`, and the package description says this is a community-maintained Drizzle dialect, not an official Drizzle project (#188).
 
 ### Changed
 - The foreign-dialect boundary guard (#192) treats the packed root entry, `dist/index.*`, as native code: its JavaScript gets the `native-dynamic` rule, and a finding in any packed native file, its `.d.ts`/`.d.cts` included, can no longer be baselined. The 0.x baseline is unchanged apart from the renames of its package entries from `dist/index.*` to `dist/legacy.*` (same rules, matches and counts).
