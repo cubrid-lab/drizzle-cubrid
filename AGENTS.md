@@ -302,13 +302,17 @@ Use Conventional Commits types (`feat`, `fix`, `docs`, `chore`, `ci`, `style`,
 contributor, Codex, Claude Code, OpenCode or another agent is never required to
 append a particular coauthor or AI-tool trailer.
 
+PR titles are checked by `.github/workflows/pr-title.yml`: `type: description`
+or `type(scope): description`. With the repository's required squash-merge
+settings ([docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md#repository-settings)),
+the PR title becomes the commit subject Release Please reads to choose the
+next version. Retitle a GitHub "Revert" PR as `revert: ...`.
+
 ## Release Process
 
-1. Update version in `package.json`
-2. Add changelog entry in `CHANGELOG.md`
-3. Commit, tag (`v{major}.{minor}.{patch}`), push with tags
-4. Create GitHub release via `gh release create`
-5. npm publish triggers automatically from the release
+Release Please proposes each release in a reviewed Release PR; tagging and npm
+publication stay manual. Do **not** edit `CHANGELOG.md` or the version in
+`package.json` in a normal PR. See [docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md).
 
 ## Human-readable communication (all agents)
 

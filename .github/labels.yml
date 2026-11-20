@@ -93,3 +93,13 @@
 - name: "size: XL"
   color: "f9d0c4"
   description: "Very large change; consider splitting"
+
+# Release Please: a merged Release PR stays "pending" until the version is on
+# npm and has a GitHub Release; release-please.yml then swaps it to "tagged".
+- name: "autorelease: pending"
+  color: "ededed"
+  description: "Release Please: Release PR not yet tagged and published"
+
+- name: "autorelease: tagged"
+  color: "ededed"
+  description: "Release Please: Release PR tagged and published"
