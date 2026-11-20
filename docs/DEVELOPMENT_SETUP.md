@@ -1,6 +1,6 @@
 # Development setup — TypeScript Drizzle CUBRID adapter
 
-> **Status:** Reviewed against committed manifests, not an executed setup test. [ADR 0005](adr/0005-development-setup.md) is Proposed. **Node.js developer toolchain and published consumer engine are different contracts.**
+> **Status:** Reviewed against committed manifests, not an executed setup test. [ADR 0005](adr/0005-development-setup.md) is Accepted. **Node.js developer toolchain and published consumer engine are different contracts.**
 
 ## Toolchain and fresh checkout
 

@@ -1,7 +1,8 @@
 # ADR 0006: Preserve Node.js 18 for the entire 1.x generation
 
-- **Status:** Proposed (explicit compatibility decision for the planned 1.x adapter)
-- **Date:** 2026-11-08
+- **Status:** Accepted
+- **Date:** 2026-11-08 (proposed)
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #260
 - **Scope:** `drizzle-cubrid` npm consumer runtime, peer compatibility and test separation
 - **Coordinated driver contract:** `cubrid-client` retains Node 18 for its 1.x releases
 

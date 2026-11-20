@@ -1,7 +1,8 @@
 # ADR 0002: CUBRID correctness and failure-evidence boundaries
 
-- **Status:** Proposed
-- **Date:** 2026-11-07
+- **Status:** Accepted
+- **Date:** 2026-11-07 (proposed)
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #260
 - **Scope:** drizzle-cubrid correctness obligations and review evidence
 
 ## Context
@@ -31,7 +32,7 @@ More upfront architecture and test work is required and current 0.x APIs may nee
 - [ ] Real DB tests use an isolated ready-checked CUBRID instance, assert actual stored/returned values and report nonzero executed-case counts; skip/missing is not success.
 - [ ] Independent JDBC (or verified official driver) comparisons evaluate meaning and type, not matching source implementation.
 - [ ] Public docs, type declarations and compatibility claims are reconciled with observed behavior; unsupported operations fail clearly.
-- [ ] Maintainer accepts this ADR and separately reviews release/code changes; neither this record nor a checklist fixes existing defects.
+- [x] Maintainer accepts this ADR and separately reviews release/code changes; neither this record nor a checklist fixes existing defects.
 
 ## References
 

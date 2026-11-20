@@ -1,7 +1,8 @@
 # ADR 0009: Apply CUBRID schema migrations as ordered SQL files, one transaction per migration
 
-- **Status:** Proposed
-- **Date:** 2026-11-18
+- **Status:** Accepted
+- **Date:** 2026-11-18 (proposed)
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #260
 - **Decision scope:** How drizzle-cubrid generates and applies schema migrations for `drizzle-cubrid/native`: the `drizzle-cubrid/native/migrator` entry, its file format, metadata table, transaction boundary, concurrency guard, SQL refusals and recovery policy; what stays unsupported
 - **Prerequisites:** [ADR 0003](0003-native-architecture-boundaries.md) (accepted), [ADR 0007](0007-drizzle-extension-boundary.md) (accepted), issue [#163](https://github.com/cubrid-lab/drizzle-cubrid/issues/163)
 
@@ -76,7 +77,7 @@ Other statement kinds (`TRUNCATE`, `GRANT`, `CREATE USER`, stored routines, part
 - [x] Unit tests cover splitting, every refusal rule, file naming and numbering, checksums, the record checks, dry runs and errors (`tests/migrator.test.ts`).
 - [x] The packed tarball's `drizzle-cubrid/native/migrator` (ESM and CJS) is exercised on Node 18 and by the packed live suite.
 - [ ] Other supported CUBRID versions, if any are declared, are measured before migration support is claimed for them.
-- [ ] A maintainer accepts this ADR explicitly in a reviewed PR.
+- [x] A maintainer accepts this ADR explicitly in a reviewed PR.
 
 ## References
 

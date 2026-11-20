@@ -1,7 +1,8 @@
 # ADR 0010: Promote the native dialect to the root entry and deprecate the 0.x API
 
-- **Status:** Proposed
-- **Date:** 2026-11-19
+- **Status:** Accepted
+- **Date:** 2026-11-19 (proposed)
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #260
 - **Decision scope:** The package's export map (`drizzle-cubrid`, `drizzle-cubrid/native`, `drizzle-cubrid/migrator`, `drizzle-cubrid/native/migrator`, `drizzle-cubrid/legacy`), the runtime and type-level deprecation of the MySQL-based 0.x API, and the plan to remove it in 1.0
 - **Prerequisites:** [ADR 0001](0001-release-governance.md) (accepted), [ADR 0003](0003-native-architecture-boundaries.md) (accepted), [ADR 0006](0006-node-18-support-through-1x.md), [ADR 0007](0007-drizzle-extension-boundary.md) (accepted), [ADR 0009](0009-cubrid-native-migrations.md); epic [#155](https://github.com/cubrid-lab/drizzle-cubrid/issues/155), boundary issue [#192](https://github.com/cubrid-lab/drizzle-cubrid/issues/192)
 
@@ -249,7 +250,7 @@ this reason (ADR 0009, decision 1).
   used by the DDL helper and the CommonJS smoke.
 - [x] Migration guide: [MIGRATING_FROM_0X.md](../MIGRATING_FROM_0X.md); CHANGELOG
   **Breaking** and **Deprecated** entries.
-- [ ] A maintainer accepts this ADR explicitly in a reviewed PR.
+- [x] A maintainer accepts this ADR explicitly in a reviewed PR.
 - [ ] 0.3.0 is released by the maintainer under ADR 0001's release gate (not
   done by this change; the version in `package.json` is unchanged).
 - [ ] 1.0.0 removes the legacy entry, its sources, the placeholders and the
