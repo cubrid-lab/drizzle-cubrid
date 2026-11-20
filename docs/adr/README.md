@@ -7,15 +7,15 @@ ADRs preserve **why** a consequential technical or release decision was made, th
 | ADR | Decision | Status |
 | --- | --- | --- |
 | [0001](0001-release-governance.md) | Release, SemVer and compatibility governance | Accepted (2026-11-13, #225) |
-| [0002](0002-database-correctness-evidence.md) | CUBRID correctness and failure-evidence requirements | Proposed |
+| [0002](0002-database-correctness-evidence.md) | CUBRID correctness and failure-evidence requirements | Accepted (2026-11-20, #PRNUM) |
 | [0003](0003-native-architecture-boundaries.md) | Native CUBRID architecture boundaries | Accepted (2026-11-13, #225) |
-| [0004](0004-test-first-development.md) | TDD: design contract, Red–Green–Refactor and live-CUBRID verification | Proposed |
-| [0005](0005-development-setup.md) | Reproducible language-native developer setup and verification | Proposed |
-| [0006](0006-node-18-support-through-1x.md) | Retain Node.js 18 consumer support throughout 1.x; consider removal no earlier than 2.0 | Proposed |
+| [0004](0004-test-first-development.md) | TDD: design contract, Red–Green–Refactor and live-CUBRID verification | Accepted (2026-11-20, #PRNUM) |
+| [0005](0005-development-setup.md) | Reproducible language-native developer setup and verification | Accepted (2026-11-20, #PRNUM) |
+| [0006](0006-node-18-support-through-1x.md) | Retain Node.js 18 consumer support throughout 1.x; consider removal no earlier than 2.0 | Accepted (2026-11-20, #PRNUM) |
 | [0007](0007-drizzle-extension-boundary.md) | Build the native dialect on Drizzle's database-neutral modules | Accepted (2026-11-14, #227) |
-| [0008](0008-prepared-queries-and-streaming.md) | Prepared queries are client-side plans; streaming uses cubrid-client's `stream()` with literal semantics, outside transactions | Proposed |
-| [0009](0009-cubrid-native-migrations.md) | Apply CUBRID schema migrations as ordered SQL files, one transaction per migration | Proposed |
-| [0010](0010-promote-native-root-deprecate-0x.md) | Promote the native dialect to the root entry and deprecate the 0.x API (removed in 1.0) | Proposed |
+| [0008](0008-prepared-queries-and-streaming.md) | Prepared queries are client-side plans; streaming uses cubrid-client's `stream()` with literal semantics, outside transactions | Accepted (2026-11-20, #PRNUM) |
+| [0009](0009-cubrid-native-migrations.md) | Apply CUBRID schema migrations as ordered SQL files, one transaction per migration | Accepted (2026-11-20, #PRNUM) |
+| [0010](0010-promote-native-root-deprecate-0x.md) | Promote the native dialect to the root entry and deprecate the 0.x API (removed in 1.0) | Accepted (2026-11-20, #PRNUM) |
 
 The CUBRID-native architecture ADR 0003 was merged as Proposed in #166, together with [the architecture plan](../CUBRID_NATIVE_ARCHITECTURE.md) and [design sign-off checklist](../DESIGN_SIGNOFF.md), and accepted after ADR 0001 in #225. Acceptance approves the direction; it does not sign off the design checklist or claim any implementation exists.
 

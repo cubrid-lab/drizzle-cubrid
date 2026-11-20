@@ -1,7 +1,8 @@
 # ADR 0008: Prepared queries are client-side plans; streaming uses cubrid-client's stream() with literal semantics, outside transactions
 
-- **Status:** Proposed
-- **Date:** 2026-11-18
+- **Status:** Accepted
+- **Date:** 2026-11-18 (proposed)
+- **Accepted:** 2026-11-20 by maintainer yeongseon, recorded in PR #PRNUM
 - **Decision scope:** What `prepare()` and `iterator()` mean on `drizzle-cubrid/native`: selects, set operations, writes and relational queries; cursor, connection and transaction lifetime of a stream
 - **Prerequisites:** [ADR 0003](0003-native-architecture-boundaries.md), [ADR 0007](0007-drizzle-extension-boundary.md), issue [#165](https://github.com/cubrid-lab/drizzle-cubrid/issues/165)
 
@@ -51,7 +52,7 @@ Live on CUBRID 11.4.7 (`tests/integration.test.ts`, #165 block): a pool stream h
 - [x] Unit tests with a fake client: SQL and parameters, literal rendering of streams, placeholder refusals before sending, option refusals, transaction refusal, lifecycle (`break`, throw, `return()`, decode error close the stream) — `tests/native/stream.test.ts`, `tests/native/relational.test.ts`, `tests/native/dml.test.ts`.
 - [x] Type tests for `iterator()` row types and prepared `execute()` signatures — `tests/native/select.test-d.ts`, `dml.test-d.ts`, `relational.test-d.ts`.
 - [x] Live CUBRID 11.4 tests, not skipped: `iterator()` refused under `'prepared'` with nothing sent; the opt-in's differences from `execute()` pinned; under `'literal'`, the same rows (or the same error) from `execute()`, a prepared `iterator()` and a direct `iterator()` over a matrix of 90+ conditions; prepared reuse under both bindings, prepared DML, 10,000 streamed rows with bigint/CHAR/DATETIME/SET codecs, pool release on early exit, concurrent streams, `stream-busy` on a client, transaction refusal and committed visibility, abort, server and decode errors, prepared relational queries.
-- [ ] Maintainer acceptance in a reviewed PR.
+- [x] Maintainer acceptance in a reviewed PR.
 
 ## References
 
