@@ -1,0 +1,35 @@
+name: Improvement Idea
+description: Share a rough edge, missing test/example, confusing documentation or suggestion without having a fix.
+labels: ["status: needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A short observed problem or improvement idea is enough; no design,
+        code, completed reproduction, or acceptance criteria is required.
+        Maintainers review scope, evidence, duplicates and priority.
+        Use a descriptive English title (docs:, feat:, test:, etc. if known).
+        Do not expose secrets, customer data, private logs or vulnerabilities.
+        This is an idea, not automatic approval for implementation or release.
+  - type: textarea
+    id: observation
+    attributes:
+      label: What did you notice?
+      description: What felt confusing, incomplete, unexpectedly hard or broken?
+      placeholder: "When I tried ..., I noticed ..."
+    validations:
+      required: true
+  - type: textarea
+    id: location
+    attributes:
+      label: Where did you notice it? (optional)
+      description: File/page/operation or version if known.
+    validations:
+      required: false
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What would help? (optional)
+      description: An outcome or idea if you have one; no implementation required.
+    validations:
+      required: false
