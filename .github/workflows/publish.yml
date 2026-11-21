@@ -249,6 +249,10 @@ jobs:
     name: Publish the tested tarball
     needs: [test, lint, package, live-cubrid, node18-consumer]
     runs-on: ubuntu-latest
+    # npm trusted publishing: the package's Trusted Publisher on npmjs.com is
+    # cubrid-lab / drizzle-cubrid / publish.yml / environment npm-publish.
+    # The environment only accepts deployments from v* tags.
+    environment: npm-publish
     permissions:
       contents: write
       id-token: write
@@ -257,8 +261,24 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           registry-url: https://registry.npmjs.org
+
+      - name: Use an npm CLI that supports trusted publishing
+        # npm 11.5.1 or later exchanges the job's GitHub OIDC identity for a
+        # short-lived publish credential, so no long-lived npm token is stored.
+        # Node 18 and 20 consumers are tested in the jobs above; this job only
+        # uploads the tarball they tested.
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@11
+          npm --version | node -e '
+            const [major, minor, patch] = require("node:fs").readFileSync(0, "utf8").trim().split(".").map(Number);
+            if (major < 11 || (major === 11 && (minor < 5 || (minor === 5 && patch < 1)))) {
+              throw new Error("npm CLI 11.5.1 or newer is required for trusted publishing");
+            }
+          '
 
       - uses: actions/download-artifact@v8
         with:
@@ -283,12 +303,13 @@ jobs:
             exit 1
           fi
 
-      # The file itself, so npm cannot pack the working tree again.
+      # The file itself, so npm cannot pack the working tree again. No
+      # NODE_AUTH_TOKEN: npm authenticates with trusted publishing (OIDC) and
+      # attaches a provenance attestation to the published version.
       - name: Publish to npm
         run: npm publish "./packed/$TARBALL" --access public --ignore-scripts
         env:
           TARBALL: ${{ needs.package.outputs.tarball }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3

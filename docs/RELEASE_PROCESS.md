@@ -11,7 +11,7 @@ This npm package uses [Release Please](https://github.com/googleapis/release-ple
 | `.release-please-manifest.json` | The last released version. It started at `0.2.1`, the published npm version and the `v0.2.1` tag; historical tags are never recreated. |
 | `.github/workflows/pr-title.yml` | Fails a PR whose title is not a Conventional Commits title. |
 | `.github/labels.yml` | Includes the `autorelease: pending` and `autorelease: tagged` labels Release Please uses. |
-| `.github/workflows/publish.yml` | Unchanged: runs only on a pushed `v*` tag, gates the packed tarball on live CUBRID 11.4 and the Node 18 consumer, publishes it and creates the GitHub Release. |
+| `.github/workflows/publish.yml` | Runs only on a pushed `v*` tag, gates the packed tarball on live CUBRID 11.4 and the Node 18 consumer, publishes it with npm trusted publishing from the `npm-publish` environment and creates the GitHub Release. |
 
 ## How versions are chosen
 
@@ -70,4 +70,5 @@ These are settings in the repository, not files.
 - **Recommended:** make the `Check PR title` check required in the branch protection or ruleset for `main`.
 - **Settings → Actions → General → Workflow permissions:** "Allow GitHub Actions to create and approve pull requests" must stay enabled, or the workflow cannot open the Release PR.
 - **Labels:** `autorelease: pending` and `autorelease: tagged` come from `.github/labels.yml` and are created by the label sync workflow when this change lands on `main`.
+- **npm trusted publishing.** `publish.yml` publishes without a stored npm token: its `publish` job runs in the `npm-publish` environment (deployments limited to `v*` tags) with `id-token: write`, and npm 11.5.1 or later exchanges the job's OIDC identity for a short-lived credential. On npmjs.com, the package's **Settings → Trusted Publisher** must name GitHub Actions with `cubrid-lab` / `drizzle-cubrid` / `publish.yml` / environment `npm-publish`; renaming the workflow file or the environment breaks publishing until it is updated there. Versions published this way carry an npm provenance attestation.
 - **Optional `RELEASE_PLEASE_TOKEN` secret:** a fine-grained token limited to this repository (Contents and Pull requests: read and write). With it, the Release PR triggers CI automatically. Without it the workflow falls back to `GITHUB_TOKEN` and CI must be started by closing and reopening the PR (step 2). A GitHub App token minted per run is an alternative; do not store an expiring App token as a long-lived secret.
