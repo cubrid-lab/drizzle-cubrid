@@ -1,6 +1,6 @@
 {
   "name": "drizzle-cubrid",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Community-maintained Drizzle ORM dialect for the CUBRID database (not an official Drizzle project)",
   "type": "module",
   "main": "./dist/index.cjs",
