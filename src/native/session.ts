@@ -247,7 +247,11 @@ export interface CubridNativeClient {
 	 * into the SQL text as escaped literals (cubrid-client 1.4's `stream()`);
 	 * `iterator()` needs it.
 	 */
-	stream?(sql: string, params: readonly unknown[], options: CubridStreamCallOptions): AsyncIterable<unknown[]>;
+	stream?(
+		sql: string,
+		params: readonly unknown[] | undefined,
+		options: CubridStreamCallOptions,
+	): AsyncIterable<unknown[]>;
 	/**
 	 * Runs `callback` on a connection the driver owns for the whole
 	 * transaction, commits when it resolves and rolls back when it rejects
