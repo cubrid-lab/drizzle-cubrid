@@ -245,14 +245,14 @@ jobs:
         working-directory: consumer
         run: cp ../scripts/packed-types-check.mjs . && node packed-types-check.mjs
 
-  publish:
+  publish-production:
     name: Publish the tested tarball
     needs: [test, lint, package, live-cubrid, node18-consumer]
     runs-on: ubuntu-latest
     # npm trusted publishing: the package's Trusted Publisher on npmjs.com is
-    # cubrid-lab / drizzle-cubrid / publish.yml / environment npm-publish.
+    # cubrid-lab / drizzle-cubrid / publish.yml / environment production.
     # The environment only accepts deployments from v* tags.
-    environment: npm-publish
+    environment: production
     permissions:
       contents: write
       id-token: write
