@@ -95,14 +95,14 @@ export interface CubridQueryable {
 	 */
 	query<T extends readonly unknown[] = unknown[]>(
 		sql: string,
-		params: readonly unknown[],
+		params: readonly unknown[] | undefined,
 		options: { rowMode: 'array' },
 	): Promise<T[]>;
 	/** `query()` with the values sent as typed binds (cubrid-client 1.3.0 and later). */
 	queryPrepared?<T extends QueryRow = QueryRow>(sql: string, params?: readonly unknown[]): Promise<T[]>;
 	queryPrepared?<T extends readonly unknown[] = unknown[]>(
 		sql: string,
-		params: readonly unknown[],
+		params: readonly unknown[] | undefined,
 		options: { rowMode: 'array' },
 	): Promise<T[]>;
 	/** `execute()` with the values sent as typed binds (cubrid-client 1.3.0 and later). */

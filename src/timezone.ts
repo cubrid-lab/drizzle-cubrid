@@ -9,7 +9,7 @@
 type ClientZone = 'utc' | 'local' | 'other';
 
 interface ZoneQueryable {
-	query(sql: string, params: readonly unknown[], options: { rowMode: 'array' }): Promise<unknown[]>;
+	query(sql: string, params: readonly unknown[] | undefined, options: { rowMode: 'array' }): Promise<unknown[]>;
 }
 
 /** Selects the same wall clock in winter and summer, so a zone with DST cannot pass for UTC. */

@@ -131,7 +131,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.6.7",
     "@vitest/coverage-v8": "^5.1.0",
-    "cubrid-client": "^1.4.0",
+    "cubrid-client": "^1.6.0",
     "drizzle-orm": "^0.45.1",
     "tsup": "^9.0.0",
     "typescript": "^5.9.3",
