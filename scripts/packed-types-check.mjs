@@ -21,8 +21,16 @@
 //   consumer must install a cubrid-client of at least that version.
 // Usage (from the consumer directory): node packed-types-check.mjs
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+// The skipLibCheck: false cases check cubrid-client's declarations, which
+// compile without Node's types only from 1.6.0.
+const client = JSON.parse(readFileSync(join('node_modules', 'cubrid-client', 'package.json'), 'utf8')).version;
+const [major, minor] = client.split('.').map(Number);
+if (major < 1 || (major === 1 && minor < 6)) {
+	throw new Error(`packed-types-check needs cubrid-client 1.6.0 or later in the consumer, found ${client}`);
+}
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
@@ -109,6 +117,15 @@ export const nativeClient = drizzle(createClient(config));
 export const nativePool = drizzle(createPool(config));
 export const legacyClient = legacyDrizzle(createClient(config));
 export const legacyPool = legacyDrizzle(createPool(config));
+export async function transactionClients() {
+	const client = createClient(config);
+	const pool = createPool(config);
+	await client.transaction(async (tx) => [drizzle(tx), legacyDrizzle(tx)]);
+	await pool.transaction(async (tx) => [drizzle(tx), legacyDrizzle(tx)]);
+	await pool.connection(async (connection) => [drizzle(connection), legacyDrizzle(connection)]);
+	const scope = await client.beginTransactionScope();
+	return [drizzle(scope), legacyDrizzle(scope)];
+}
 `;
 
 // [name, lib, types, source]: skipLibCheck is false in all of them.
@@ -182,12 +199,19 @@ try {
 			}),
 		);
 		let output = '';
+		let failed = false;
 		try {
 			execFileSync(npx, ['tsc', '-p', config, '--pretty', 'false'], { encoding: 'utf8', stdio: 'pipe' });
 		} catch (error) {
+			failed = true;
 			output = `${error.stdout ?? ''}${error.stderr ?? ''}`;
 		}
 		const errors = output.split('\n').filter((line) => /error TS\d+/.test(line));
+		// A tsc that fails without reporting a type error did not check anything.
+		if (failed && errors.length === 0) {
+			console.error(output);
+			throw new Error(`${name}: tsc failed without a type error`);
+		}
 		const own = errors.filter((line) => !/(^|[\\/])node_modules[\\/]drizzle-orm[\\/]/.test(line));
 		if (own.length > 0) {
 			console.error(own.join('\n'));

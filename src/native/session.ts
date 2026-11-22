@@ -492,13 +492,13 @@ export class CubridSession {
 		const { literal, call } = streamOptions(options);
 		if (this.options.scope !== undefined) {
 			throw new Error(
-				"iterator() is not supported inside db.transaction(): cubrid-client 1.4's transaction client has no stream(); await the select in the transaction, or stream with db outside it",
+				'iterator() is not supported inside db.transaction(): await the select in the transaction, or stream with db outside it',
 			);
 		}
 		const stream = this.client.stream;
 		if (typeof stream !== 'function') {
 			throw new Error(
-				'The CUBRID client has no stream() for iterator() (a cubrid-client 1.4 client or pool has one; its transaction clients do not)',
+				'The CUBRID client has no stream() for iterator() (a cubrid-client 1.4 or later client or pool has one; transaction clients have one from 1.5.0)',
 			);
 		}
 		if (this.binding === 'prepared' && !literal) {

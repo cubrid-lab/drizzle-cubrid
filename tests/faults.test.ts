@@ -405,7 +405,8 @@ describe('a connection lost in the middle of a transaction', () => {
 		log('server restart mid-transaction', { ...shape(outcome.error), ms: outcome.ms - restartMs, restartMs });
 		// The CAS reconnects to the new server, but not inside a transaction: the
 		// next statement fails with -224 "A database has not been restarted",
-		// which cubrid-client 1.4.0 leaves without a kind (see docs/NATIVE_API.md).
+		// which cubrid-client 1.4.0 leaves without a kind and 1.5.0 and later classify
+		// as 'connection-lost' (see docs/NATIVE_API.md).
 		expect(outcome.error).toMatchObject({ name: 'TransactionError', code: -224, outcomeUnknown: false });
 		expect([undefined, 'connection-lost']).toContain((outcome.error as { kind?: string }).kind);
 		expect(await persisted()).toEqual([]);

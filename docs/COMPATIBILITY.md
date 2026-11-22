@@ -5,7 +5,7 @@
 | Peer | Declared range | Why this floor | Why this ceiling |
 | --- | --- | --- | --- |
 | `drizzle-orm` | `>=0.44.1 <0.46.0` | 0.44.0 and older fail to type-check (below) | 0.46 and the 1.0 release candidates are untested |
-| `cubrid-client` | `>=1.4.0 <2.0.0` | the only version verified against a real CUBRID server (#185); `isolationLevel` also needs 1.3.0 or later | a 2.x driver may change its API |
+| `cubrid-client` | `>=1.4.0 <2.0.0` | 1.4.0 (the floor) and 1.6.0 (the lockfile version) are verified against a real CUBRID server (#185); `isolationLevel` also needs 1.3.0 or later | a 2.x driver may change its API |
 
 A version outside these ranges is **unsupported**, even if it happens to install.
 A version inside them is **verified** only where the tables below say so.
@@ -77,6 +77,7 @@ Measured the same way with `npm install --no-save cubrid-client@<version>`
 | 1.0.0 – 1.2.0 | pass | 94 / 72 passed | not run | unsupported: `transaction()` takes no options; not verified against a server |
 | 1.3.0 | pass | 94 passed | not run | unsupported: not verified against a server |
 | 1.4.0 | pass | 94 passed | transaction isolation checks from #185 | verified |
+| 1.6.0 | pass | 869 passed | live suite, packed live suite and fault injection in CI (the lockfile version) | verified |
 
 Passing unit tests and a clean install are not database compatibility. The
 live suite runs against a real server with both the lockfile version and the
@@ -112,7 +113,8 @@ tarball they tested.
 | Lint and the foreign-dialect boundary | `src` and the packed tarball |
 | Fault injection (`tests/faults.test.ts`, `npm run integration:faults`) on the source | CUBRID 11.4 (same pinned digest) in a container of its own that the tests restart, pause and kill, Node 22, lockfile peers (CI only, not in the release gate) |
 
-**Fault scenarios verified** (CUBRID 11.4, cubrid-client 1.4.0, mostly
+**Fault scenarios verified** (CUBRID 11.4, cubrid-client 1.6.0, the lockfile
+version; the floor is not fault-tested; mostly
 the native API; each test checks the persisted rows through a new
 connection and that the pool recovers; what callers see is in
 [Failures](NATIVE_API.md#failures)):
@@ -138,7 +140,7 @@ connection and that the pool recovers; what callers see is in
   and the child statement.
 
 **Prepared queries and streaming verified** (CUBRID 11.4, cubrid-client
-1.4.0, the native API, in the live suite; see
+1.4.0 and 1.6.0, the native API, in the live suite; see
 [Prepared queries](NATIVE_API.md#prepared-queries) and
 [Streaming](NATIVE_API.md#streaming)):
 

@@ -97,7 +97,7 @@ const rows = await db
   .offset(20);
 ```
 
-`drizzle(client, { logger?, binding? })` takes a cubrid-client 1.4 client,
+`drizzle(client, { logger?, binding? })` takes a cubrid-client 1.4 or later client,
 pool or transaction client (anything with `query()`, and `queryPrepared()` for
 the default binding). Result types come from Drizzle's database-neutral select
 types, so they match Drizzle's other dialects.
@@ -391,7 +391,8 @@ table's `.primaryKey()` columns that have `.autoIncrement()` or `$defaultFn()`
   2^53; an `integer()` key that does not fit throws). If the row was inserted
   but the server still reports no key, `$returningId()` throws, saying the
   row was inserted, so do not retry it.
-- **Known limit, concurrent inserts on a pool:** with cubrid-client 1.4.0,
+- **Known limit, concurrent inserts on a pool:** observed with cubrid-client
+  1.4.0 and not re-measured on later versions,
   generated keys are sometimes missing when many inserts run at once on a
   pool, mostly on newly created tables. In one run, about 6 to 8 of 60
   concurrent inserts on new tables reported no key
@@ -529,7 +530,7 @@ Refused before a connection is taken:
 ## Failures
 
 What a caller sees when the server or the network fails. Every row below is
-verified on CUBRID 11.4 with cubrid-client 1.4.0 by `tests/faults.test.ts`
+verified on CUBRID 11.4 with cubrid-client 1.6.0, the lockfile version, by `tests/faults.test.ts`
 (`npm run integration:faults`), which checks the outcome the caller gets and
 then reads what the database actually holds through a new connection. The
 adapter adds no retry or reconnect of its own: it passes cubrid-client's
@@ -540,7 +541,7 @@ sends a statement or a COMMIT a second time.
 | --- | --- | --- |
 | Connection lost between two statements of `db.transaction()` (socket reset, CAS process killed) | The next statement, so the transaction, rejects at once with `TransactionError`, `kind: 'connection-lost'`. `outcomeUnknown` depends on when the driver noticed: `true` when it wrote the statement to a socket that turned out to be reset (observed for a reset between statements), `false` when it saw the socket close before sending (observed for a killed CAS process). Either way the transaction is lost | Nothing of the transaction: the server rolls it back when the connection closes |
 | Connection lost while a statement of the transaction was on the wire (the server ran it, the reply never came) | Same, with `outcomeUnknown: true` | Nothing: the statement was part of the transaction, which the server rolled back |
-| Database server restart (`cubrid server restart`) during a transaction | The next statement rejects with `TransactionError`, `code: -224` ("A database has not been restarted"), **no `kind`** in cubrid-client 1.4.0, `outcomeUnknown: false` | Nothing of the transaction |
+| Database server restart (`cubrid server restart`) during a transaction | The next statement rejects with `TransactionError`, `code: -224` ("A database has not been restarted"), `kind: 'connection-lost'` in cubrid-client 1.5.0 and later (no `kind` in 1.4.0), `outcomeUnknown: false` | Nothing of the transaction |
 | Server or broker restart between queries on a pool or client | The next query succeeds: the CAS reconnects to a restarted server by itself, and cubrid-client checks an idle connection's CAS (`CHECK_CAS`) before each statement outside a transaction and opens a new connection when it is gone, before the statement is sent | The statement ran once |
 | Server unreachable (connections reset and new ones refused) | Queries reject at once with `kind: 'connection-lost'`, `outcomeUnknown: false` (a `QueryError` when an idle connection could not be replaced, a `ConnectionError` when a pool could not open one) | Nothing was sent; the next query after the server is back succeeds |
 | Connection lost during COMMIT of `db.transaction()` | Rejects with cubrid-client's error unchanged: `TransactionError`, `kind: 'connection-lost'`, `outcomeUnknown: true` | **Unknown to the caller.** Verified both ways: when the COMMIT never reached the server nothing is committed; when only its reply was lost the transaction **is committed**. The error is the same in both cases |
@@ -577,8 +578,9 @@ Recommendations:
   not only on the error itself: when the victim was a nested transaction whose
   error was caught, the outer transaction rejects with the `… can only roll
   back` error, and the deadlock is its `cause`.
-- A `code: -224` statement error after a server restart has no `kind` in
-  cubrid-client 1.4.0; treat it as a lost transaction.
+- A `code: -224` statement error after a server restart has
+  `kind: 'connection-lost'` in cubrid-client 1.5.0 and later and no `kind` in
+  1.4.0; either way, treat it as a lost transaction.
 
 ## Relational queries
 
@@ -903,8 +905,8 @@ Refused, before anything is sent:
 | --- | --- |
 | `iterator()` under `binding: 'prepared'` without `{ literal: true }` | See Binding above |
 | A prepared select of a `tx` iterated after its transaction ended | `This transaction has ended …`, as for its `execute()` |
-| `iterator()` inside `db.transaction()` (on `tx` or a nested `tx`) | cubrid-client 1.4's transaction client has no `stream()`. It is refused even for a client that has one: an open cursor's interaction with savepoints and with a callback that returns has no defined behavior yet. Await the select in the transaction, or stream with `db`, which runs outside it and sees only committed rows |
-| `iterator()` on a client without `stream()` (such as a cubrid-client transaction client passed to `drizzle()`) | Nothing to stream with |
+| `iterator()` inside `db.transaction()` (on `tx` or a nested `tx`) | cubrid-client 1.4's transaction client has no `stream()` (1.5.0 added one). It is refused whatever the driver provides: an open cursor's interaction with savepoints and with a callback that returns has no defined behavior yet. Await the select in the transaction, or stream with `db`, which runs outside it and sees only committed rows |
+| `iterator()` on a client without `stream()` (such as a cubrid-client 1.4 transaction client passed to `drizzle()`) | Nothing to stream with. A cubrid-client 1.5.0 or later transaction client has `stream()`, so `iterator()` on it runs; that path is not covered by this package's tests ([#272](https://github.com/cubrid-lab/drizzle-cubrid/issues/272)) |
 | `iterator()` on a relational query | Its rows are complete only after every level is loaded; stream a `select()` |
 | Writes | Have no `iterator()` |
 
