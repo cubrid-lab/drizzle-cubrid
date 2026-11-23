@@ -478,3 +478,103 @@ describe('repository and command line', () => {
 		expect(spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8' }).status).toBe(2);
 	});
 });
+
+// Each bypass named in #192 is planted in a native file of a temporary tree
+// and must fail the command; legitimate native code must pass it.
+describe('native code loading bypasses, planted in a fixture tree', () => {
+	let dir: string | undefined;
+	afterEach(() => {
+		vi.restoreAllMocks();
+		if (dir) rmSync(dir, { recursive: true, force: true });
+		dir = undefined;
+	});
+
+	const run = (text: string) => {
+		dir = mkdtempSync(join(tmpdir(), 'boundary-bypass-'));
+		mkdirSync(join(dir, 'src', 'native'), { recursive: true });
+		writeFileSync(join(dir, 'src', 'native', 'planted.ts'), text);
+		const errors: string[] = [];
+		vi.spyOn(console, 'log').mockImplementation(() => undefined);
+		vi.spyOn(console, 'error').mockImplementation((message: string) => errors.push(message));
+		const code = main(['src'], { root: dir, baseline: join(dir, 'baseline.json') });
+		return { code, errors };
+	};
+
+	it.each([
+		['eval', "export const r = eval('1');\n", 'native-dynamic "eval"'],
+		['new Function', "export const f = new Function('return 1');\n", 'native-dynamic "Function"'],
+		['Function()', "export const f = Function('return 1');\n", 'native-dynamic "Function"'],
+		[
+			'new x.constructor',
+			"export const f = new (() => 1).constructor('return 1');\n",
+			'native-dynamic "new .constructor()"',
+		],
+		[
+			'import(expression)',
+			'export const load = (name: string) => import(name);\n',
+			'native-dynamic "import(expression)"',
+		],
+		['import() of a foreign driver', "export const m = import('mysql2/promise');\n", 'import "mysql2/promise"'],
+		['import() of pg', "export const m = import('pg');\n", 'import "pg"'],
+		[
+			'import() of a foreign dialect',
+			"export const m = import('drizzle-orm/mysql-core');\n",
+			'import "drizzle-orm/mysql-core"',
+		],
+		[
+			'module.require(expression)',
+			'export const m = (n: string) => module.require(n);\n',
+			'native-dynamic "require(expression)"',
+		],
+		[
+			'module.require of a 0.x module',
+			"export const m = module.require('../session.js');\n",
+			'native-import "../session.js"',
+		],
+		[
+			'globalThis.require(expression)',
+			'export const m = (n: string) => globalThis.require(n);\n',
+			'native-dynamic "require(expression)"',
+		],
+		['globalThis.require alias', 'export const r = globalThis.require;\n', 'native-import "require alias"'],
+		[
+			'createRequire()',
+			"import { createRequire } from 'node:module';\nexport const r = createRequire(import.meta.url);\n",
+			'native-import "createRequire"',
+		],
+		['obj["require"]', "export const r = module['require'];\n", 'native-dynamic "["require"]"'],
+		['module[expression]', "export const r = module['req' + 'uire'];\n", 'native-dynamic "module[expression]"'],
+		['module.constructor', 'export const l = module.constructor._load;\n', 'native-dynamic "module.constructor"'],
+		[
+			'getBuiltinModule',
+			"export const vm = process.getBuiltinModule('node:vm');\n",
+			'native-dynamic "getBuiltinModule"',
+		],
+	])('reports %s', (_name, text, finding) => {
+		const { code, errors } = run(text);
+		expect(code).toBe(1);
+		expect(errors.join('\n')).toContain(`src/native/planted.ts:`);
+		expect(errors.join('\n')).toContain(`${finding} is not allowed in native code`);
+	});
+
+	it('passes legitimate native code', () => {
+		const { code, errors } = run(
+			[
+				"import { readFileSync } from 'node:fs';",
+				"import { sql } from 'drizzle-orm';",
+				"import { quote } from './internal.js';",
+				'export class Row { clone() { return new (this.constructor as new () => Row)(); } }',
+				"export const load = () => import('./internal.js');",
+				"export const client = () => import('cubrid-client');",
+				'export const kind = (x: object) => x.constructor.name;',
+				"export const evaluate = (row: Record<string, unknown>, k: string) => row[k] ?? row['required'];",
+				'export const isModule = typeof module !== "undefined" && module.exports;',
+				"export const message = 'eval, new Function and require are refused here';",
+				'// eval(x); import(y); module.require(z); process.getBuiltinModule(w)',
+				'export { readFileSync, sql, quote };',
+			].join('\n'),
+		);
+		expect(errors).toEqual([]);
+		expect(code).toBe(0);
+	});
+});
