@@ -171,11 +171,12 @@ connection and that the pool recovers; what callers see is in
 
 **SELECT-only database user verified** (CUBRID 11.4, the native API, in the
 live suite, #265): a run-created user granted only `SELECT` on a run-created
-table, reaching it through a synonym in its own schema, reads the exact rows
-with a parameterized `select()`; `insert`, `update` and `delete` are each
+table, reaching it through a synonym in its own schema, is refused a `select()`
+with code `-494` before the grant and, after it, reads the exact rows with a
+parameterized `select()`; `insert`, `update` and `delete` are each
 refused by the server with code `-494` (`<verb> is not authorized on ...`),
 passed through as cubrid-client's `QueryError`; a `select()` afterwards still
-works, and a separate `dba` connection sees the rows and columns unchanged.
+works, and a separate connection as the suite's user sees the rows and columns unchanged.
 The user, synonym and table are dropped only if the run created them. This is
 not a security review; other privileges (`ALTER`, `EXECUTE`, roles, `WITH
 GRANT OPTION`) are not tested.
