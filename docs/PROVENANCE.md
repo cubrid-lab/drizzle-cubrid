@@ -196,10 +196,12 @@ THIRD_PARTY_NOTICES.md alone.
   project's MIT license.
 - **Precautionary attribution.** The notices on `src/session.ts` and `src/driver.ts` can be kept until the 0.x API
   is removed in 1.0 (ADR 0010), when both files and the drizzle-orm part of THIRD_PARTY_NOTICES.md go away.
-- **npm provenance.** From 0.3.1 on, `publish.yml` publishes with npm trusted publishing (OIDC) from the
-  `npm-publish` environment, with no stored npm token, and npm attaches a provenance attestation to each version it
-  publishes this way. Versions up to 0.2.1 have none ([RELEASE_NOTES_AUDIT.md](RELEASE_NOTES_AUDIT.md)); 0.3.0 was
-  tagged but never published. The Trusted Publisher is configured on npmjs.com in the package's settings
-  (`cubrid-lab` / `drizzle-cubrid` / `publish.yml` / environment `npm-publish`).
+- **npm provenance.** From 0.3.1 on, `publish.yml` publishes with npm trusted publishing (OIDC), with no stored npm
+  token, and npm attaches a provenance attestation to each version it publishes this way. 0.3.1 was published from
+  the `npm-publish` environment; from 0.3.2 on, the job runs in the `production` environment
+  ([#268](https://github.com/cubrid-lab/drizzle-cubrid/pull/268)). Versions up to 0.2.1 have none
+  ([RELEASE_NOTES_AUDIT.md](RELEASE_NOTES_AUDIT.md)); 0.3.0 was tagged but never published. The Trusted Publisher is
+  configured on npmjs.com in the package's settings (`cubrid-lab` / `drizzle-cubrid` / `publish.yml` / environment
+  `production`); see [RELEASE_PROCESS.md](RELEASE_PROCESS.md#repository-settings).
 - **Release gate.** `publish.yml` does not run `check-provenance.mjs pack`; CI does on every code change.
   Adding it to the release `package` job is a one-line change if wanted.
