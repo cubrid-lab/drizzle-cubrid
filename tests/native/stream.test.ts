@@ -446,3 +446,119 @@ describe('iterator() refusals before anything is sent', () => {
 		expect(client.calls).toEqual([]);
 	});
 });
+
+// Characterizes behavior pending #272; change these assertions deliberately when #272 is decided.
+//
+// A cubrid-client transaction client (the tx of client.transaction() or
+// pool.transaction(), a beginTransactionScope() handle) passed to drizzle()
+// directly. From cubrid-client 1.5.0 it has stream(); with 1.4 it has none.
+// pool.connection()'s connection has stream() from 1.4 on. The live suite
+// (tests/integration.test.ts) pins the same behavior on real objects.
+describe('iterator() on a cubrid-client transaction client passed to drizzle() (pending #272)', () => {
+	const NO_STREAM =
+		'The CUBRID client has no stream() for iterator() (a cubrid-client 1.4 or later client or pool has one; transaction clients have one from 1.5.0)';
+	const PREPARED_REFUSED =
+		"iterator() is refused under binding 'prepared': cubrid-client 1.4's stream() sends values only as SQL literals, and CUBRID compares some values differently as literals than as typed binds (a NULL inside OR under NOT, trailing spaces in LIKE), so the stream could return other rows than execute(). Create the database with drizzle(client, { binding: 'literal' }) so that execute() and iterator() both send literals, or pass { literal: true } to iterator() to accept literal semantics for this stream (cubrid-lab/cubrid-client#307)";
+	const IN_DB_TRANSACTION =
+		'iterator() is not supported inside db.transaction(): await the select in the transaction, or stream with db outside it';
+
+	/** A transaction client as cubrid-client 1.5.0 and later hand it out: with stream(). */
+	const txWithStream = () => fakeClient([[1n], [2n], [3n]]);
+	/** A transaction client as cubrid-client 1.4 hands it out: without stream(). */
+	const txWithoutStream = () => {
+		const { stream: _, ...tx } = fakeClient([[1n]]);
+		return tx;
+	};
+	/** The error iterator() throws synchronously, or undefined. */
+	const thrownBy = (run: () => unknown): unknown => {
+		try {
+			run();
+		} catch (error) {
+			return error;
+		}
+		return undefined;
+	};
+
+	it("refuses iterator() under the default binding 'prepared' on a transaction client with stream() (1.5.0+)", () => {
+		const tx = txWithStream();
+		const error = thrownBy(() => drizzle(tx).select({ id: users.id }).from(users).iterator());
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).constructor).toBe(Error);
+		expect((error as Error).message).toBe(PREPARED_REFUSED);
+		expect(tx.calls).toEqual([]);
+	});
+
+	it('streams with { literal: true } on a transaction client with stream() (1.5.0+), through the tx itself', async () => {
+		const tx = txWithStream();
+		const rows = await collect(drizzle(tx).select({ id: users.id }).from(users).iterator({}, { literal: true }));
+		expect(rows).toEqual([{ id: 1n }, { id: 2n }, { id: 3n }]);
+		expect(tx.calls).toEqual([
+			{ method: 'stream', sql: 'select "users"."id" from "users"', params: [], options: { rowMode: 'array' } },
+		]);
+		expect(tx.state).toEqual({ reads: 3, ended: 'done' });
+	});
+
+	it("streams under binding 'literal' on a transaction client with stream() (1.5.0+)", async () => {
+		const tx = txWithStream();
+		const rows = await collect(drizzle(tx, { binding: 'literal' }).select({ id: users.id }).from(users).iterator());
+		expect(rows).toEqual([{ id: 1n }, { id: 2n }, { id: 3n }]);
+		expect(tx.calls.map(({ method }) => method)).toEqual(['stream']);
+	});
+
+	it("closes the transaction client's stream when the loop breaks (1.5.0+)", async () => {
+		const tx = txWithStream();
+		const seen: unknown[] = [];
+		for await (const row of drizzle(tx).select({ id: users.id }).from(users).iterator({}, { literal: true })) {
+			seen.push(row);
+			break;
+		}
+		expect(seen).toEqual([{ id: 1n }]);
+		expect(tx.state).toEqual({ reads: 1, ended: 'closed' });
+	});
+
+	it.each([
+		['the default binding', {}, undefined],
+		['the default binding with { literal: true }', {}, { literal: true }],
+		["binding 'literal'", { binding: 'literal' as const }, undefined],
+	])(
+		'refuses iterator() on a transaction client without stream() (1.4) under %s, before anything is sent',
+		(_, config, options) => {
+			const tx = txWithoutStream();
+			const error = thrownBy(() => drizzle(tx, config).select({ id: users.id }).from(users).iterator({}, options));
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).constructor).toBe(Error);
+			expect((error as Error).message).toBe(NO_STREAM);
+			expect(tx.calls).toEqual([]);
+		},
+	);
+
+	it.each([
+		['the default binding', {}, undefined, txWithStream],
+		['the default binding with { literal: true }', {}, { literal: true }, txWithStream],
+		["binding 'literal'", { binding: 'literal' as const }, undefined, txWithStream],
+		[
+			"binding 'literal' on a transaction client without stream() (1.4)",
+			{ binding: 'literal' as const },
+			undefined,
+			txWithoutStream,
+		],
+	])(
+		'refuses iterator() inside db.transaction() under %s, whatever the transaction client has',
+		async (_, config, options, makeTx) => {
+			const inner = makeTx();
+			const client = {
+				...fakeClient(),
+				transaction: async <T>(callback: (tx: typeof inner) => Promise<T>) => callback(inner),
+			};
+			const error = await drizzle(client, config)
+				.transaction(async (tx) => {
+					tx.select({ id: users.id }).from(users).iterator({}, options);
+				})
+				.catch((e: unknown) => e);
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).constructor).toBe(Error);
+			expect((error as Error).message).toBe(IN_DB_TRANSACTION);
+			expect(inner.calls).toEqual([]);
+		},
+	);
+});

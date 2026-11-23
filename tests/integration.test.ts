@@ -10,9 +10,10 @@
 // The 0.x API is imported from its deprecated entry, drizzle-cubrid/legacy
 // (src/legacy.ts), and keeps its live tests until it is removed in 1.0
 // (ADR 0010). The native API is the root entry, src/native/index.ts.
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
 	TransactionError as ClientTransactionError,
 	ConstraintError,
@@ -4034,6 +4035,171 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 		expect({ cases: cases.length, differing }).toEqual({ cases: cases.length, differing: [] });
 		expect(cases.length).toBeGreaterThan(80);
 	});
+});
+
+// Characterizes behavior pending #272; change these assertions deliberately when #272 is decided.
+//
+// What iterator() does today on the cubrid-client objects that hold one
+// connection, passed to drizzle() directly. The transaction clients (the tx of
+// client.transaction() and pool.transaction(), a beginTransactionScope()
+// handle) have stream() from cubrid-client 1.5.0; with 1.4, the floor of the
+// peer range that the packed floor lane installs, they have none. The
+// connection of pool.connection() has stream() from 1.4. The assertions follow
+// the installed cubrid-client version instead of skipping.
+describe('iterator() on cubrid-client transaction clients passed to drizzle() (pending #272)', () => {
+	const clientVersion = (
+		JSON.parse(
+			readFileSync(
+				join(dirname(createRequire(import.meta.url).resolve('cubrid-client')), '..', 'package.json'),
+				'utf8',
+			),
+		) as { version: string }
+	).version;
+	const [major = 0, minor = 0] = clientVersion.split('.').map(Number);
+	const txHasStream = major > 1 || (major === 1 && minor >= 5);
+	const NO_STREAM =
+		'The CUBRID client has no stream() for iterator() (a cubrid-client 1.4 or later client or pool has one; transaction clients have one from 1.5.0)';
+	const PREPARED_REFUSED =
+		"iterator() is refused under binding 'prepared': cubrid-client 1.4's stream() sends values only as SQL literals, and CUBRID compares some values differently as literals than as typed binds (a NULL inside OR under NOT, trailing spaces in LIKE), so the stream could return other rows than execute(). Create the database with drizzle(client, { binding: 'literal' }) so that execute() and iterator() both send literals, or pass { literal: true } to iterator() to accept literal semantics for this stream (cubrid-lab/cubrid-client#307)";
+	const IN_DB_TRANSACTION =
+		'iterator() is not supported inside db.transaction(): await the select in the transaction, or stream with db outside it';
+	const rows = native.cubridTable(name('n272'), {
+		id: native.integer().primaryKey(),
+		label: native.varchar({ length: 20 }).notNull(),
+	});
+	const seeded = [
+		{ id: 1, label: 'one' },
+		{ id: 2, label: 'two' },
+		{ id: 3, label: 'three' },
+	];
+	type Tx = native.CubridNativeClient;
+	/** Each source runs `use` on its connection and ends it as a success would (commit, or release). */
+	const sources: { label: string; hasStream: () => boolean; on: (use: (tx: Tx) => Promise<void>) => Promise<void> }[] =
+		[
+			{ label: 'client.transaction(cb)', hasStream: () => txHasStream, on: (use) => client.transaction(use as never) },
+			{ label: 'pool.transaction(cb)', hasStream: () => txHasStream, on: (use) => pool.transaction(use as never) },
+			{ label: 'pool.connection()', hasStream: () => true, on: (use) => pool.connection(use as never) },
+			{
+				label: 'client.beginTransactionScope()',
+				hasStream: () => txHasStream,
+				on: async (use) => {
+					const scope = await client.beginTransactionScope();
+					try {
+						await use(scope as never);
+					} catch (error) {
+						await scope.rollback().catch(() => undefined);
+						throw error;
+					}
+					await scope.commit();
+				},
+			},
+		];
+	const collect = async <T>(stream: AsyncIterable<T>): Promise<T[]> => {
+		const out: T[] = [];
+		for await (const row of stream) out.push(row);
+		return out;
+	};
+	/** The error `run` throws synchronously, or undefined. */
+	const thrownBy = (run: () => unknown): unknown => {
+		try {
+			run();
+		} catch (error) {
+			return error;
+		}
+		return undefined;
+	};
+	const expectPlainError = (error: unknown, message: string) => {
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).constructor).toBe(Error);
+		expect((error as Error).message).toBe(message);
+	};
+
+	beforeAll(async () => {
+		await client.query(createTableSql(rows));
+		created.push(`"${native.getTableConfig(rows).name}"`);
+		await native.drizzle(client).insert(rows).values(seeded);
+	}, DDL_TIMEOUT);
+
+	it('runs against a known cubrid-client version', () => {
+		console.log(`cubrid-client ${clientVersion}: transaction clients ${txHasStream ? 'have' : 'lack'} stream()`);
+		expect(clientVersion).toMatch(/^1\.\d+\.\d+/);
+		expect(typeof pool.connection).toBe('function');
+		expect(typeof client.beginTransactionScope).toBe('function');
+	});
+
+	for (const source of sources) {
+		it(`${source.label}: iterator() under the default binding 'prepared' is refused before anything is sent`, async () => {
+			const statements: string[] = [];
+			await source.on(async (tx) => {
+				expect(typeof tx.stream === 'function').toBe(source.hasStream());
+				const db = native.drizzle(tx, { logger: { logQuery: (query) => statements.push(query) } });
+				const error = thrownBy(() => db.select().from(rows).orderBy(rows.id).iterator());
+				// 1.5.0+: the tx has stream(), so the binding refusal is reached; 1.4: no stream().
+				expectPlainError(error, source.hasStream() ? PREPARED_REFUSED : NO_STREAM);
+				expect(statements).toEqual([]);
+				// The connection is untouched.
+				expect(await db.select().from(rows).orderBy(rows.id)).toEqual(seeded);
+			});
+			expect(pool.stats().active).toBe(0);
+		});
+
+		it(`${source.label}: iterator({}, { literal: true }) ${source.hasStream() ? 'streams on that connection and closes the cursor on break' : 'is refused for lack of stream()'}`, async () => {
+			const statements: string[] = [];
+			await source.on(async (tx) => {
+				const db = native.drizzle(tx, { logger: { logQuery: (query) => statements.push(query) } });
+				const stream = () => db.select().from(rows).orderBy(rows.id).iterator({}, { literal: true });
+				if (!source.hasStream()) {
+					expectPlainError(thrownBy(stream), NO_STREAM);
+					expect(statements).toEqual([]);
+					return;
+				}
+				// The stream reads on the same connection: it sees a row written there
+				// and not yet committed.
+				await db.insert(rows).values({ id: 4, label: 'four' });
+				expect(await collect(stream())).toEqual([...seeded, { id: 4, label: 'four' }]);
+				await db.delete(rows).where(eq(rows.id, 4));
+				const seen: unknown[] = [];
+				for await (const row of stream()) {
+					seen.push(row);
+					break;
+				}
+				expect(seen).toEqual([seeded[0]]);
+				// The break closed the cursor: the same connection runs the next
+				// statement, and the commit or release below succeeds.
+				expect(await db.select().from(rows).orderBy(rows.id)).toEqual(seeded);
+				const iterator = stream();
+				expect(await iterator.next()).toEqual({ value: seeded[0], done: false });
+				expect(await iterator.return(undefined)).toEqual({ value: undefined, done: true });
+				expect(await db.select({ id: rows.id }).from(rows).where(eq(rows.id, 2))).toEqual([{ id: 2 }]);
+			});
+			expect(pool.stats().active).toBe(0);
+			expect(await native.drizzle(client).select().from(rows).orderBy(rows.id)).toEqual(seeded);
+		});
+	}
+
+	for (const [label, source] of [
+		['client', () => client],
+		['pool', () => pool],
+	] as const) {
+		for (const [binding, options] of [
+			['prepared', undefined],
+			['prepared', { literal: true }],
+			['literal', undefined],
+		] as const) {
+			it(`inside db.transaction() on a ${label} (binding '${binding}'${options ? ', { literal: true }' : ''}), iterator() is refused whatever the version`, async () => {
+				const statements: string[] = [];
+				const db = native.drizzle(source(), { binding, logger: { logQuery: (query) => statements.push(query) } });
+				const error = await db
+					.transaction(async (tx) => {
+						tx.select().from(rows).iterator({}, options);
+					})
+					.catch((e: unknown) => e);
+				expectPlainError(error, IN_DB_TRANSACTION);
+				expect(statements).toEqual([]);
+				expect(pool.stats().active).toBe(0);
+			});
+		}
+	}
 });
 
 // The measurements behind ADR 0009 (#163): what CUBRID does with DDL in a
