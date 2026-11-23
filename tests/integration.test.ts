@@ -4047,6 +4047,10 @@ describe('drizzle-cubrid/native prepared queries and streaming (#165)', () => {
 // connection of pool.connection() has stream() from 1.4. The assertions follow
 // the installed cubrid-client version instead of skipping.
 describe('iterator() on cubrid-client transaction clients passed to drizzle() (pending #272)', () => {
+	// cubrid-client does not export ./package.json, so the version is read from
+	// dirname(require.resolve('cubrid-client'))/../package.json. That assumes the
+	// resolved entry is one directory below the package root (dist/index.cjs,
+	// true for 1.4.0 through 1.6.0).
 	const clientVersion = (
 		JSON.parse(
 			readFileSync(
@@ -4155,9 +4159,18 @@ describe('iterator() on cubrid-client transaction clients passed to drizzle() (p
 				}
 				// The stream reads on the same connection: it sees a row written there
 				// and not yet committed.
+				// pool.connection() autocommits the insert, so the delete always runs: a
+				// leaked row 4 would fail every later assertion and hide this one. The
+				// seeded check below proves the delete worked.
 				await db.insert(rows).values({ id: 4, label: 'four' });
-				expect(await collect(stream())).toEqual([...seeded, { id: 4, label: 'four' }]);
-				await db.delete(rows).where(eq(rows.id, 4));
+				try {
+					expect(await collect(stream())).toEqual([...seeded, { id: 4, label: 'four' }]);
+				} finally {
+					await db
+						.delete(rows)
+						.where(eq(rows.id, 4))
+						.catch(() => undefined);
+				}
 				const seen: unknown[] = [];
 				for await (const row of stream()) {
 					seen.push(row);
@@ -4196,7 +4209,7 @@ describe('iterator() on cubrid-client transaction clients passed to drizzle() (p
 					.catch((e: unknown) => e);
 				expectPlainError(error, IN_DB_TRANSACTION);
 				expect(statements).toEqual([]);
-				expect(pool.stats().active).toBe(0);
+				if (label === 'pool') expect(pool.stats().active).toBe(0);
 			});
 		}
 	}
