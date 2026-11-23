@@ -38,7 +38,13 @@
 //                 a non-literal argument, require(expr)/module.require(expr)/
 //                 createRequire(...)(expr) with a non-literal argument, and
 //                 'eval'/'Function'/'require'/'createRequire' as a computed
-//                 property key (`module['require']`, Reflect.get(m, 'require')).
+//                 property key (`module['require']`, Reflect.get(m, 'require')),
+//                 a computed key that is not a string on `module`
+//                 (`module['req' + 'uire']`, Reflect.get(module, k)),
+//                 `module.constructor` (Module._load and friends),
+//                 `new x.constructor(...)` other than on `this`, and
+//                 `getBuiltinModule` in any form (process.getBuiltinModule
+//                 hands out node:vm and node:module without an import).
 //                 Comments, ordinary strings, type annotations and properties
 //                 such as `.function` never match. Never baselinable.
 //
@@ -104,7 +110,7 @@ function isNative(scope, file, rule) {
 	);
 }
 /** Names that load or build code when reached by a computed key. */
-const DYNAMIC_KEYS = new Set(['eval', 'Function', 'require', 'createRequire']);
+const DYNAMIC_KEYS = new Set(['eval', 'Function', 'require', 'createRequire', 'getBuiltinModule']);
 const CODE_RUNNING_BUILTINS = new Set(['node:module', 'node:vm', 'node:worker_threads', 'node:child_process']);
 const BINDING_KEYS = new Set(['eval', 'Function', 'constructor']);
 const TIMERS = new Set(['setTimeout', 'setInterval']);
@@ -170,6 +176,23 @@ export function scanText(file, text, scope = 'src') {
 	}
 
 	const isGlobalObject = (expr) => ts.isIdentifier(expr) && GLOBAL_OBJECTS.has(expr.text);
+	// Parentheses, casts and `!` change no value: (module)['x'], new ((f).constructor)().
+	const unwrap = (expr) => {
+		let inner = expr;
+		while (
+			ts.isParenthesizedExpression(inner) ||
+			ts.isAsExpression(inner) ||
+			ts.isTypeAssertionExpression(inner) ||
+			ts.isNonNullExpression(inner) ||
+			ts.isSatisfiesExpression(inner)
+		)
+			inner = inner.expression;
+		return inner;
+	};
+	const isModuleObject = (expr) => {
+		const target = unwrap(expr);
+		return ts.isIdentifier(target) && target.text === 'module';
+	};
 
 	// An identifier that is a use of the global `eval` / `Function`, not a
 	// property name, declaration or type.
@@ -238,6 +261,8 @@ export function scanText(file, text, scope = 'src') {
 
 		if (checkDynamic) {
 			const dyn = (match) => add('native-dynamic', match, node.getStart(source));
+			// process.getBuiltinModule('node:vm') loads a module without an import.
+			if (ts.isIdentifier(node) && node.text === 'getBuiltinModule') dyn('getBuiltinModule');
 			if (ts.isIdentifier(node) && (node.text === 'eval' || node.text === 'Function') && isGlobalUse(node)) {
 				dyn(node.text);
 			} else if (ts.isPropertyAccessExpression(node)) {
@@ -248,12 +273,17 @@ export function scanText(file, text, scope = 'src') {
 					GLOBAL_OBJECTS.has(expression.text)
 				)
 					dyn(name.text);
+				// module.constructor is node:module's Module (Module._load, Module.prototype.require).
+				if (name.text === 'constructor' && isModuleObject(expression)) dyn('module.constructor');
 			} else if (ts.isElementAccessExpression(node) || ts.isComputedPropertyName(node)) {
 				const key = stringValue(ts.isElementAccessExpression(node) ? node.argumentExpression : node.expression);
+				const element = ts.isElementAccessExpression(node);
 				if (key !== undefined && DYNAMIC_KEYS.has(key)) dyn(`["${key}"]`);
+				else if (key === 'constructor' && element && isModuleObject(node.expression)) dyn('module.constructor');
 				// globalThis["ev" + "al"], globalThis[k]: a computed key on a global object.
-				else if (key === undefined && ts.isElementAccessExpression(node) && isGlobalObject(node.expression))
-					dyn('global[expression]');
+				else if (key === undefined && element && isGlobalObject(node.expression)) dyn('global[expression]');
+				// module["req" + "uire"], module[k]
+				else if (key === undefined && element && isModuleObject(node.expression)) dyn('module[expression]');
 			} else if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
 				// const { eval: e } = globalThis, const { Function } = globalThis
 				const property = node.propertyName ?? node.name;
@@ -282,6 +312,8 @@ export function scanText(file, text, scope = 'src') {
 					if (DYNAMIC_KEYS.has(key ?? '')) dyn(`["${key}"]`);
 					else if (key === undefined && node.arguments[0] && isGlobalObject(node.arguments[0]))
 						dyn('global[expression]');
+					else if (key === undefined && node.arguments[0] && isModuleObject(node.arguments[0]))
+						dyn('module[expression]');
 				}
 				// setTimeout('code') evaluates the string.
 				const timer = ts.isIdentifier(callee)
@@ -290,6 +322,14 @@ export function scanText(file, text, scope = 'src') {
 						? callee.name
 						: undefined;
 				if (timer && TIMERS.has(timer.text) && arg && ts.isStringLiteralLike(arg)) dyn(`${timer.text}(string)`);
+			} else if (ts.isNewExpression(node)) {
+				// new fn.constructor('code') builds a function like new Function;
+				// new this.constructor(...) only makes another instance.
+				const callee = unwrap(node.expression);
+				const ctor =
+					(ts.isPropertyAccessExpression(callee) && callee.name.text === 'constructor') ||
+					(ts.isElementAccessExpression(callee) && stringValue(callee.argumentExpression) === 'constructor');
+				if (ctor && unwrap(callee.expression).kind !== ts.SyntaxKind.ThisKeyword) dyn('new .constructor()');
 			}
 		}
 

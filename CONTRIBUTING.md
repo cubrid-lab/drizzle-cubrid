@@ -177,9 +177,16 @@ reports:
   (rule `native-dynamic`): `eval`, `Function` (`new Function`, `Function(...)`,
   an alias or `globalThis.Function`), a call of `.constructor(...)`,
   `import(expr)` or `require(expr)` with a non-literal argument, and `'eval'`,
-  `'Function'`, `'require'` or `'createRequire'` as a computed key
-  (`module['require']`, `Reflect.get(m, 'require')`). Strings, comments, types
-  and properties such as `.function` do not match. The 0.x code
+  `'Function'`, `'require'`, `'createRequire'` or `'getBuiltinModule'` as a
+  computed key (`module['require']`, `Reflect.get(m, 'require')`). Also
+  refused: a non-literal computed key on `module` (`module['req' + 'uire']`,
+  `Reflect.get(module, k)`), `module.constructor` (Node's `Module`, with
+  `_load`), `new x.constructor(...)` other than on `this` (the `Function`
+  constructor reached through any function), and `getBuiltinModule` in any form
+  (`process.getBuiltinModule('node:vm')` loads a built-in without an import).
+  Dynamic `import('…')` and `require('…')` with a literal argument go through
+  the `import` and `native-import` rules like static imports. Strings, comments,
+  types and properties such as `.function` do not match. The 0.x code
   (`dist/legacy.*`, `drizzle-cubrid/legacy`) is not scanned for it
 
 Native code may have no findings at all: neither `src/native/**` nor a packed
