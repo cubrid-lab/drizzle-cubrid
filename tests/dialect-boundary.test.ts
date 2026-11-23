@@ -510,6 +510,11 @@ describe('native code loading bypasses, planted in a fixture tree', () => {
 			'native-dynamic "new .constructor()"',
 		],
 		[
+			'new (x.constructor) in parentheses',
+			"export const f = new ((() => 1).constructor)('return 1');\n",
+			'native-dynamic "new .constructor()"',
+		],
+		[
 			'import(expression)',
 			'export const load = (name: string) => import(name);\n',
 			'native-dynamic "import(expression)"',
@@ -544,6 +549,11 @@ describe('native code loading bypasses, planted in a fixture tree', () => {
 		],
 		['obj["require"]', "export const r = module['require'];\n", 'native-dynamic "["require"]"'],
 		['module[expression]', "export const r = module['req' + 'uire'];\n", 'native-dynamic "module[expression]"'],
+		[
+			'(module)[expression]',
+			"export const r = (module as NodeModule)!['req' + 'uire'];\n",
+			'native-dynamic "module[expression]"',
+		],
 		['module.constructor', 'export const l = module.constructor._load;\n', 'native-dynamic "module.constructor"'],
 		[
 			'getBuiltinModule',
@@ -564,6 +574,7 @@ describe('native code loading bypasses, planted in a fixture tree', () => {
 				"import { sql } from 'drizzle-orm';",
 				"import { quote } from './internal.js';",
 				'export class Row { clone() { return new (this.constructor as new () => Row)(); } }',
+				'export class Copy { copy() { return new this.constructor(); } }',
 				"export const load = () => import('./internal.js');",
 				"export const client = () => import('cubrid-client');",
 				'export const kind = (x: object) => x.constructor.name;',

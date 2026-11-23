@@ -176,7 +176,23 @@ export function scanText(file, text, scope = 'src') {
 	}
 
 	const isGlobalObject = (expr) => ts.isIdentifier(expr) && GLOBAL_OBJECTS.has(expr.text);
-	const isModuleObject = (expr) => ts.isIdentifier(expr) && expr.text === 'module';
+	// Parentheses, casts and `!` change no value: (module)['x'], new ((f).constructor)().
+	const unwrap = (expr) => {
+		let inner = expr;
+		while (
+			ts.isParenthesizedExpression(inner) ||
+			ts.isAsExpression(inner) ||
+			ts.isTypeAssertionExpression(inner) ||
+			ts.isNonNullExpression(inner) ||
+			ts.isSatisfiesExpression(inner)
+		)
+			inner = inner.expression;
+		return inner;
+	};
+	const isModuleObject = (expr) => {
+		const target = unwrap(expr);
+		return ts.isIdentifier(target) && target.text === 'module';
+	};
 
 	// An identifier that is a use of the global `eval` / `Function`, not a
 	// property name, declaration or type.
@@ -309,11 +325,11 @@ export function scanText(file, text, scope = 'src') {
 			} else if (ts.isNewExpression(node)) {
 				// new fn.constructor('code') builds a function like new Function;
 				// new this.constructor(...) only makes another instance.
-				const callee = node.expression;
+				const callee = unwrap(node.expression);
 				const ctor =
 					(ts.isPropertyAccessExpression(callee) && callee.name.text === 'constructor') ||
 					(ts.isElementAccessExpression(callee) && stringValue(callee.argumentExpression) === 'constructor');
-				if (ctor && callee.expression.kind !== ts.SyntaxKind.ThisKeyword) dyn('new .constructor()');
+				if (ctor && unwrap(callee.expression).kind !== ts.SyntaxKind.ThisKeyword) dyn('new .constructor()');
 			}
 		}
 
