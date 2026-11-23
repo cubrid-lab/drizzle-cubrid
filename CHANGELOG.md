@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2](https://github.com/cubrid-lab/drizzle-cubrid/compare/v0.3.1...v0.3.2) (2026-11-23)
+
+
+### Bug Fixes
+
+* accept cubrid-client's CubridClient and CubridPool in drizzle() ([#271](https://github.com/cubrid-lab/drizzle-cubrid/issues/271)) ([316429a](https://github.com/cubrid-lab/drizzle-cubrid/commit/316429a32c4bab4840e11b40d1a2774cb47f16da)), closes [#270](https://github.com/cubrid-lab/drizzle-cubrid/issues/270)
+
 ## [0.3.1](https://github.com/cubrid-lab/drizzle-cubrid/compare/v0.3.0...v0.3.1) (2026-11-21)
 
 0.3.1 is the first published version of the 0.3 line. `v0.3.0` was tagged but never published to npm: its publish job was refused by the npm registry after every release gate had passed, and the tag stays without a GitHub Release. 0.3.1 ships the same library code as `v0.3.0`; upgrading from 0.2.1 means reading the 0.3.0 section below.
