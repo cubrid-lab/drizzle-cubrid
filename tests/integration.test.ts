@@ -4878,3 +4878,120 @@ describe('drizzle-cubrid/native binary() and varbinary() round-trip Buffer value
 		await client.execute(`DELETE FROM ${quoted} WHERE "id" IN (901, 902)`);
 	});
 });
+
+describe('drizzle-cubrid native queries as a SELECT-only CUBRID user (#265)', () => {
+	// The fixture is a run-unique table, a run-unique user granted SELECT on it
+	// only, and a synonym in that user's schema so the unqualified table name of
+	// a native table resolves for it. Each object is dropped only if this run
+	// created it, and the run stops if one of them already exists.
+	const tableName = name('ro_rows');
+	const reader = name('ro_user');
+	// A fresh random password per run; it is never logged.
+	const password = `p${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+	const rows = native.cubridTable(tableName, {
+		id: native.integer().primaryKey(),
+		label: native.varchar({ length: 20 }).notNull(),
+	});
+	const seeded = [
+		{ id: 1, label: 'alpha' },
+		{ id: 2, label: 'beta' },
+	];
+
+	// CUBRID reports a missing privilege as -494 with "<verb> is not authorized on
+	// <owner>.<table>" in the server's message, which cubrid-client keeps on its
+	// cause chain; a parser or client-side refusal carries neither.
+	async function expectNotAuthorized(write: Promise<unknown>, verb: 'INSERT' | 'UPDATE' | 'DELETE'): Promise<void> {
+		const error = await write.then(
+			() => {
+				throw new Error(`${verb} as the SELECT-only user succeeded`);
+			},
+			(reason: unknown) => reason,
+		);
+		expect(error).toBeInstanceOf(QueryError);
+		expect(error).toMatchObject({ code: -494, origin: 'server', outcomeUnknown: false });
+		const messages: string[] = [];
+		for (let e: unknown = error; e instanceof Error; e = e.cause) messages.push(e.message);
+		expect(messages.join('\n')).toContain(`${verb} is not authorized on dba.${tableName}`);
+	}
+
+	async function exists(sqlText: string, params: unknown[]): Promise<boolean> {
+		const [row] = await client.query<{ n: number }>(sqlText, params);
+		return Number(row?.n) > 0;
+	}
+
+	async function snapshot(): Promise<{ data: unknown[]; columns: unknown[] }> {
+		return {
+			data: await client.query(`SELECT "id", "label" FROM "${tableName}" ORDER BY "id"`),
+			columns: await client.query(
+				'SELECT attr_name, data_type, prec, is_nullable FROM db_attribute WHERE class_name = ? AND owner_name = ? ORDER BY def_order',
+				[tableName, 'DBA'],
+			),
+		};
+	}
+
+	it(
+		'reads with a parameterized select(); the server refuses insert, update and delete',
+		async () => {
+			const readerUpper = reader.toUpperCase();
+			if (await exists('SELECT COUNT(*) AS n FROM db_user WHERE name = ?', [readerUpper])) {
+				throw new Error(`CUBRID user ${reader} already exists; refusing to reuse it`);
+			}
+			if (await exists('SELECT COUNT(*) AS n FROM db_class WHERE class_name = ?', [tableName])) {
+				throw new Error(`A table named ${tableName} already exists; refusing to reuse it`);
+			}
+			if (await exists('SELECT COUNT(*) AS n FROM db_synonym WHERE synonym_name = ?', [tableName])) {
+				throw new Error(`A synonym named ${tableName} already exists; refusing to reuse it`);
+			}
+			let tableCreated = false;
+			let userCreated = false;
+			let synonymCreated = false;
+			let limited: CubridClient | undefined;
+			try {
+				await client.query(createTableSql(rows));
+				tableCreated = true;
+				await client.executePrepared(`INSERT INTO "${tableName}" ("id", "label") VALUES (?, ?), (?, ?)`, [
+					1,
+					'alpha',
+					2,
+					'beta',
+				]);
+				await client.query(`CREATE USER "${reader}" PASSWORD '${password}'`);
+				userCreated = true;
+				await client.query(`GRANT SELECT ON "${tableName}" TO "${reader}"`);
+				await client.query(`CREATE SYNONYM "${reader}"."${tableName}" FOR "dba"."${tableName}"`);
+				synonymCreated = true;
+				const before = await snapshot();
+				expect(before.data).toEqual(seeded);
+
+				limited = createClient({ ...config, user: reader, password, timezone: 'utc' });
+				const db = native.drizzle(limited);
+				const [{ user } = { user: '' }] = await limited.query<{ user: string }>('SELECT CURRENT_USER AS "user"');
+				expect(user.toUpperCase()).toBe(readerUpper);
+
+				const logged: unknown[][] = [];
+				const watched = native.drizzle(limited, { logger: { logQuery: (_sql, params) => logged.push(params) } });
+				expect(await watched.select().from(rows).where(eq(rows.id, 2))).toEqual([seeded[1]]);
+				expect(logged).toEqual([[2]]);
+				expect(await db.select().from(rows).orderBy(asc(rows.id))).toEqual(seeded);
+
+				await expectNotAuthorized(db.insert(rows).values({ id: 3, label: 'gamma' }).execute(), 'INSERT');
+				await expectNotAuthorized(db.update(rows).set({ label: 'changed' }).where(eq(rows.id, 1)).execute(), 'UPDATE');
+				await expectNotAuthorized(db.delete(rows).where(eq(rows.id, 2)).execute(), 'DELETE');
+
+				// The refusals leave the reader's session usable for SELECT.
+				expect(await db.select({ label: rows.label }).from(rows).where(eq(rows.id, 1))).toEqual([{ label: 'alpha' }]);
+				// The dba connection sees the same rows and columns as before.
+				expect(await snapshot()).toEqual(before);
+			} finally {
+				await limited?.close().catch(() => undefined);
+				if (synonymCreated) await client.query(`DROP SYNONYM "${reader}"."${tableName}"`);
+				if (userCreated) await client.query(`DROP USER "${reader}"`);
+				if (tableCreated) await client.query(`DROP TABLE "${tableName}"`);
+			}
+			expect(await exists('SELECT COUNT(*) AS n FROM db_user WHERE name = ?', [readerUpper])).toBe(false);
+			expect(await exists('SELECT COUNT(*) AS n FROM db_class WHERE class_name = ?', [tableName])).toBe(false);
+			expect(await exists('SELECT COUNT(*) AS n FROM db_synonym WHERE synonym_name = ?', [tableName])).toBe(false);
+		},
+		DDL_TIMEOUT,
+	);
+});
