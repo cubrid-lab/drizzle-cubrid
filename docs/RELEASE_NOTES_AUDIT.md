@@ -168,3 +168,51 @@ Successful historical publish CI is evidence of the workflow outcome, not
 independent registry verification. The editorial finding and registry
 verification remain open work; no public release, tag, asset, or package
 was changed.
+
+### Historical body repair is blocked by the current sync workflow (2026-11-26)
+
+The five public bodies still match their versioned files byte for byte in
+the November 26 comparison. The contributor gap above therefore exists in
+both places. The following is a proposed source-only change, not a change
+to the currently published note:
+
+```diff
+- ... both `drizzle()` entries ([#271](https://github.com/cubrid-lab/drizzle-cubrid/pull/271))
++ ... both `drizzle()` entries ([#271](https://github.com/cubrid-lab/drizzle-cubrid/pull/271)) by @yeongseon
+```
+
+The tagged [packed-types check](https://github.com/cubrid-lab/drizzle-cubrid/blob/v0.3.2/scripts/packed-types-check.mjs)
+also exercises transaction clients, pooled connections and a scoped
+connection through the native and legacy entries. PR #271 is the
+implementing PR for those declaration checks; the proposed credit does
+not imply a new runtime feature or widen the verified peer range.
+
+The current [sync workflow](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/.github/workflows/sync-release-notes.yml)
+(blob `5c19869726be39e63359f0e2af16a4c2ea227c77` on this audit date)
+is not a guarded historical publisher:
+
+- A push to main changing any file under `docs/releases/` triggers it;
+  it loops over every versioned note with an existing Release.
+- The final command passes both `--title "drizzle-cubrid $tag"` and
+  `--notes-file "$file"` to `gh release edit`. All five current titles
+  happen to match that format, but the command is not body-only and
+  would overwrite a differently titled Release.
+- The workflow does not compare the remote body with an approved prior
+  digest, save a pre-edit JSON backup, check that the selected source is
+  the reviewed revision, or read back the edited Release and verify its
+  immutable metadata. The workflow concurrency group only serializes
+  its own runs; it cannot exclude manual or external API edits.
+
+A separate, independently reviewed publisher change must precede merging
+the historical source correction. It must isolate the selected existing
+Release (v0.3.2, ID 454875530), bind both source and prior remote body to
+approved digests, require exclusive editing during the repair, retain
+the backup, send a body-only PATCH, and read back the body and all
+non-body metadata. Preserve the normal new-release path; do not dispatch
+the existing bulk sync as a workaround. The public release was published
+at 2026-11-23 01:02:02 UTC, has title `drizzle-cubrid v0.3.2` and no
+attached assets. Those observed properties are reference evidence, not
+authorization to edit. Registry integrity remains a separate open gate.
+
+This audit update changes only this file, not the workflow, versioned
+notes, or any public Release.
