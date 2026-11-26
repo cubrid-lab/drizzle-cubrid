@@ -116,3 +116,103 @@ python3 -m unittest discover -s scripts -p test_release_notes_quality.py -v
 ```
 
 No live CUBRID database was used; no claim in these notes depends on server behavior beyond what the offline tests cover.
+
+## Follow-up audit: v0.3.2 (2026-11-24)
+
+This is a read-only evidence update to the historical audit above (#233, #270,
+#271, #274). It does not change a versioned note or trigger a historical body
+sync. The v0.3.1 migration history remains a separate editorial and provenance
+review.
+
+### Public identity and canonical text
+
+- [Public v0.3.2 Release](https://github.com/cubrid-lab/drizzle-cubrid/releases/tag/v0.3.2):
+  Release ID `454875530`, published 2026-11-23 01:02:02 UTC, zero attached assets.
+- The tag resolves to [`3af52582d9932fa1e5bd03de9591d39c32182c9b`](https://github.com/cubrid-lab/drizzle-cubrid/commit/3af52582d9932fa1e5bd03de9591d39c32182c9b).
+  The five existing public Release bodies (v0.1.0, v0.2.0, v0.2.1, v0.3.1,
+  v0.3.2) each matched their corresponding `docs/releases/` file exactly
+  in the November 24 API comparison. This is a content match, not a claim
+  that all five pass an editorial or registry-artifact audit.
+
+### Tagged evidence and contributor credit
+
+| Claim in v0.3.2 | Evidence and limit |
+| --- | --- |
+| Node and peer ranges | [Tagged package.json](https://github.com/cubrid-lab/drizzle-cubrid/blob/v0.3.2/package.json#L127-L142): Node >=18.0.0, drizzle-orm >=0.44.1 <0.46.0, cubrid-client >=1.4.0 <2.0.0; development dependency ^1.6.0. |
+| Client argument typing | [PR #271](https://github.com/cubrid-lab/drizzle-cubrid/pull/271), [tagged native session](https://github.com/cubrid-lab/drizzle-cubrid/blob/v0.3.2/src/native/session.ts#L235-L255) and [legacy session](https://github.com/cubrid-lab/drizzle-cubrid/blob/v0.3.2/src/session.ts#L92-L110) show the array-row/stream parameter change to allow undefined; this is a declaration correction, not evidence of new SQL functionality. |
+| Iterator diagnostic | [Tagged native session](https://github.com/cubrid-lab/drizzle-cubrid/blob/v0.3.2/src/native/session.ts#L496-L506) names client/pool streaming from 1.4 and transaction-client streaming from 1.5.0. |
+| Packed declarations | [Tagged packed-types check](https://github.com/cubrid-lab/drizzle-cubrid/blob/v0.3.2/scripts/packed-types-check.mjs) requires driver >=1.6.0 for this check, exercises root and legacy calls, and filters only drizzle-orm declaration errors. This is not a claim that all supported peer combinations pass strict declaration checks. |
+| Contributor | PR #271 was opened by `@yeongseon`; its merged commit is [316429a](https://github.com/cubrid-lab/drizzle-cubrid/commit/316429a32c4bab4840e11b40d1a2774cb47f16da). The two branch commits use an AI account and carry Claude AI co-author trailers; do not count these as human co-authors. |
+
+The two Bug Fixes bullets cite PR #271 and credit its human PR author.
+The Tests bullet also cites #271 but omits the same verified credit. A future
+separately approved source/body repair should add `by @yeongseon` to that
+bullet. Do not change the versioned note as part of this audit: the existing
+sync workflow can write public bodies on a merge.
+
+### Existing executed CI versus registry verification
+
+The [tag publish run](https://github.com/cubrid-lab/drizzle-cubrid/actions/runs/45092002346)
+on the tag commit completed successfully, including all eight jobs: lint,
+Node 20/22 type/unit checks, candidate pack, live CUBRID 11.4 with locked
+and floor peers, Node 18 consumer, and publishing the tested tarball.
+The separate [CI run](https://github.com/cubrid-lab/drizzle-cubrid/actions/runs/45091936165)
+on the same SHA reports successful live and fault-injection jobs.
+The [tagged compatibility guide](https://github.com/cubrid-lab/drizzle-cubrid/blob/v0.3.2/docs/COMPATIBILITY.md)
+distinguishes fault injection on the locked 1.6.0 driver from the 1.4.0
+floor live lane; the publish run does not contain a fault-injection job.
+
+This follow-up did not rerun database tests, download the npm tarball, or
+independently check registry `gitHead`, integrity, or provenance attestation.
+Successful historical publish CI is evidence of the workflow outcome, not
+independent registry verification. The editorial finding and registry
+verification remain open work; no public release, tag, asset, or package
+was changed.
+
+### Historical body repair is blocked by the current sync workflow (2026-11-26)
+
+The five public bodies still match their versioned files byte for byte in
+the November 26 comparison. The contributor gap above therefore exists in
+both places. The following is a proposed source-only change, not a change
+to the currently published note:
+
+```diff
+- ... both `drizzle()` entries ([#271](https://github.com/cubrid-lab/drizzle-cubrid/pull/271))
++ ... both `drizzle()` entries ([#271](https://github.com/cubrid-lab/drizzle-cubrid/pull/271)) by @yeongseon
+```
+
+The tagged [packed-types check](https://github.com/cubrid-lab/drizzle-cubrid/blob/v0.3.2/scripts/packed-types-check.mjs)
+also exercises transaction clients, pooled connections and a scoped
+connection through the native and legacy entries. PR #271 is the
+implementing PR for those declaration checks; the proposed credit does
+not imply a new runtime feature or widen the verified peer range.
+
+The current [sync workflow](https://github.com/cubrid-lab/drizzle-cubrid/blob/main/.github/workflows/sync-release-notes.yml)
+(blob `5c19869726be39e63359f0e2af16a4c2ea227c77` on this audit date)
+is not a guarded historical publisher:
+
+- A push to main changing any file under `docs/releases/` triggers it;
+  it loops over every versioned note with an existing Release.
+- The final command passes both `--title "drizzle-cubrid $tag"` and
+  `--notes-file "$file"` to `gh release edit`. All five current titles
+  happen to match that format, but the command is not body-only and
+  would overwrite a differently titled Release.
+- The workflow does not compare the remote body with an approved prior
+  digest, save a pre-edit JSON backup, check that the selected source is
+  the reviewed revision, or read back the edited Release and verify its
+  immutable metadata. The workflow concurrency group only serializes
+  its own runs; it cannot exclude manual or external API edits.
+
+A separate, independently reviewed publisher change must precede merging
+the historical source correction. It must isolate the selected existing
+Release (v0.3.2, ID 454875530), bind both source and prior remote body to
+approved digests, require exclusive editing during the repair, retain
+the backup, send a body-only PATCH, and read back the body and all
+non-body metadata. Preserve the normal new-release path; do not dispatch
+the existing bulk sync as a workaround. The public release was published
+at 2026-11-23 01:02:02 UTC, has title `drizzle-cubrid v0.3.2` and no
+attached assets. Those observed properties are reference evidence, not
+authorization to edit. Registry integrity remains a separate open gate.
+
+This audit update changes only this file, not the workflow, versioned
+notes, or any public Release.
